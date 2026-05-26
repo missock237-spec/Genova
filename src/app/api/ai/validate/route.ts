@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ZAI from 'z-ai-web-dev-sdk';
+import { validateAction } from '@/lib/ai-router';
 import { db } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
@@ -16,42 +16,27 @@ export async function POST(request: NextRequest) {
     });
 
     if (guardrails.length === 0) {
-      return NextResponse.json({ valid: true, message: 'Aucun garde-fou actif', details: [] });
+      return NextResponse.json({ valid: true, message: 'Aucun garde-fou actif — action autorisée', details: [], severity: 'info' });
     }
 
-    const zai = await ZAI.create();
+    const result = await validateAction(
+      action,
+      context || '',
+      guardrails.map(g => ({ name: g.name, type: g.type, rules: g.rules, severity: g.severity })),
+      'validation'
+    );
 
-    const completion = await zai.chat.completions.create({
-      messages: [
-        {
-          role: 'system',
-          content: `Tu es le système de validation AgentOS. Tu vérifies si une action respecte les garde-fous définis. Réponds TOUJOURS en JSON valide:
-{
-  "valid": true/false,
-  "message": "Message explicatif",
-  "details": [{ "guardrailName": "nom", "passed": true/false, "reason": "raison" }],
-  "severity": "info/warning/critical/blocking"
-}
-Parle en français.`,
-        },
-        {
-          role: 'user',
-          content: `Garde-fous actifs: ${JSON.stringify(guardrails.map(g => ({ name: g.name, type: g.type, rules: g.rules, severity: g.severity })))}\n\nAction à valider: ${action}\nContexte: ${context || 'Aucun'}`,
-        },
-      ],
-    });
-
-    const responseText = completion.choices?.[0]?.message?.content || '{}';
-
-    let result;
+    let validationResult;
     try {
-      result = JSON.parse(responseText);
+      validationResult = JSON.parse(result.content);
+      validationResult._meta = { model: result.model, provider: result.provider };
     } catch {
-      result = { valid: true, message: 'Validation par défaut: accepté', details: [], severity: 'info' };
+      validationResult = { valid: true, message: result.content, details: [], severity: 'info', _meta: { model: result.model, provider: result.provider } };
     }
 
-    return NextResponse.json(result);
-  } catch (error) {
-    return NextResponse.json({ error: 'Erreur lors de la validation' }, { status: 500 });
+    return NextResponse.json(validationResult);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Erreur lors de la validation';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

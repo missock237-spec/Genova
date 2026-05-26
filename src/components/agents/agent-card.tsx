@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Bot, Power, Trash2, Eye, Mail, MessageSquare, Search, Calendar, Database, Phone } from 'lucide-react';
+import { Bot, Power, Trash2, Eye, Mail, MessageSquare, Search, Calendar, Database, Phone, MessageCircle } from 'lucide-react';
 
 const typeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   sales: Phone,
@@ -54,9 +54,10 @@ interface AgentCardProps {
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (agent: Agent) => void;
+  onChat?: (agent: Agent) => void;
 }
 
-export function AgentCard({ agent, onToggle, onDelete, onEdit }: AgentCardProps) {
+export function AgentCard({ agent, onToggle, onDelete, onEdit, onChat }: AgentCardProps) {
   const Icon = typeIcons[agent.type] || Bot;
   const isActive = agent.status === 'active';
 
@@ -74,6 +75,10 @@ export function AgentCard({ agent, onToggle, onDelete, onEdit }: AgentCardProps)
     crm: Database,
     web_search: Search,
     calendar: Calendar,
+    sms: Phone,
+    code: Bot,
+    analytics: Search,
+    sentiment: MessageCircle,
   };
 
   return (
@@ -99,7 +104,7 @@ export function AgentCard({ agent, onToggle, onDelete, onEdit }: AgentCardProps)
         {/* Tools */}
         {configTools.length > 0 && (
           <div className="flex gap-1.5 mb-3 flex-wrap">
-            {configTools.map((tool) => {
+            {configTools.slice(0, 5).map((tool) => {
               const ToolIcon = toolIcons[tool];
               return ToolIcon ? (
                 <div key={tool} className="p-1 rounded bg-muted/50" title={tool}>
@@ -107,15 +112,31 @@ export function AgentCard({ agent, onToggle, onDelete, onEdit }: AgentCardProps)
                 </div>
               ) : null;
             })}
+            {configTools.length > 5 && (
+              <div className="p-1 rounded bg-muted/50">
+                <span className="text-[9px] text-muted-foreground">+{configTools.length - 5}</span>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Task count */}
+        {/* Task count & actions */}
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-muted-foreground">
             {agent._count?.tasks || 0} tâche(s)
           </span>
           <div className="flex items-center gap-1">
+            {onChat && isActive && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => onChat(agent)}
+                title="Discuter avec l'agent"
+              >
+                <MessageCircle className="h-3.5 w-3.5 text-primary" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"

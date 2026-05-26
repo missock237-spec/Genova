@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react';
 import { useAuthStore, useAppStore } from '@/lib/store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { StatCard } from '@/components/shared/stat-card';
 import { ActivityFeed } from '@/components/shared/activity-feed';
-import { Bot, Play, Workflow, ShieldCheck, Plus, Wand2, GitBranch, Activity } from 'lucide-react';
+import { Bot, Play, Workflow, ShieldCheck, Plus, Wand2, GitBranch, Activity, Zap, Brain, Cpu, ArrowRight } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 interface DashboardStats {
   activeAgents: number;
@@ -26,6 +28,11 @@ interface DashboardStats {
   }>;
   tasksByStatus: Array<{ status: string; _count: { status: number } }>;
 }
+
+const AI_PROVIDERS = [
+  { name: 'Groq', icon: Zap, status: 'active', color: 'text-orange-500', bgColor: 'bg-orange-500/10', description: 'Vitesse — Réponses rapides', models: ['LLaMA 3.3 70B', 'DeepSeek R1', 'Qwen QWQ 32B'] },
+  { name: 'OpenRouter', icon: Brain, status: 'active', color: 'text-purple-500', bgColor: 'bg-purple-500/10', description: 'Intelligence — Raisonnement avancé', models: ['DeepSeek Chat', 'Qwen3 235B', 'Mistral 3.1', 'Gemma 3 27B'] },
+];
 
 export function DashboardView() {
   const { user } = useAuthStore();
@@ -99,6 +106,57 @@ export function DashboardView() {
         />
       </div>
 
+      {/* AI Router Status */}
+      <Card className="border-border/50">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Cpu className="h-4 w-4 text-primary" />
+            Routeur IA — Fournisseurs actifs
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {AI_PROVIDERS.map((provider, i) => (
+              <motion.div
+                key={provider.name}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.1 }}
+                className="p-4 rounded-xl border border-border/50 bg-card"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`p-2 rounded-lg ${provider.bgColor}`}>
+                    <provider.icon className={`h-5 w-5 ${provider.color}`} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-semibold">{provider.name}</h4>
+                      <Badge variant="outline" className="text-[9px] h-4 bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
+                        Actif
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{provider.description}</p>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  {provider.models.map((model) => (
+                    <div key={model} className="flex items-center gap-2 text-xs">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      <span className="text-muted-foreground">{model}</span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+          <div className="mt-4 p-3 rounded-lg bg-primary/5 border border-primary/10">
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-primary">Routage intelligent :</span> Le système choisit automatiquement le meilleur fournisseur selon le type de tâche (chat rapide, raisonnement, code, marketing, analyse, orchestration, validation).
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Quick Actions + Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Quick Actions */}
@@ -171,7 +229,7 @@ export function DashboardView() {
                   running: 'bg-primary/10 text-primary border-primary/20',
                   completed: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
                   failed: 'bg-red-500/10 text-red-600 border-red-500/20',
-                  validated: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+                  validated: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
                 };
                 return (
                   <div

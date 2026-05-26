@@ -17,10 +17,11 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  agents      Agent[]
-  workflows   Workflow[]
-  guardrails  Guardrail[]
-  activities  ActivityLog[]
+  agents        Agent[]
+  workflows     Workflow[]
+  guardrails    Guardrail[]
+  activities    ActivityLog[]
+  conversations Conversation[]
 }
 
 model Agent {
@@ -35,8 +36,9 @@ model Agent {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tasks       Task[]
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks         Task[]
+  conversations Conversation[]
 
   @@map("agents")
 }
@@ -121,4 +123,36 @@ model ActivityLog {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("activity_logs")
+}
+
+model Conversation {
+  id          String    @id @default(cuid())
+  title       String
+  type        String    @default("automation") // automation, agent_chat, orchestration
+  status      String    @default("active") // active, archived
+  agentId     String?
+  userId      String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent       Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  messages    Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  role           String   // user, assistant, system
+  content        String
+  model          String?  // Which AI model was used
+  provider       String?  // groq or openrouter
+  tokensUsed     Int?
+  conversationId String
+  createdAt      DateTime @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
 }

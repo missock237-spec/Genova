@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ZAI from 'z-ai-web-dev-sdk';
+import { orchestrate } from '@/lib/ai-router';
 import { db } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { command, userId } = body;
+    const { command, userId, conversationId } = body;
 
     if (!command || !userId) {
       return NextResponse.json({ error: 'Commande et userId requis' }, { status: 400 });
@@ -15,55 +15,67 @@ export async function POST(request: NextRequest) {
       where: { userId, status: 'active' },
     });
 
-    const zai = await ZAI.create();
+    // Load conversation memory
+    if (conversationId) {
+      await db.message.findMany({
+        where: { conversationId },
+        orderBy: { createdAt: 'asc' },
+        take: 10,
+      });
+    }
 
-    const completion = await zai.chat.completions.create({
-      messages: [
-        {
-          role: 'system',
-          content: `Tu es l'orchestrateur AgentOS. Tu analyses les commandes en langage naturel et les transforme en plans d'action utilisant les agents IA disponibles. Réponds TOUJOURS en JSON valide avec cette structure:
-{
-  "understanding": "Compréhension de la demande",
-  "steps": [
-    { "title": "Titre de l'étape", "description": "Description", "agentType": "type d'agent suggéré", "priority": "high/medium/low" }
-  ],
-  "estimatedTime": "Temps estimé",
-  "summary": "Résumé du plan"
-}
-Types d'agents disponibles: sales, support, marketing, research, rh, accounting, custom. Parle en français.`,
-        },
-        {
-          role: 'user',
-          content: `Agents disponibles: ${JSON.stringify(agents.map(a => ({ id: a.id, name: a.name, type: a.type })))}\n\nCommande: ${command}`,
-        },
-      ],
-    });
-
-    const responseText = completion.choices?.[0]?.message?.content || '{}';
+    const result = await orchestrate(
+      command,
+      agents.map(a => ({ id: a.id, name: a.name, type: a.type })),
+      'orchestration'
+    );
 
     let plan;
     try {
-      plan = JSON.parse(responseText);
+      plan = JSON.parse(result.content);
+      plan._meta = { model: result.model, provider: result.provider };
     } catch {
       plan = {
         understanding: command,
-        steps: [{ title: 'Analyse', description: 'Analyse de la commande', agentType: 'custom', priority: 'medium' }],
+        steps: [{ title: 'Analyse', description: result.content, agentType: 'custom', priority: 'medium' }],
         estimatedTime: 'Non estimé',
-        summary: responseText,
+        summary: result.content,
+        _meta: { model: result.model, provider: result.provider },
       };
     }
+
+    // Save to conversation
+    let convId = conversationId;
+    if (!convId) {
+      const conv = await db.conversation.create({
+        data: {
+          title: command.substring(0, 50),
+          type: 'orchestration',
+          userId,
+        },
+      });
+      convId = conv.id;
+    }
+
+    await db.message.createMany({
+      data: [
+        { role: 'user', content: command, conversationId: convId },
+        { role: 'assistant', content: result.content, model: result.model, provider: result.provider, conversationId: convId },
+      ],
+    });
 
     await db.activityLog.create({
       data: {
         action: 'Commande orchestrée',
-        details: JSON.stringify({ command, stepsCount: plan.steps?.length || 0 }),
+        details: JSON.stringify({ command, stepsCount: plan.steps?.length || 0, model: result.model, provider: result.provider }),
         category: 'system',
         userId,
       },
     });
 
-    return NextResponse.json(plan);
-  } catch (error) {
-    return NextResponse.json({ error: 'Erreur lors de l\'orchestration' }, { status: 500 });
+    return NextResponse.json({ ...plan, conversationId: convId });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Erreur lors de l\'orchestration';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
