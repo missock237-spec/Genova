@@ -10,7 +10,7 @@ import {
   Wand2,
   Shield,
   GitBranch,
-  Settings,
+  BookOpen,
   Cpu,
   LogOut,
   X,
@@ -20,6 +20,7 @@ const navItems = [
   { id: 'dashboard' as const, label: 'Tableau de bord', icon: LayoutDashboard },
   { id: 'agents' as const, label: 'Agents IA', icon: Bot },
   { id: 'automation' as const, label: 'Automatisation', icon: Wand2 },
+  { id: 'knowledge' as const, label: 'Base de connaissances', icon: BookOpen },
   { id: 'guardrails' as const, label: 'Garde-fous', icon: Shield },
   { id: 'coordination' as const, label: 'Coordination', icon: GitBranch },
 ];
@@ -47,8 +48,8 @@ export function AppSidebar() {
         {/* Header */}
         <div className="p-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-primary/10">
-              <Cpu className="h-5 w-5 text-primary" />
+            <div className="p-1.5 rounded-lg bg-emerald-500/10">
+              <Cpu className="h-5 w-5 text-emerald-500" />
             </div>
             <div>
               <h2 className="font-bold text-sm tracking-tight">AgentOS</h2>
@@ -84,7 +85,7 @@ export function AppSidebar() {
                   setSidebarOpen(false);
                 }}
               >
-                <item.icon className={`h-4 w-4 ${currentView === item.id ? 'text-primary' : ''}`} />
+                <item.icon className={`h-4 w-4 ${currentView === item.id ? 'text-emerald-500' : ''}`} />
                 {item.label}
               </Button>
             ))}
@@ -96,8 +97,8 @@ export function AppSidebar() {
         {/* User section */}
         <div className="p-3">
           <div className="flex items-center gap-3 p-2 rounded-lg">
-            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-              <span className="text-xs font-bold text-primary">
+            <div className="h-8 w-8 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+              <span className="text-xs font-bold text-emerald-500">
                 {user?.name?.charAt(0)?.toUpperCase() || 'U'}
               </span>
             </div>

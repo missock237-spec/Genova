@@ -10,6 +10,7 @@ import { AgentsView } from '@/components/agents/agents-view';
 import { AutomationView } from '@/components/automation/automation-view';
 import { GuardrailsView } from '@/components/guardrails/guardrails-view';
 import { CoordinationView } from '@/components/coordination/coordination-view';
+import { KnowledgeView } from '@/components/knowledge/knowledge-view';
 import { ThemeProvider } from 'next-themes';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -17,6 +18,7 @@ const viewComponents = {
   dashboard: DashboardView,
   agents: AgentsView,
   automation: AutomationView,
+  knowledge: KnowledgeView,
   guardrails: GuardrailsView,
   coordination: CoordinationView,
 };
