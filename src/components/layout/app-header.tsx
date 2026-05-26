@@ -10,6 +10,7 @@ const viewTitles: Record<string, string> = {
   dashboard: 'Tableau de bord',
   agents: 'Agents IA',
   automation: 'Automatisation',
+  knowledge: 'Base de connaissances',
   guardrails: 'Garde-fous',
   coordination: 'Coordination',
   settings: 'Paramètres',
@@ -50,7 +51,7 @@ export function AppHeader() {
         </Button>
         <Button variant="ghost" size="icon" className="h-8 w-8 relative">
           <Bell className="h-4 w-4" />
-          <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-primary animate-pulse" />
+          <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
         </Button>
         {mounted && (
           <Button
@@ -62,8 +63,8 @@ export function AppHeader() {
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
         )}
-        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center ml-1">
-          <span className="text-xs font-bold text-primary">
+        <div className="h-8 w-8 rounded-full bg-emerald-500/10 flex items-center justify-center ml-1">
+          <span className="text-xs font-bold text-emerald-500">
             {user?.name?.charAt(0)?.toUpperCase() || 'U'}
           </span>
         </div>

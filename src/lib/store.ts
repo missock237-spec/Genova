@@ -17,10 +17,12 @@ interface AuthState {
 }
 
 interface AppState {
-  currentView: 'dashboard' | 'agents' | 'automation' | 'guardrails' | 'coordination' | 'settings';
+  currentView: 'dashboard' | 'agents' | 'automation' | 'guardrails' | 'coordination' | 'knowledge';
   setCurrentView: (view: AppState['currentView']) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
+  currentConversationId: string | null;
+  setCurrentConversationId: (id: string | null) => void;
 }
 
 function getStoredUser(): User | null {
@@ -61,4 +63,6 @@ export const useAppStore = create<AppState>((set) => ({
   setCurrentView: (currentView) => set({ currentView }),
   sidebarOpen: false,
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
+  currentConversationId: null,
+  setCurrentConversationId: (currentConversationId) => set({ currentConversationId }),
 }));

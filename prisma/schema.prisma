@@ -22,6 +22,9 @@ model User {
   guardrails    Guardrail[]
   activities    ActivityLog[]
   conversations Conversation[]
+  knowledge     Knowledge[]
+  documents     Document[]
+  executions    AgentExecution[]
 }
 
 model Agent {
@@ -39,6 +42,7 @@ model Agent {
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   tasks         Task[]
   conversations Conversation[]
+  executions    AgentExecution[]
 
   @@map("agents")
 }
@@ -138,6 +142,7 @@ model Conversation {
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   agent       Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
   messages    Message[]
+  executions  AgentExecution[]
 
   @@map("conversations")
 }
@@ -155,4 +160,75 @@ model Message {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@map("messages")
+}
+
+model Knowledge {
+  id          String   @id @default(cuid())
+  content     String
+  category    String   // preference, project, document, workflow_context, agent_learning
+  tags        String   // JSON array of tags
+  source      String   // conversation, document, manual
+  relevance   Float    @default(0.5)
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("knowledge")
+}
+
+model Document {
+  id          String   @id @default(cuid())
+  fileName    String
+  fileType    String
+  fileSize    Int
+  content     String?  // Full text content
+  status      String   @default("processing") // processing, ready, error
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks      DocumentChunk[]
+
+  @@map("documents")
+}
+
+model DocumentChunk {
+  id          String   @id @default(cuid())
+  content     String
+  chunkIndex  Int
+  pageNumber  Int?
+  metadata    String   // JSON: additional metadata
+  documentId  String
+  userId      String
+  createdAt   DateTime @default(now())
+
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("document_chunks")
+}
+
+model AgentExecution {
+  id          String   @id @default(cuid())
+  agentId     String
+  task        String
+  steps       String   // JSON: array of execution steps
+  status      String   @default("running") // running, completed, failed, paused
+  totalDuration Int?
+  totalTokens Int?
+  estimatedCost Float?
+  model       String?
+  provider    String?
+  userId      String
+  conversationId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  agent       Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@map("agent_executions")
 }
