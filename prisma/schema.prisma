@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  avatar    String?
+  plan      String   @default("free")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agents      Agent[]
+  workflows   Workflow[]
+  guardrails  Guardrail[]
+  activities  ActivityLog[]
+}
+
+model Agent {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  description String
+  status      String   @default("inactive")
+  config      String
+  avatar      String?
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks       Task[]
+
+  @@map("agents")
+}
+
+model Workflow {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  status      String   @default("draft")
+  steps       String
+  trigger     String
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks       Task[]
+
+  @@map("workflows")
+}
+
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  status      String   @default("pending")
+  priority    String   @default("medium")
+  result      String?
+  agentId     String?
+  workflowId  String?
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  agent       Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  workflow    Workflow? @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  validations Validation[]
+
+  @@map("tasks")
+}
+
+model Guardrail {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  description String
+  rules       String
+  severity    String   @default("warning")
+  isActive    Boolean  @default(true)
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  validations Validation[]
+
+  @@map("guardrails")
+}
+
+model Validation {
+  id          String   @id @default(cuid())
+  status      String
+  result      String
+  guardrailId String
+  taskId      String
+  createdAt   DateTime @default(now())
+
+  guardrail   Guardrail @relation(fields: [guardrailId], references: [id], onDelete: Cascade)
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("validations")
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  action      String
+  details     String
+  category    String
+  userId      String
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("activity_logs")
+}
