@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -19,9 +19,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Loader2, Mail, MessageCircle, Smartphone, Calendar, Search, Users, Database, Plug, GitBranch, Clock, BarChart3, Heart, Target, Code, FileText, ImageIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuthStore } from '@/lib/store';
+import { AGENT_TOOLS, getToolsForAgentType, type AgentTool } from '@/lib/agent-tools';
 
 interface AgentCreateDialogProps {
   open: boolean;
@@ -46,13 +48,40 @@ const agentTypes = [
   { value: 'custom', label: 'Personnalisé' },
 ];
 
-const tools = [
-  { id: 'email', label: 'Email' },
-  { id: 'whatsapp', label: 'WhatsApp' },
-  { id: 'crm', label: 'CRM' },
-  { id: 'web_search', label: 'Recherche Web' },
-  { id: 'calendar', label: 'Calendrier' },
-];
+const toolIconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  Mail,
+  MessageCircle,
+  Smartphone,
+  Calendar,
+  Search,
+  Users,
+  Database,
+  Plug,
+  GitBranch,
+  Clock,
+  BarChart3,
+  Heart,
+  Target,
+  Code,
+  FileText,
+  Image: ImageIcon,
+};
+
+const categoryLabels: Record<string, string> = {
+  communication: 'Communication',
+  data: 'Données',
+  automation: 'Automatisation',
+  analysis: 'Analyse',
+  creation: 'Création',
+};
+
+const categoryColors: Record<string, string> = {
+  communication: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+  data: 'bg-orange-500/10 text-orange-600 border-orange-500/20',
+  automation: 'bg-purple-500/10 text-purple-600 border-purple-500/20',
+  analysis: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20',
+  creation: 'bg-pink-500/10 text-pink-600 border-pink-500/20',
+};
 
 export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: AgentCreateDialogProps) {
   const { user } = useAuthStore();
@@ -75,6 +104,24 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
     personality: editAgent ? parseConfig(editAgent.config).personality || 'professional' : 'professional',
     selectedTools: editAgent ? parseConfig(editAgent.config).tools || [] : [] as string[],
   });
+
+  // Get recommended tools based on agent type
+  const recommendedTools = useMemo(() => {
+    if (!form.type) return AGENT_TOOLS;
+    return getToolsForAgentType(form.type);
+  }, [form.type]);
+
+  // Group tools by category
+  const toolsByCategory = useMemo(() => {
+    const categories: Record<string, AgentTool[]> = {};
+    for (const tool of recommendedTools) {
+      if (!categories[tool.category]) {
+        categories[tool.category] = [];
+      }
+      categories[tool.category].push(tool);
+    }
+    return categories;
+  }, [recommendedTools]);
 
   const handleToolToggle = (toolId: string) => {
     setForm((prev) => ({
@@ -200,22 +247,73 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label>Outils</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {tools.map((tool) => (
-                <div key={tool.id} className="flex items-center gap-2">
-                  <Checkbox
-                    id={tool.id}
-                    checked={form.selectedTools.includes(tool.id)}
-                    onCheckedChange={() => handleToolToggle(tool.id)}
-                  />
-                  <label htmlFor={tool.id} className="text-sm cursor-pointer">
-                    {tool.label}
-                  </label>
-                </div>
-              ))}
+          {/* Enhanced Tools Selection */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Outils</Label>
+              {form.type && (
+                <Badge variant="outline" className="text-[10px]">
+                  {recommendedTools.length} outil(s) recommandé(s)
+                </Badge>
+              )}
             </div>
+
+            {Object.entries(toolsByCategory).map(([category, tools]) => (
+              <div key={category} className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className={`text-[10px] h-5 ${categoryColors[category] || ''}`}>
+                    {categoryLabels[category] || category}
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-2 gap-2 pl-1">
+                  {tools.map((tool) => {
+                    const ToolIcon = toolIconMap[tool.icon];
+                    return (
+                      <div
+                        key={tool.id}
+                        className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
+                          form.selectedTools.includes(tool.id)
+                            ? 'border-primary/50 bg-primary/5'
+                            : 'border-border/50 hover:border-primary/20'
+                        }`}
+                        onClick={() => handleToolToggle(tool.id)}
+                      >
+                        <Checkbox
+                          id={tool.id}
+                          checked={form.selectedTools.includes(tool.id)}
+                          onCheckedChange={() => handleToolToggle(tool.id)}
+                          className="pointer-events-none"
+                        />
+                        {ToolIcon && <ToolIcon className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
+                        <label htmlFor={tool.id} className="text-xs cursor-pointer truncate">
+                          {tool.name}
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            {form.selectedTools.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {form.selectedTools.map((toolId) => {
+                  const tool = AGENT_TOOLS.find(t => t.id === toolId);
+                  return tool ? (
+                    <Badge key={toolId} variant="secondary" className="text-[10px] h-5 gap-1">
+                      {tool.name}
+                      <button
+                        type="button"
+                        className="ml-0.5 hover:text-destructive"
+                        onClick={() => handleToolToggle(toolId)}
+                      >
+                        ×
+                      </button>
+                    </Badge>
+                  ) : null;
+                })}
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
