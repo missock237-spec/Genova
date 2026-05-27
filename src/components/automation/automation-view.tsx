@@ -69,6 +69,18 @@ const EXAMPLE_COMMANDS = [
   { text: 'Génère un code Python pour scraper les données du site', icon: '💻', category: 'Code' },
 ];
 
+/* ===== Provider Label Helper ===== */
+function getProviderLabel(provider: string): { label: string; color: string } | null {
+  switch (provider) {
+    case 'groq':
+      return { label: 'Groq', color: 'text-orange-500 border-orange-500/30' };
+    case 'openrouter':
+      return { label: 'OpenRouter', color: 'text-blue-500 border-blue-500/30' };
+    default:
+      return { label: provider || 'AI', color: 'text-emerald-500 border-emerald-500/30' };
+  }
+}
+
 /* ===== Animated Provider Badge ===== */
 function ProviderBadge({ provider }: { provider: string }) {
   const config = getProviderLabel(provider);

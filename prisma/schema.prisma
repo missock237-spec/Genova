@@ -2,24 +2,8 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Database Provider Configuration
-// ─────────────────────────────────────────────────────────────────────────────
-// For development (SQLite):   provider = "sqlite"
-// For production (PostgreSQL): provider = "postgresql"
-//
-// To switch to PostgreSQL:
-//   1. Change provider below to "postgresql"
-//   2. Update DATABASE_URL in .env.local to a PostgreSQL connection string
-//   3. Run `bun run db:push` to sync the schema
-//
-// When using PostgreSQL, consider enabling the pgvector extension for native
-// vector similarity search on the EmbeddingVector model:
-//   CREATE EXTENSION IF NOT EXISTS vector;
-//   Then change the `vector` field type from String to Unsupported("vector(384)")
-// ─────────────────────────────────────────────────────────────────────────────
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -33,35 +17,39 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  agents           Agent[]
-  workflows        Workflow[]
-  guardrails       Guardrail[]
-  activities       ActivityLog[]
-  conversations    Conversation[]
-  knowledge        Knowledge[]
-  documents        Document[]
-  executions       AgentExecution[]
-  episodicMemories EpisodicMemory[]
-  memoryAccessLogs MemoryAccessLog[]
-  embeddingVectors EmbeddingVector[]
+  agents              Agent[]
+  workflows           Workflow[]
+  guardrails          Guardrail[]
+  activities          ActivityLog[]
+  conversations       Conversation[]
+  knowledge           Knowledge[]
+  documents           Document[]
+  executions          AgentExecution[]
+  episodicMemories    EpisodicMemory[]
+  memoryAccessLogs    MemoryAccessLog[]
+  embeddingVectors    EmbeddingVector[]
+  executionPolicies   ExecutionPolicy[]
+  websocketSessions   WebSocketSession[]
 }
 
 model Agent {
-  id          String   @id @default(cuid())
-  name        String
-  type        String
-  description String
-  status      String   @default("inactive")
-  config      String
-  avatar      String?
-  userId      String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  name         String
+  type         String
+  description  String
+  status       String   @default("inactive")
+  config       String
+  avatar       String?
+  capabilities String   @default("{}") // JSON: tool capabilities and permissions per agent
+  userId       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tasks         Task[]
-  conversations Conversation[]
-  executions    AgentExecution[]
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks           Task[]
+  conversations   Conversation[]
+  executions      AgentExecution[]
+  toolPermissions ToolPermission[]
 
   @@map("agents")
 }
@@ -306,24 +294,90 @@ model MemoryAccessLog {
 // Embedding Vector Store
 // Persists vector embeddings for RAG (Retrieval-Augmented Generation).
 //
-// With SQLite: vectors are stored as JSON strings (arrays of floats).
-// With PostgreSQL + pgvector: change the `vector` field to:
-//   vector  Unsupported("vector(384)")
-// This enables native cosine / L2 similarity search directly in the database.
+// With PostgreSQL + pgvector: native cosine / L2 similarity search.
+// Requires: CREATE EXTENSION IF NOT EXISTS vector;
 // ─────────────────────────────────────────────────────────────────────────────
 model EmbeddingVector {
-  id          String   @id @default(cuid())
-  entityId    String   // ID of the entity this embedding represents (chunk, knowledge, etc.)
-  entityType  String   // "document_chunk" | "knowledge" | "episodic_memory"
-  vector      String   // JSON array of floats (or use pgvector extension in PostgreSQL)
-  dimension   Int      @default(384)
+  id          String              @id @default(cuid())
+  entityId    String              // ID of the entity this embedding represents (chunk, knowledge, etc.)
+  entityType  String              // "document_chunk" | "knowledge" | "episodic_memory"
+  vector      Unsupported("vector(384)")
+  dimension   Int                 @default(384)
   userId      String
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([entityId, entityType])
+  @@index([entityType, userId])
+  @@map("embedding_vectors")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool Permission System
+// Granular per-agent tool permissions with scope, actions, constraints,
+// and call limits for the capability-based security model.
+// ─────────────────────────────────────────────────────────────────────────────
+model ToolPermission {
+  id          String    @id @default(cuid())
+  agentId     String
+  toolName    String    // Which tool this permission applies to
+  actions     String    @default("[]") // JSON array: ["read", "write", "execute", "network"]
+  scope       String    @default("none") // "full" | "limited" | "none"
+  constraints String    @default("[]") // JSON array of constraint strings
+  maxCalls    Int       @default(-1) // -1 = unlimited
+  callCount   Int       @default(0)
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, toolName])
+  @@map("tool_permissions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Execution Policy
+// Defines rules and constraints for agent execution, including retries,
+// timeouts, and per-agent-type policy assignments.
+// ─────────────────────────────────────────────────────────────────────────────
+model ExecutionPolicy {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  rules       String   // JSON: execution policy rules
+  agentTypes  String   @default("[]") // JSON: which agent types this applies to
+  maxRetries  Int      @default(3)
+  timeout     Int      @default(30000)
+  userId      String
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([entityId, entityType])
-  @@index([entityType, userId])
-  @@map("embedding_vectors")
+  @@map("execution_policies")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WebSocket Session
+// Tracks active and historical WebSocket connections per user,
+// including connected agent IDs, status, and connection metadata.
+// ─────────────────────────────────────────────────────────────────────────────
+model WebSocketSession {
+  id          String    @id @default(cuid())
+  userId      String
+  agentIds    String    @default("[]") // JSON: connected agent IDs
+  status      String    @default("active") // active, closed, error
+  metadata    String    @default("{}") // JSON: connection metadata
+  createdAt   DateTime  @default(now())
+  lastPingAt  DateTime  @default(now())
+  closedAt    DateTime?
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("websocket_sessions")
 }

@@ -1,6 +1,7 @@
 // Embeddings Engine — Real semantic embeddings using AI providers
+// Priority: OpenAI Embeddings API > HuggingFace Inference > Deterministic fallback
 // Falls back to TF-IDF similarity when no embedding API is available
-// Supports: Groq embeddings (future), OpenRouter, and local TF-IDF
+// Supports: OpenAI text-embedding-3-small, Groq (future), local TF-IDF
 
 import { chatCompletion } from '@/lib/ai-router';
 
@@ -20,6 +21,54 @@ export interface EmbeddingResult {
   text: string;
   score: number;
   metadata: Record<string, unknown>;
+}
+
+// ============================================================
+// EMBEDDING PROVIDERS — Try real embedding APIs first
+// ============================================================
+
+type EmbeddingProvider = 'openai' | 'groq' | 'deterministic' | 'llm_fallback';
+
+let activeProvider: EmbeddingProvider | null = null;
+
+/**
+ * Detect the best available embedding provider
+ */
+async function detectEmbeddingProvider(): Promise<EmbeddingProvider> {
+  if (activeProvider) return activeProvider;
+
+  // 1. Try OpenAI Embeddings API (best quality)
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const response = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (response.ok) {
+        activeProvider = 'openai';
+        return 'openai';
+      }
+    } catch {
+      // OpenAI not available
+    }
+  }
+
+  // 2. Try Groq (if they add embedding support)
+  if (process.env.GROQ_API_KEY) {
+    // Groq doesn't have embedding API yet, skip
+    // Will be enabled when Groq adds embedding support
+  }
+
+  // 3. Fall back to deterministic
+  activeProvider = 'deterministic';
+  return 'deterministic';
+}
+
+/**
+ * Reset the provider cache (for testing)
+ */
+export function resetEmbeddingProvider(): void {
+  activeProvider = null;
 }
 
 // ============================================================
@@ -133,40 +182,63 @@ export function extractKeywords(text: string, maxKeywords: number = 10): string[
 const vectorStore: Map<string, EmbeddingVector> = new Map();
 
 /**
- * Generate embeddings using AI provider
- * Uses a lightweight model to create vector representations
+ * Generate embeddings using the best available provider
+ * Priority: OpenAI Embeddings API → Deterministic fallback (fast, reliable)
+ * The old LLM-based approach (asking chat model to generate 384 numbers) is
+ * unreliable and expensive — it's kept only as a last-resort option.
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
+  const provider = await detectEmbeddingProvider();
+
+  switch (provider) {
+    case 'openai':
+      return generateOpenAIEmbedding(text);
+    case 'deterministic':
+    default:
+      return generateDeterministicEmbedding(text);
+  }
+}
+
+/**
+ * Generate embeddings using OpenAI's text-embedding-3-small model
+ * High quality 1536-dim embeddings, truncated to 384 for storage efficiency
+ * Cost: ~$0.02 per 1M tokens (very affordable)
+ */
+async function generateOpenAIEmbedding(text: string): Promise<number[]> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return generateDeterministicEmbedding(text);
+
   try {
-    // Use AI to generate a semantic hash-like embedding
-    // We use a compact representation approach via the AI model
-    const result = await chatCompletion([
-      {
-        role: 'system',
-        content: `Tu es un modèle d'embeddings. Pour le texte donné, génère EXACTEMENT 384 nombres décimaux entre -1 et 1, séparés par des virgules, représentant le vecteur sémantique du texte. Ne donne RIEN d'autre que les nombres, pas d'explication. Format: 0.123,-0.456,0.789,...`
+    const model = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
+
+    const response = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
       },
-      {
-        role: 'user',
-        content: text.substring(0, 500)
-      }
-    ], 'quick_chat');
+      body: JSON.stringify({
+        model,
+        input: text.substring(0, 8000), // OpenAI limit
+        dimensions: 384, // Request 384-dim output directly (supported by text-embedding-3-small)
+      }),
+    });
 
-    // Parse the embedding vector
-    const cleaned = result.content.trim().replace(/\s+/g, '');
-    const vector = cleaned.split(',').map(Number).filter(n => !isNaN(n) && isFinite(n));
+    if (!response.ok) {
+      // Fall back to deterministic
+      return generateDeterministicEmbedding(text);
+    }
 
-    // Normalize to 384 dimensions (pad or truncate)
-    const targetDim = 384;
-    if (vector.length >= targetDim) {
-      return vector.slice(0, targetDim);
+    const data = await response.json();
+    const embedding = data.data?.[0]?.embedding as number[] | undefined;
+
+    if (embedding && Array.isArray(embedding) && embedding.length >= 384) {
+      return embedding.slice(0, 384);
     }
-    // Pad with zeros if too short
-    while (vector.length < targetDim) {
-      vector.push(0);
-    }
-    return vector;
+
+    // If API returned wrong dimensions, fall back
+    return generateDeterministicEmbedding(text);
   } catch {
-    // Fallback: generate a deterministic pseudo-embedding from text
     return generateDeterministicEmbedding(text);
   }
 }

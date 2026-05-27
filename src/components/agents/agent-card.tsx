@@ -82,7 +82,7 @@ export function AgentCard({ agent, onToggle, onDelete, onEdit, onChat }: AgentCa
   };
 
   return (
-    <Card className={`group border-border/50 hover:border-primary/30 transition-all ${isActive ? 'agent-glow' : ''}`}>
+    <Card className={`group border-border/50 hover:border-primary/30 transition-all card-lift ${isActive ? 'agent-glow agent-breathing' : ''}`}>
       <CardContent className="p-4 sm:p-5">
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3">

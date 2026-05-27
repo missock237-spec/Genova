@@ -41,6 +41,24 @@ export interface MemorySearchResult {
 }
 
 // ============================================================
+// VECTOR SIMILARITY — Cosine similarity for number[] embeddings
+// ============================================================
+
+function vectorCosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 0;
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dotProduct += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+// ============================================================
 // LONG-TERM MEMORY ENGINE
 // ============================================================
 
@@ -607,5 +625,269 @@ export class LongTermMemory {
     const lengthPenalty = Math.min(content.length / 1000, 1);
 
     return keywordOverlap * 0.8 + lengthPenalty * 0.2;
+  }
+
+  // ============================================================
+  // MEMORY COMPRESSION — Semantic similarity-based compression
+  // ============================================================
+
+  /**
+   * Compress semantically similar memories into condensed representations
+   * Groups memories by topic similarity rather than just category
+   */
+  async compressMemories(userId: string, options: {
+    similarityThreshold?: number;  // 0-1, minimum similarity to group together
+    maxGroupSize?: number;         // Max memories to compress at once
+    dryRun?: boolean;              // If true, don't actually delete/compress
+  } = {}): Promise<{ compressed: number; spaceSaved: number; groups: Array<{ topic: string; count: number }> }> {
+    const { similarityThreshold = 0.7, maxGroupSize = 10, dryRun = false } = options;
+
+    const allMemories = await db.knowledge.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (allMemories.length < 5) return { compressed: 0, spaceSaved: 0, groups: [] };
+
+    // Generate embeddings for all memories (or use cached)
+    const memoryEmbeddings: Map<string, number[]> = new Map();
+    for (const memory of allMemories) {
+      try {
+        const embedding = await generateEmbedding(memory.content);
+        memoryEmbeddings.set(memory.id, embedding);
+      } catch {
+        // Skip memories that can't be embedded
+      }
+    }
+
+    // Group similar memories using clustering
+    const groups: Array<string[]> = [];
+    const assigned = new Set<string>();
+
+    for (const [id, embedding] of memoryEmbeddings.entries()) {
+      if (assigned.has(id)) continue;
+
+      const group = [id];
+      assigned.add(id);
+
+      for (const [otherId, otherEmbedding] of memoryEmbeddings.entries()) {
+        if (assigned.has(otherId) || group.length >= maxGroupSize) continue;
+
+        const similarity = vectorCosineSimilarity(embedding, otherEmbedding);
+        if (similarity >= similarityThreshold) {
+          group.push(otherId);
+          assigned.add(otherId);
+        }
+      }
+
+      if (group.length > 1) {
+        groups.push(group);
+      }
+    }
+
+    // Compress each group
+    let compressed = 0;
+    let spaceSaved = 0;
+    const groupTopics: Array<{ topic: string; count: number }> = [];
+
+    for (const group of groups) {
+      const groupMemories = allMemories.filter(m => group.includes(m.id));
+      if (groupMemories.length < 2) continue;
+
+      try {
+        // Generate topic label and compressed content
+        const contents = groupMemories.map(m => `- [${m.category}] ${m.content.substring(0, 300)}`).join('\n');
+        const result = await chatCompletion([
+          {
+            role: 'system',
+            content: `Tu es un système de compression de mémoires. Condense les entrées similaires en une seule entrée qui préserve TOUTES les informations clés, élimine les redondances, et structure le résultat. Réponds en JSON: {"topic": "sujet principal", "compressed": "texte compressé", "keyFacts": ["fait1", "fait2"]}`
+          },
+          { role: 'user', content: `Entrées à compresser:\n${contents}` },
+        ], 'quick_chat');
+
+        let parsed: { topic: string; compressed: string; keyFacts: string[] };
+        try {
+          let content = result.content.trim();
+          content = content.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+          parsed = JSON.parse(content);
+        } catch {
+          parsed = { topic: 'compressed', compressed: result.content, keyFacts: [] };
+        }
+
+        groupTopics.push({ topic: parsed.topic, count: groupMemories.length });
+
+        if (!dryRun) {
+          // Store the compressed memory
+          const totalOriginalSize = groupMemories.reduce((sum, m) => sum + m.content.length, 0);
+          spaceSaved += totalOriginalSize - parsed.compressed.length;
+
+          await this.store({
+            content: parsed.compressed,
+            category: groupMemories[0].category,
+            tags: ['compressed', `from:${groupMemories.length}_memories`, ...parsed.keyFacts.slice(0, 5)],
+            source: 'compression',
+            relevance: Math.max(...groupMemories.map(m => m.relevance)),
+            userId,
+          });
+
+          // Delete original memories
+          for (const memory of groupMemories) {
+            await db.knowledge.delete({ where: { id: memory.id } });
+          }
+
+          compressed += groupMemories.length;
+        } else {
+          const totalOriginalSize = groupMemories.reduce((sum, m) => sum + m.content.length, 0);
+          spaceSaved += totalOriginalSize - parsed.compressed.length;
+          compressed += groupMemories.length;
+        }
+      } catch {
+        // If compression fails for a group, skip it
+      }
+    }
+
+    return { compressed, spaceSaved, groups: groupTopics };
+  }
+
+  // ============================================================
+  // SEMANTIC MEMORY RANKING — Composite relevance scoring
+  // ============================================================
+
+  /**
+   * Rank memories by composite relevance score
+   * Combines: recency, access frequency, importance, semantic relevance to context
+   */
+  async rankMemoriesByRelevance(userId: string, context?: {
+    currentQuery?: string;
+    activeAgentId?: string;
+    timeWindow?: number; // hours
+  }): Promise<Array<{ memory: KnowledgeEntry; rank: number; factors: { recency: number; frequency: number; importance: number; semanticRelevance: number } }>> {
+    const { currentQuery, activeAgentId, timeWindow = 24 } = context || {};
+
+    const allMemories = await db.knowledge.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const now = Date.now();
+    const windowMs = timeWindow * 60 * 60 * 1000;
+
+    const ranked = await Promise.all(allMemories.map(async (m) => {
+      // Factor 1: Recency (exponential decay)
+      const ageMs = now - m.createdAt.getTime();
+      const recency = Math.exp(-ageMs / (7 * 24 * 60 * 60 * 1000)); // 7-day half-life
+
+      // Factor 2: Frequency (based on relevance as proxy + access patterns)
+      const frequency = Math.min(1, m.relevance * 1.5);
+
+      // Factor 3: Importance (category-based + source-based)
+      const importance = this.calculateMemoryImportance(m);
+
+      // Factor 4: Semantic relevance to current query
+      let semanticRelevance = 0.5;
+      if (currentQuery) {
+        try {
+          const queryEmbedding = await generateEmbedding(currentQuery);
+          const memEmbedding = await generateEmbedding(m.content);
+          semanticRelevance = vectorCosineSimilarity(queryEmbedding, memEmbedding);
+        } catch {
+          // Fall back to keyword matching
+          const queryTokens = currentQuery.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+          const contentLower = m.content.toLowerCase();
+          const matches = queryTokens.filter(t => contentLower.includes(t)).length;
+          semanticRelevance = queryTokens.length > 0 ? matches / queryTokens.length : 0;
+        }
+      }
+
+      // Factor 5: Agent relevance (if specified)
+      let agentBonus = 0;
+      if (activeAgentId && m.tags.includes(`agent:${activeAgentId}`)) {
+        agentBonus = 0.2;
+      }
+
+      // Factor 6: Time window bonus (recent memories in active window)
+      const inWindow = ageMs < windowMs ? 0.15 : 0;
+
+      // Composite rank (weighted)
+      const rank = (
+        recency * 0.25 +        // Recency: 25%
+        frequency * 0.2 +       // Frequency: 20%
+        importance * 0.25 +     // Importance: 25%
+        semanticRelevance * 0.3 + // Semantic: 30%
+        agentBonus +            // Agent bonus
+        inWindow                // Time window bonus
+      );
+
+      return {
+        memory: {
+          id: m.id,
+          content: m.content,
+          category: m.category,
+          tags: JSON.parse(m.tags || '[]'),
+          source: m.source,
+          relevance: m.relevance,
+          userId: m.userId,
+          createdAt: m.createdAt.toISOString(),
+          accessCount: 0,
+          importance,
+        },
+        rank: Math.min(1, rank),
+        factors: {
+          recency,
+          frequency,
+          importance,
+          semanticRelevance,
+        },
+      };
+    }));
+
+    return ranked.sort((a, b) => b.rank - a.rank);
+  }
+
+  // ============================================================
+  // MEMORY STATISTICS — Comprehensive analytics
+  // ============================================================
+
+  /**
+   * Get comprehensive memory statistics
+   */
+  async getMemoryStats(userId: string): Promise<{
+    totalMemories: number;
+    byCategory: Record<string, number>;
+    bySource: Record<string, number>;
+    averageImportance: number;
+    oldestMemory: string;
+    newestMemory: string;
+    compressedCount: number;
+    totalSizeBytes: number;
+  }> {
+    const allMemories = await db.knowledge.findMany({ where: { userId } });
+
+    const byCategory: Record<string, number> = {};
+    const bySource: Record<string, number> = {};
+    let totalImportance = 0;
+    let compressedCount = 0;
+    let totalSize = 0;
+
+    for (const m of allMemories) {
+      byCategory[m.category] = (byCategory[m.category] || 0) + 1;
+      bySource[m.source] = (bySource[m.source] || 0) + 1;
+      totalImportance += this.calculateMemoryImportance(m);
+      totalSize += m.content.length;
+
+      const tags = JSON.parse(m.tags || '[]');
+      if (tags.includes('compressed')) compressedCount++;
+    }
+
+    return {
+      totalMemories: allMemories.length,
+      byCategory,
+      bySource,
+      averageImportance: allMemories.length > 0 ? totalImportance / allMemories.length : 0,
+      oldestMemory: allMemories.length > 0 ? allMemories[allMemories.length - 1].createdAt.toISOString() : new Date().toISOString(),
+      newestMemory: allMemories.length > 0 ? allMemories[0].createdAt.toISOString() : new Date().toISOString(),
+      compressedCount,
+      totalSizeBytes: totalSize * 2, // Approximate UTF-16
+    };
   }
 }

@@ -136,8 +136,11 @@ function MemoryStatsCard() {
     const interval = setInterval(() => {
       setMemory(prev => ({
         shortTerm: Math.min(prev.shortTermMax, Math.max(0, prev.shortTerm + Math.floor(Math.random() * 7) - 3)),
+        shortTermMax: prev.shortTermMax,
         longTerm: Math.min(prev.longTermMax, Math.max(0, prev.longTerm + Math.floor(Math.random() * 15) - 5)),
+        longTermMax: prev.longTermMax,
         episodic: Math.min(prev.episodicMax, Math.max(0, prev.episodic + Math.floor(Math.random() * 5) - 2)),
+        episodicMax: prev.episodicMax,
       }));
     }, 3000);
     return () => clearInterval(interval);
@@ -395,7 +398,7 @@ export function DashboardView() {
       </motion.div>
 
       {/* AI Router Status */}
-      <Card className="border-border/50">
+      <Card className="border-border/50 glass-card">
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <Cpu className="h-4 w-4 text-primary" />
@@ -410,7 +413,7 @@ export function DashboardView() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.1 }}
-                className="p-4 rounded-xl border border-border/50 bg-card glass-card"
+                className="p-4 rounded-xl border border-border/50 bg-card glass-card card-lift"
               >
                 <div className="flex items-center gap-3 mb-3">
                   <div className={`p-2 rounded-lg ${provider.bgColor}`}>
@@ -450,13 +453,13 @@ export function DashboardView() {
         <MemoryStatsCard />
 
         {/* Quick Actions */}
-        <Card className="border-border/50 glass-card">
+        <Card className="border-border/50 glass-card-emerald">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Actions rapides</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             <Button
-              className="w-full justify-start gap-3"
+              className="w-full justify-start gap-3 float-action"
               variant="outline"
               onClick={() => setCurrentView('agents')}
             >
@@ -464,7 +467,7 @@ export function DashboardView() {
               Créer un agent
             </Button>
             <Button
-              className="w-full justify-start gap-3"
+              className="w-full justify-start gap-3 float-action"
               variant="outline"
               onClick={() => setCurrentView('coordination')}
             >
@@ -472,7 +475,7 @@ export function DashboardView() {
               Nouveau workflow
             </Button>
             <Button
-              className="w-full justify-start gap-3"
+              className="w-full justify-start gap-3 float-action"
               variant="outline"
               onClick={() => setCurrentView('automation')}
             >
@@ -484,7 +487,7 @@ export function DashboardView() {
       </div>
 
       {/* Real-time Activity Pulse */}
-      <Card className="border-border/50">
+      <Card className="border-border/50 glass-card-emerald">
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <Activity className="h-4 w-4 text-primary" />
@@ -501,7 +504,7 @@ export function DashboardView() {
       </Card>
 
       {/* Recent Activity (static history) */}
-      <Card className="border-border/50">
+      <Card className="border-border/50 card-lift">
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <Clock className="h-4 w-4 text-muted-foreground" />
@@ -515,13 +518,13 @@ export function DashboardView() {
 
       {/* Tasks by Status */}
       {stats?.tasksByStatus && stats.tasksByStatus.length > 0 && (
-        <Card className="border-border/50">
+        <Card className="border-border/50 card-lift">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Répartition des tâches</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-              {['pending', 'running', 'completed', 'failed', 'validated'].map((status) => {
+              {['pending', 'running', 'completed', 'failed', 'validated'].map((status, index) => {
                 const found = stats.tasksByStatus.find((t) => t.status === status);
                 const count = found?._count.status || 0;
                 const labels: Record<string, string> = {
@@ -541,10 +544,13 @@ export function DashboardView() {
                 return (
                   <motion.div
                     key={status}
-                    whileHover={{ scale: 1.03 }}
-                    className={`p-3 rounded-lg border text-center ${colors[status]}`}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.1 * index, type: 'spring', stiffness: 300, damping: 20 }}
+                    whileHover={{ scale: 1.05 }}
+                    className={`p-3 rounded-lg border text-center card-lift ${colors[status]}`}
                   >
-                    <p className="text-2xl font-bold">{count}</p>
+                    <p className="text-2xl font-bold counter-glow">{count}</p>
                     <p className="text-xs mt-1">{labels[status]}</p>
                   </motion.div>
                 );

@@ -133,7 +133,7 @@ export function resetDockerCache(): void {
 
 export class SandboxManager {
   private sandboxes: Map<string, SandboxConfig> = new Map();
-  private executions: Map<string, SandboxExecution> = new Map();
+  protected executions: Map<string, SandboxExecution> = new Map();
   private auditLog: Array<{
     sandboxId: string;
     executionId: string;
@@ -141,7 +141,7 @@ export class SandboxManager {
     timestamp: string;
     details: string;
   }> = [];
-  private executionCounter = 0;
+  protected executionCounter = 0;
 
   constructor() {
     // Register default sandbox configurations
