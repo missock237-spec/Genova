@@ -1,31 +1,47 @@
 // Email Sending Utility for Genova
-// Supports SMTP (nodemailer) for production, console logging for development
+// Supports: Resend API (recommended), SMTP (nodemailer), Console (development)
+//
+// Configuration priority:
+// 1. RESEND_API_KEY → Use Resend.com API (free tier: 100 emails/day)
+// 2. SMTP_HOST + SMTP_USER + SMTP_PASS → Use SMTP (Gmail, SendGrid, etc.)
+// 3. No config → Log to console (development mode)
 
 import { createTransport, Transporter } from 'nodemailer';
 
 let _transporter: Transporter | null = null;
+let _transportType: 'resend' | 'smtp' | 'console' | null = null;
 
-function getTransporter(): Transporter | null {
-  if (_transporter) return _transporter;
+function initializeTransport(): void {
+  if (_transportType) return;
 
+  // 1. Try Resend API (recommended for production)
+  if (process.env.RESEND_API_KEY) {
+    _transportType = 'resend';
+    console.info('[EMAIL] Using Resend API');
+    return;
+  }
+
+  // 2. Try SMTP
   const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
 
-  if (!host || !user || !pass) {
-    console.warn('[EMAIL] SMTP not configured — emails will be logged to console only');
-    return null;
+  if (host && user && pass) {
+    const port = parseInt(process.env.SMTP_PORT || '587', 10);
+    _transporter = createTransport({
+      host,
+      port,
+      secure: process.env.SMTP_SECURE === 'true' || port === 465,
+      auth: { user, pass },
+    });
+    _transportType = 'smtp';
+    console.info(`[EMAIL] Using SMTP (${host}:${port})`);
+    return;
   }
 
-  _transporter = createTransport({
-    host,
-    port,
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: { user, pass },
-  });
-
-  return _transporter;
+  // 3. Console fallback (development)
+  _transportType = 'console';
+  console.warn('[EMAIL] No SMTP or Resend configured — emails will be logged to console only');
 }
 
 interface EmailOptions {
@@ -36,25 +52,55 @@ interface EmailOptions {
 }
 
 /**
- * Send an email. Falls back to console logging if SMTP is not configured.
+ * Send an email using Resend API
  */
-export async function sendEmail({ to, subject, html, text }: EmailOptions): Promise<boolean> {
-  const from = process.env.EMAIL_FROM || 'noreply@genova.app';
+async function sendViaResend({ to, subject, html, text }: EmailOptions): Promise<boolean> {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return false;
 
-  // Development mode: log email instead of sending
-  const transporter = getTransporter();
-  if (!transporter) {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`[EMAIL DEV MODE] To: ${to}`);
-    console.log(`Subject: ${subject}`);
-    console.log(`${'='.repeat(60)}`);
-    console.log(text || html.replace(/<[^>]*>/g, ''));
-    console.log(`${'='.repeat(60)}\n`);
-    return true;
-  }
+  const from = process.env.EMAIL_FROM || 'onboarding@resend.dev';
 
   try {
-    const result = await transporter.sendMail({
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: `Genova <${from}>`,
+        to: [to],
+        subject,
+        html,
+        text: text || html.replace(/<[^>]*>/g, ''),
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('[EMAIL] Resend API error:', response.status, errorData);
+      return false;
+    }
+
+    const result = await response.json();
+    console.log(`[EMAIL] Sent via Resend to ${to} (ID: ${result.id})`);
+    return true;
+  } catch (error) {
+    console.error('[EMAIL] Resend failed:', error);
+    return false;
+  }
+}
+
+/**
+ * Send an email via SMTP (nodemailer)
+ */
+async function sendViaSmtp({ to, subject, html, text }: EmailOptions): Promise<boolean> {
+  if (!_transporter) return false;
+
+  const from = process.env.EMAIL_FROM || 'noreply@genova.app';
+
+  try {
+    const result = await _transporter.sendMail({
       from: `"Genova" <${from}>`,
       to,
       subject,
@@ -62,11 +108,42 @@ export async function sendEmail({ to, subject, html, text }: EmailOptions): Prom
       text: text || html.replace(/<[^>]*>/g, ''),
     });
 
-    console.log(`[EMAIL] Sent to ${to}: ${subject} (ID: ${result.messageId})`);
+    console.log(`[EMAIL] Sent via SMTP to ${to}: ${subject} (ID: ${result.messageId})`);
     return true;
   } catch (error) {
-    console.error('[EMAIL] Failed to send:', error);
+    console.error('[EMAIL] SMTP failed:', error);
     return false;
+  }
+}
+
+/**
+ * Log email to console (development mode)
+ */
+function logToConsole({ to, subject, html, text }: EmailOptions): boolean {
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`[EMAIL DEV MODE] To: ${to}`);
+  console.log(`Subject: ${subject}`);
+  console.log(`${'='.repeat(60)}`);
+  console.log(text || html.replace(/<[^>]*>/g, ''));
+  console.log(`${'='.repeat(60)}\n`);
+  return true;
+}
+
+/**
+ * Send an email. Automatically selects the best available transport.
+ * Priority: Resend API → SMTP → Console logging
+ */
+export async function sendEmail(options: EmailOptions): Promise<boolean> {
+  initializeTransport();
+
+  switch (_transportType) {
+    case 'resend':
+      return sendViaResend(options);
+    case 'smtp':
+      return sendViaSmtp(options);
+    case 'console':
+    default:
+      return logToConsole(options);
   }
 }
 
@@ -111,4 +188,12 @@ export async function sendPasswordResetCode(to: string, code: string, userName: 
     `,
     text: `Bonjour ${userName},\n\nVotre code de récupération Genova est : ${code}\n\nCe code est valable pendant 15 minutes. Si vous n'avez pas fait cette demande, ignorez cet email.\n\nGenova — ${appUrl}`,
   });
+}
+
+/**
+ * Get the current email transport type (for debugging)
+ */
+export function getEmailTransportType(): string {
+  initializeTransport();
+  return _transportType || 'unknown';
 }
