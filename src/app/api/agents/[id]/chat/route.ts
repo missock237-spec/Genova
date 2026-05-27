@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import { streamChat } from '@/lib/ai-router';
 import { db } from '@/lib/db';
+import { getStreamManager, SSEEncoder, type StreamEvent, type ProgressUpdate } from '@/lib/streaming';
+import { LongTermMemory } from '@/lib/memory/long-term';
 
 export async function POST(
   request: NextRequest,
@@ -32,11 +34,16 @@ export async function POST(
 
     const config = JSON.parse(agent.config || '{}');
 
-    // Build system prompt from agent config
+    // Load long-term memory context for this agent
+    const longTermMemory = new LongTermMemory();
+    const memoryContext = await longTermMemory.getContextForQuery(message, agent.userId);
+
+    // Build system prompt from agent config + memory
     const systemPrompt = `Tu es ${agent.name}, un agent IA spécialisé en ${agent.type}.
 ${config.instructions || 'Tu assistes l\'utilisateur dans tes domaines de compétence.'}
 ${config.personality ? `Personnalité: ${config.personality}` : ''}
 Outils disponibles: ${(config.tools || []).join(', ') || 'Aucun outil spécifique'}
+${memoryContext ? `\nMémoire à long terme pertinente:\n${memoryContext}` : ''}
 Réponds toujours en français de manière professionnelle et utile.`;
 
     // Load conversation history
@@ -85,34 +92,92 @@ Réponds toujours en français de manière professionnelle et utile.`;
       data: { role: 'user', content: message, conversationId: convId },
     });
 
-    // Stream response
-    const stream = await streamChat(conversationMessages, resolvedTaskType);
+    // Stream response using advanced streaming architecture
+    const aiStream = await streamChat(conversationMessages, resolvedTaskType);
 
+    // Create enhanced SSE stream with structured events
+    const encoder = new TextEncoder();
     let fullResponse = '';
+    let tokenCount = 0;
+    const startTime = Date.now();
+
     const transformStream = new TransformStream({
       async transform(chunk, controller) {
-        fullResponse += new TextDecoder().decode(chunk);
-        controller.enqueue(chunk);
+        const text = decoder.decode(chunk, { stream: true });
+        const lines = text.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+            try {
+              const json = JSON.parse(line.slice(6));
+              const delta = json.choices?.[0]?.delta?.content;
+
+              if (delta) {
+                fullResponse += delta;
+                tokenCount++;
+
+                // Send structured token event
+                const tokenEvent: StreamEvent = {
+                  id: `evt_${Date.now()}_${tokenCount}`,
+                  type: 'token',
+                  data: { token: delta, model: json.model },
+                  timestamp: new Date().toISOString(),
+                };
+                controller.enqueue(encoder.encode(SSEEncoder.encode(tokenEvent)));
+              }
+            } catch {
+              // Forward raw chunk for non-JSON data
+              controller.enqueue(chunk);
+            }
+          } else if (line.startsWith('data: [DONE]')) {
+            // Send completion event
+            const completeEvent: StreamEvent = {
+              id: `evt_${Date.now()}_complete`,
+              type: 'complete',
+              data: {
+                fullResponse,
+                tokenCount,
+                duration: Date.now() - startTime,
+                conversationId: convId,
+              },
+              timestamp: new Date().toISOString(),
+            };
+            controller.enqueue(encoder.encode(SSEEncoder.encode(completeEvent)));
+            controller.enqueue(encoder.encode(SSEEncoder.done()));
+          } else {
+            // Forward other SSE lines
+            controller.enqueue(encoder.encode(line + '\n'));
+          }
+        }
       },
       async flush() {
         try {
-          const lines = fullResponse.split('\n');
-          let assistantContent = '';
-          for (const line of lines) {
-            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-              try {
-                const json = JSON.parse(line.slice(6));
-                const delta = json.choices?.[0]?.delta?.content;
-                if (delta) assistantContent += delta;
-              } catch {
-                // skip unparseable lines
-              }
-            }
-          }
-          if (convId && assistantContent) {
+          if (convId && fullResponse) {
             await db.message.create({
-              data: { role: 'assistant', content: assistantContent, model: 'auto-routed', provider: 'groq/openrouter', conversationId: convId },
+              data: {
+                role: 'assistant',
+                content: fullResponse,
+                model: 'auto-routed',
+                provider: 'groq/openrouter',
+                conversationId: convId,
+              },
             });
+
+            // Extract and store learnings in long-term memory
+            try {
+              const ltm = new LongTermMemory();
+              const keywords = fullResponse.split(/\s+/).filter(w => w.length > 4).slice(0, 5);
+              await ltm.store({
+                content: `${agent.name}: ${fullResponse.substring(0, 500)}`,
+                category: 'agent_learning',
+                tags: [agent.type, ...keywords],
+                source: 'conversation',
+                relevance: 0.6,
+                userId: agent.userId,
+              });
+            } catch {
+              // Fail silently on memory store error
+            }
           }
         } catch {
           // fail silently on save error
@@ -120,7 +185,8 @@ Réponds toujours en français de manière professionnelle et utile.`;
       },
     });
 
-    const transformedStream = stream.pipeThrough(transformStream);
+    const decoder = new TextDecoder();
+    const transformedStream = aiStream.pipeThrough(transformStream);
 
     return new Response(transformedStream, {
       headers: {
@@ -128,6 +194,8 @@ Réponds toujours en français de manière professionnelle et utile.`;
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
         'X-Conversation-Id': convId,
+        'X-Stream-Version': '2.0',
+        'Access-Control-Allow-Origin': '*',
       },
     });
   } catch (error: unknown) {

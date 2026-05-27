@@ -99,8 +99,8 @@ export function AuthForm() {
           <div className="inline-flex items-center justify-center p-4 rounded-2xl bg-primary/10 agent-glow mb-4">
             <Cpu className="h-10 w-10 text-primary" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">AgentOS</h1>
-          <p className="text-muted-foreground mt-1">Système d&apos;exploitation pour agents IA</p>
+          <h1 className="text-3xl font-bold tracking-tight">Genova</h1>
+          <p className="text-muted-foreground mt-1">AI Operating System — Créez, gérez et orchestrez vos agents IA</p>
         </div>
 
         <Card className="border-border/50 agent-glow">

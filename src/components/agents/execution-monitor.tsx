@@ -167,7 +167,7 @@ export function ExecutionMonitor({
             const config = stepConfig[step.type] || stepConfig.thought;
             const Icon = config.icon;
             const isExpanded = expandedSteps.has(step.id);
-            const hasDetails = (step.toolInput && Object.keys(step.toolInput).length > 0) || step.toolOutput;
+            const hasDetails = Boolean((step.toolInput && Object.keys(step.toolInput as Record<string, unknown>).length > 0) || step.toolOutput);
 
             return (
               <motion.div
@@ -209,13 +209,13 @@ export function ExecutionMonitor({
                               {formatDuration(step.duration)}
                             </span>
                           )}
-                          {hasDetails && (
+                          {hasDetails ? (
                             isExpanded ? (
                               <ChevronUp className="h-3.5 w-3.5 text-muted-foreground ml-auto flex-shrink-0" />
                             ) : (
                               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground ml-auto flex-shrink-0" />
                             )
-                          )}
+                          ) : null}
                         </div>
                         <p className="text-sm whitespace-pre-wrap break-words">
                           {step.content.length > 500 && !isExpanded
@@ -226,14 +226,14 @@ export function ExecutionMonitor({
 
                         {/* Expanded details */}
                         <AnimatePresence>
-                          {isExpanded && hasDetails && (
+                          {isExpanded && hasDetails ? (
                             <motion.div
                               initial={{ opacity: 0, height: 0 }}
                               animate={{ opacity: 1, height: 'auto' }}
                               exit={{ opacity: 0, height: 0 }}
                               className="mt-2 space-y-2"
                             >
-                              {step.toolInput && Object.keys(step.toolInput).length > 0 && (
+                              {step.toolInput && Object.keys(step.toolInput as Record<string, unknown>).length > 0 && (
                                 <div className="p-2 rounded-md bg-background/50 border border-border/50">
                                   <p className="text-[10px] font-medium text-muted-foreground mb-1">Paramètres:</p>
                                   <pre className="text-xs whitespace-pre-wrap break-words">
@@ -241,7 +241,7 @@ export function ExecutionMonitor({
                                   </pre>
                                 </div>
                               )}
-                              {step.toolOutput && (
+                              {step.toolOutput !== undefined && step.toolOutput !== null && (
                                 <div className="p-2 rounded-md bg-background/50 border border-border/50">
                                   <p className="text-[10px] font-medium text-muted-foreground mb-1">Résultat:</p>
                                   <pre className="text-xs whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
@@ -252,7 +252,7 @@ export function ExecutionMonitor({
                                 </div>
                               )}
                             </motion.div>
-                          )}
+                          ) : null}
                         </AnimatePresence>
                       </div>
                     </div>

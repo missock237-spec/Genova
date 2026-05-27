@@ -16,26 +16,24 @@ export const webSearchTool: ToolDefinition = {
 
     try {
       // Use z-ai-web-dev-sdk for web search
-      const { createWebSearch } = await import('z-ai-web-dev-sdk');
-      const webSearch = createWebSearch();
-      const results = await webSearch.search({ query, num });
+      const ZAI = (await import('z-ai-web-dev-sdk')).default;
+      const zai = await ZAI.create();
+      const searchResult = await zai.functions.invoke("web_search", { query, num });
 
-      if (results && results.results) {
-        return results.results.slice(0, num).map((r: { title?: string; url?: string; snippet?: string; description?: string }) => ({
-          title: r.title || '',
+      if (Array.isArray(searchResult)) {
+        return searchResult.slice(0, num).map((r: { name?: string; url?: string; snippet?: string }) => ({
+          title: r.name || '',
           url: r.url || '',
-          snippet: r.snippet || r.description || '',
+          snippet: r.snippet || '',
         }));
       }
 
-      // Fallback: return a structured response indicating no results
       return {
         query,
         results: [],
-        message: 'Aucun résultat trouvé. L\'outil de recherche web nécessite une connexion API.',
+        message: 'Aucun résultat trouvé.',
       };
     } catch {
-      // Fallback response when web search API is not available
       return {
         query,
         results: [],

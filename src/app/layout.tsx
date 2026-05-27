@@ -14,10 +14,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AgentOS — Système d'exploitation pour agents IA",
-  description: "AgentOS est la plateforme SaaS qui vous permet de créer, gérer et coordonner vos agents IA.",
-  keywords: ["AgentOS", "IA", "agents", "automatisation", "SaaS"],
-  authors: [{ name: "AgentOS Team" }],
+  title: "Genova — Système d'exploitation pour agents IA",
+  description: "Genova est la plateforme SaaS qui vous permet de créer, gérer et coordonner vos agents IA.",
+  keywords: ["Genova", "IA", "agents", "automatisation", "SaaS"],
+  authors: [{ name: "Genova Team" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
