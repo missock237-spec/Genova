@@ -729,3 +729,72 @@ Stage Summary:
 - Bug #3: Vector search latency fixed with norm pre-check + early termination + partial sort
 - Bug #4: WebSocket now actually sends data, no more Map mutation during iteration, errors logged
 - Bug #5: Critical data leak fixed with Bearer token session auth — userId verified from token, not request params
+
+---
+Task ID: security-overhaul
+Agent: Main Agent
+Task: Fix 3 critical security issues: Auth on ALL routes, Zod validation, CORS + Rate Limiting
+
+Work Log:
+- Created `src/lib/validation.ts` — Centralized Zod schemas for all API inputs:
+  - Auth schemas: loginSchema, registerSchema (email + password strength validation)
+  - Agent schemas: createAgentSchema, updateAgentSchema (enum types, validated fields)
+  - Task/Workflow/Guardrail schemas with proper enums and constraints
+  - Chat/AI schemas: chatMessageSchema, aiChatSchema, aiValidateSchema, aiOrchestrateSchema, multiAgentExecuteSchema
+  - RAG schemas: ragQuerySchema, ragUploadSchema
+  - Helper: validateBody() returns typed data or 400 error with field-level details
+  - Fixed Zod v4 compatibility: z.record() now requires 2 args (z.string(), z.unknown())
+- Created `src/lib/security.ts` — CORS + Rate Limiting + Combined Middleware:
+  - CORS: Same-origin by default, configurable allowlist, proper preflight handling, Vary: Origin
+  - Rate Limiting: In-memory sliding window per IP+userId, 8 categories (auth, login, ai, aiExecute, read, write, delete, upload)
+  - applySecurity() combined middleware: CORS preflight → Auth check → Rate limit
+  - verifyOwnership() helper for [id] route ownership verification (403 if wrong user)
+  - secureResponse() wrapper for CORS headers on responses
+- Created `src/lib/session.ts` — Token-based session management:
+  - createSession(): 48-byte crypto token, 24h expiry, auto-cleanup expired
+  - validateSession(): token lookup + expiry check
+  - getAuthenticatedUser(): Extracts Bearer token from Authorization header
+  - deleteSession(): Logout support
+- Added Session model to prisma/schema.prisma
+- Updated auth/login to create session + return Bearer token
+- Created auth/logout route for session invalidation
+- Updated auth/register with Zod validation + auto-session + rate limiting
+- **SECURED ALL 28 API ROUTES**:
+  - auth/me: Bearer token instead of userId query param
+  - auth/register: Zod validation (email format, password 8+ chars + uppercase + lowercase + digit)
+  - agents/route: auth + Zod (was already done in previous fix)
+  - agents/[id]: auth + ownership verification + updateAgentSchema for PUT
+  - agents/[id]/toggle: auth + ownership verification
+  - agents/[id]/execute: auth + ownership + executeAgentSchema + rate limiting by auth userId
+  - agents/[id]/chat: auth + ownership + chatMessageSchema + removed Access-Control-Allow-Origin: *
+  - tasks: auth + createTaskSchema
+  - tasks/[id]: auth + ownership verification
+  - workflows: auth + createWorkflowSchema
+  - workflows/[id]: auth + ownership + updateWorkflowSchema
+  - workflows/[id]/execute: auth + ownership verification
+  - guardrails: auth + createGuardrailSchema
+  - guardrails/[id]: auth + ownership + updateGuardrailSchema
+  - guardrails/[id]/toggle: auth + ownership verification
+  - conversations: auth (userId from token)
+  - conversations/[id]: auth + ownership verification
+  - knowledge: auth + createKnowledgeSchema + deleteKnowledgeSchema
+  - activities: auth (userId from token)
+  - dashboard/stats: auth (userId from token)
+  - ai/chat: auth + aiChatSchema + conversation ownership check
+  - ai/validate: auth + aiValidateSchema (userId from token for guardrail lookup)
+  - ai/orchestrate: auth + aiOrchestrateSchema (userId from token for agent lookup)
+  - rag/upload: auth + rate limiting (upload category)
+  - rag/query: auth + ragQuerySchema
+  - rag/documents: auth (userId from token)
+  - multi-agent/execute: auth + multiAgentExecuteSchema (userId from token, not body)
+  - queue/status: auth required (was fully open)
+  - observability/traces: auth + agentId ownership verification
+
+Stage Summary:
+- 28/28 routes now secured with Bearer token authentication
+- All userId values come from validated session tokens, never from client params
+- All [id] routes verify resource ownership before returning data
+- All POST/PUT bodies validated with Zod schemas (no more mass assignment / injection)
+- CORS configured (same-origin default, allowlist for cross-origin)
+- Rate limiting on all endpoints (8 categories, IP+userId sliding window)
+- Zero new TypeScript errors introduced

@@ -1,25 +1,17 @@
-// RAG Documents Route — List uploaded documents
-
 import { NextRequest, NextResponse } from 'next/server';
 import { getAgentEngine } from '@/lib/agent-engine';
+import { applySecurity, secureResponse } from '@/lib/security';
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId');
-
-    if (!userId) {
-      return NextResponse.json({ error: 'userId requis' }, { status: 400 });
-    }
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'read' });
+    if (error) return error;
 
     const engine = getAgentEngine();
-    const documents = await engine.ragRetriever.getDocuments(userId);
+    const documents = await engine.ragRetriever.getDocuments(auth!.userId);
 
-    return NextResponse.json({ documents });
+    return secureResponse(request, NextResponse.json({ documents }));
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Erreur serveur' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Erreur serveur' }, { status: 500 });
   }
 }
