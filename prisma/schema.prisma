@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -300,19 +300,18 @@ model MemoryAccessLog {
 // Requires: CREATE EXTENSION IF NOT EXISTS vector;
 // ─────────────────────────────────────────────────────────────────────────────
 model EmbeddingVector {
-  id          String              @id @default(cuid())
-  entityId    String              // ID of the entity this embedding represents (chunk, knowledge, etc.)
-  entityType  String              // "document_chunk" | "knowledge" | "episodic_memory"
-  vector      Unsupported("vector(384)")
-  dimension   Int                 @default(384)
+  id          String   @id @default(cuid())
+  entityId    String   // ID of the entity this embedding represents (chunk, knowledge, etc.)
+  entityType  String   // "document_chunk" | "knowledge" | "episodic_memory"
+  vector      String   // JSON array of floats (SQLite compat; use pgvector for PostgreSQL)
+  dimension   Int      @default(384)
   userId      String
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([entityId, entityType])
-  @@index([entityType, userId])
   @@map("embedding_vectors")
 }
 

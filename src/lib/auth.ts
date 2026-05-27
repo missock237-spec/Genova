@@ -1,6 +1,7 @@
 // Auth Utilities — Secure password hashing with PBKDF2
 // Uses Web Crypto API (no external dependencies needed)
 // Each password gets a unique salt for rainbow table resistance
+// Supports migration from legacy SHA-256 hashes with multiple salt candidates
 
 const PBKDF2_ITERATIONS = 100000;
 const SALT_LENGTH = 32; // bytes
@@ -50,31 +51,57 @@ export async function hashPassword(password: string): Promise<string> {
   return `${salt}:${hash}`;
 }
 
-// Lazy-loaded legacy salt — read once from env, fail loudly if missing
-let _legacySalt: string | null = null;
-function getLegacySalt(): string {
-  if (_legacySalt === null) {
-    _legacySalt = process.env.ENCRYPTION_SALT || '';
-    if (!_legacySalt) {
-      throw new Error(
-        'ENCRYPTION_SALT environment variable is required. ' +
-        'Set it before starting the server. Example: ENCRYPTION_SALT=$(openssl rand -hex 32)'
-      );
+/**
+ * Get all possible legacy salts to try during verification.
+ * Supports migration from previous hardcoded salts and environment salts.
+ * Returns an array of salt candidates — verification tries each one.
+ */
+function getLegacySaltCandidates(): string[] {
+  const candidates: string[] = [];
+
+  // 1. Current ENCRYPTION_SALT from environment (highest priority)
+  const envSalt = process.env.ENCRYPTION_SALT;
+  if (envSalt) {
+    candidates.push(envSalt);
+  }
+
+  // 2. Previous hardcoded salt that was used before the env var was required
+  // (Users registered before the fix used this salt)
+  candidates.push('genova-default-salt-2024');
+
+  // 3. Alternative salt from .env.local
+  candidates.push('genova-salt-2025-secure');
+
+  return candidates;
+}
+
+/**
+ * Verify a legacy SHA-256 hash by trying all known salt candidates.
+ * Returns true if any salt produces a matching hash.
+ */
+async function verifyLegacyHash(password: string, storedHash: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const saltCandidates = getLegacySaltCandidates();
+
+  for (const salt of saltCandidates) {
+    const data = encoder.encode(password + salt);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    const legacyHash = Array.from(new Uint8Array(hash))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    if (legacyHash === storedHash) {
+      return true;
     }
   }
-  return _legacySalt;
+
+  return false;
 }
 
 export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
   // Support legacy SHA-256 hashes (migration path)
   if (!storedHash.includes(':')) {
-    // Legacy SHA-256 hash — verify using old method then rehash
-    const encoder = new TextEncoder();
-    const salt = getLegacySalt();
-    const data = encoder.encode(password + salt);
-    const hash = await crypto.subtle.digest('SHA-256', data);
-    const legacyHash = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-    return legacyHash === storedHash;
+    return verifyLegacyHash(password, storedHash);
   }
 
   // New PBKDF2 hash format: salt:hash
@@ -99,4 +126,17 @@ export async function verifyPassword(password: string, storedHash: string): Prom
   );
   const computedHash = arrayToHex(derivedBits);
   return computedHash === hash;
+}
+
+/**
+ * Migrate a legacy SHA-256 hash to PBKDF2 after successful verification.
+ * Call this after verifyPassword returns true for a legacy hash.
+ * Returns the new PBKDF2 hash, or null if the hash was already PBKDF2.
+ */
+export async function migrateToPBKDF2(password: string, storedHash: string): Promise<string | null> {
+  // Only migrate legacy hashes (without colon separator)
+  if (storedHash.includes(':')) return null;
+
+  // Generate a new PBKDF2 hash
+  return hashPassword(password);
 }

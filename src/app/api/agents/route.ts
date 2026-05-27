@@ -1,47 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthenticatedUser } from '@/lib/session';
+import { applySecurity, secureResponse } from '@/lib/security';
 
 /**
  * GET /api/agents
- * FIX (Bug #5): Original accepted `userId` from query params without verifying
- * the authenticated user — any client could read another user's agents.
- * Now uses Bearer token authorization: the userId is extracted from the
- * validated session token, NOT from the query string.
+ * FIX: Uses authenticated user from session token (not query params).
+ * Supports optional `status` query parameter to filter agents.
+ * - `?status=active` → only active agents (for dashboard/agents view)
+ * - `?status=inactive` → only inactive agents (for settings)
+ * - no status → all agents
  */
 export async function GET(request: NextRequest) {
   try {
-    const auth = await getAuthenticatedUser(request);
-    if (!auth) {
-      return NextResponse.json({ error: 'Non autorisé — token invalide ou manquant' }, { status: 401 });
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'read' });
+    if (error) return error;
+
+    const userId = auth!.userId;
+
+    // Parse status filter from query params
+    const { searchParams } = new URL(request.url);
+    const statusFilter = searchParams.get('status');
+
+    const where: { userId: string; status?: string } = { userId };
+    if (statusFilter) {
+      where.status = statusFilter;
     }
 
-    // Use the authenticated user's ID — ignore any userId in query params
     const agents = await db.agent.findMany({
-      where: { userId: auth.userId },
+      where,
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { tasks: true } } },
     });
 
-    return NextResponse.json(agents);
+    return secureResponse(request, NextResponse.json(agents));
   } catch (error) {
+    console.error('[AGENTS] GET error:', error);
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
 }
 
 /**
  * POST /api/agents
- * FIX (Bug #5): Original accepted `userId` from request body without verifying
- * the authenticated user — any client could create agents under another user.
- * Now uses Bearer token authorization: the userId comes from the validated session.
+ * FIX: Uses authenticated user from session token (not request body).
+ * New agents are created with status "active" by default.
  */
 export async function POST(request: NextRequest) {
   try {
-    const auth = await getAuthenticatedUser(request);
-    if (!auth) {
-      return NextResponse.json({ error: 'Non autorisé — token invalide ou manquant' }, { status: 401 });
-    }
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'write' });
+    if (error) return error;
 
+    const userId = auth!.userId;
     const body = await request.json();
     const { name, type, description, config, avatar } = body;
 
@@ -57,7 +66,8 @@ export async function POST(request: NextRequest) {
         description: description || '',
         config: config ? JSON.stringify(config) : '{}',
         avatar: avatar || null,
-        userId: auth.userId, // Secure: comes from validated session token
+        status: 'active', // New agents are active by default
+        userId,
       },
     });
 
@@ -66,12 +76,13 @@ export async function POST(request: NextRequest) {
         action: 'Agent créé',
         details: JSON.stringify({ agentName: name, type }),
         category: 'agent',
-        userId: auth.userId,
+        userId,
       },
     });
 
-    return NextResponse.json(agent, { status: 201 });
+    return secureResponse(request, NextResponse.json(agent, { status: 201 }));
   } catch (error) {
+    console.error('[AGENTS] POST error:', error);
     return NextResponse.json({ error: 'Erreur lors de la création' }, { status: 500 });
   }
 }

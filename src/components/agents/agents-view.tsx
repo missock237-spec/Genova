@@ -68,7 +68,9 @@ export function AgentsView() {
   const loadAgents = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch('/api/agents', { credentials: 'include' });
+      // Only fetch ACTIVE agents for the main agents view
+      // Inactive agents are managed in Settings
+      const res = await fetch('/api/agents?status=active', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setAgents(data);
@@ -93,11 +95,20 @@ export function AgentsView() {
       const res = await fetch(`/api/agents/${id}/toggle`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
         const updated = await res.json();
-        setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, status: updated.status } : a)));
-        toast({
-          title: updated.status === 'active' ? 'Agent activé' : 'Agent désactivé',
-          description: `L'agent a été ${updated.status === 'active' ? 'activé' : 'désactivé'}`,
-        });
+        if (updated.status === 'inactive') {
+          // Remove from active agents view — it'll show in Settings
+          setAgents((prev) => prev.filter((a) => a.id !== id));
+          toast({
+            title: 'Agent désactivé',
+            description: `L'agent a été désactivé. Retrouvez-le dans les Paramètres.`,
+          });
+        } else {
+          setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, status: updated.status } : a)));
+          toast({
+            title: 'Agent activé',
+            description: `L'agent a été activé`,
+          });
+        }
       }
     } catch {
       toast({ title: 'Erreur', description: 'Erreur lors du changement de statut', variant: 'destructive' });
@@ -234,8 +245,8 @@ export function AgentsView() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Vos Agents IA</h2>
-          <p className="text-sm text-muted-foreground">{agents.length} agent(s) configuré(s)</p>
+          <h2 className="text-lg font-semibold">Agents actifs</h2>
+          <p className="text-sm text-muted-foreground">{agents.length} agent(s) actif(s) — les agents inactifs sont dans les Paramètres</p>
         </div>
         <Button className="gap-2 float-action" onClick={() => { setEditAgent(null); setCreateOpen(true); }}>
           <Plus className="h-4 w-4" />
