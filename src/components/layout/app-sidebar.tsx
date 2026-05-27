@@ -19,6 +19,7 @@ import {
   LogOut,
   X,
   Activity,
+  Settings,
 } from 'lucide-react';
 
 const navItems = [
@@ -30,18 +31,31 @@ const navItems = [
   { id: 'coordination' as const, label: 'Coordination', icon: GitBranch },
 ];
 
+const bottomNavItems = [
+  { id: 'settings' as const, label: 'Paramètres', icon: Settings },
+];
+
 export function AppSidebar() {
   const { currentView, setCurrentView, sidebarOpen, setSidebarOpen } = useAppStore();
-  const { user, logout } = useAuthStore();
+  const { user, logout: storeLogout } = useAuthStore();
   const [activeAgentCount, setActiveAgentCount] = useState(0);
   const [systemStatus, setSystemStatus] = useState<'operational' | 'degraded' | 'down'>('operational');
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {
+      // Best-effort: clear local state even if API fails
+    }
+    storeLogout();
+  };
 
   // Fetch active agent count
   useEffect(() => {
     const fetchActiveAgents = async () => {
       if (!user?.id) return;
       try {
-        const res = await fetch(`/api/agents?userId=${user.id}`);
+        const res = await fetch('/api/agents', { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           const active = data.filter((a: { status: string }) => a.status === 'active').length;
@@ -60,7 +74,7 @@ export function AppSidebar() {
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        const res = await fetch('/api/dashboard/stats?userId=demo');
+        const res = await fetch('/api/dashboard/stats', { credentials: 'include' });
         setSystemStatus(res.ok ? 'operational' : 'degraded');
       } catch {
         setSystemStatus('degraded');
@@ -210,6 +224,39 @@ export function AppSidebar() {
               );
             })}
           </nav>
+
+          {/* Bottom Nav — Settings */}
+          <div className="mt-4 pt-4 border-t border-sidebar-border">
+            {bottomNavItems.map((item) => {
+              const isActive = currentView === item.id;
+              return (
+                <motion.div
+                  key={item.id}
+                  whileHover={{ x: 2 }}
+                  whileTap={{ scale: 0.98 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                >
+                  <Button
+                    variant={isActive ? 'secondary' : 'ghost'}
+                    className={`
+                      w-full justify-start gap-3 h-10 text-sm transition-all duration-200
+                      ${isActive
+                        ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium sidebar-item-glow'
+                        : 'text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/50'
+                      }
+                    `}
+                    onClick={() => {
+                      setCurrentView(item.id);
+                      setSidebarOpen(false);
+                    }}
+                  >
+                    <item.icon className={`h-4 w-4 ${isActive ? 'text-emerald-500' : ''}`} />
+                    <span className="flex-1 text-left">{item.label}</span>
+                  </Button>
+                </motion.div>
+              );
+            })}
+          </div>
         </ScrollArea>
 
         <Separator className="bg-sidebar-border" />
@@ -249,7 +296,7 @@ export function AppSidebar() {
                   variant="ghost"
                   size="icon"
                   className="h-8 w-8 flex-shrink-0 text-muted-foreground hover:text-destructive"
-                  onClick={logout}
+                  onClick={handleLogout}
                 >
                   <LogOut className="h-4 w-4" />
                 </Button>

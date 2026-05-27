@@ -46,6 +46,20 @@ export const registerSchema = z.object({
 });
 
 // ============================================================
+// PASSWORD RESET SCHEMAS
+// ============================================================
+
+export const forgotPasswordSchema = z.object({
+  email: emailSchema,
+});
+
+export const resetPasswordSchema = z.object({
+  email: emailSchema,
+  code: z.string().length(6, 'Le code doit contenir 6 chiffres').regex(/^\d{6}$/, 'Code invalide'),
+  newPassword: passwordSchema,
+});
+
+// ============================================================
 // AGENT SCHEMAS
 // ============================================================
 

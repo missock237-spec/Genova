@@ -519,7 +519,7 @@ export function ExecutionTraces({ userId }: { userId: string }) {
     if (!userId) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/observability/traces?userId=${userId}`);
+      const res = await fetch('/api/observability/traces', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setTraces(data.traces || []);

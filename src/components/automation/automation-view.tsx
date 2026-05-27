@@ -263,7 +263,7 @@ export function AutomationView() {
   const loadConversations = async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch(`/api/conversations?userId=${user.id}&type=orchestration`);
+      const res = await fetch('/api/conversations?type=orchestration', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setConversations(data);
@@ -276,7 +276,7 @@ export function AutomationView() {
   const loadAgents = async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch(`/api/agents?userId=${user.id}`);
+      const res = await fetch('/api/agents', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setAgents(data.filter((a: { status: string }) => a.status === 'active') || []);
@@ -289,7 +289,7 @@ export function AutomationView() {
 
   const loadConversation = async (id: string) => {
     try {
-      const res = await fetch(`/api/conversations/${id}`);
+      const res = await fetch(`/api/conversations/${id}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setMessages(data.messages.map((m: { id: string; role: string; content: string; createdAt: string; model?: string; provider?: string }) => ({
@@ -341,7 +341,8 @@ export function AutomationView() {
       const res = await fetch('/api/ai/orchestrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: input, userId: user?.id, conversationId }),
+        credentials: 'include',
+        body: JSON.stringify({ command: input, conversationId }),
       });
 
       const data = await res.json();
@@ -422,12 +423,12 @@ export function AutomationView() {
         await fetch('/api/tasks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             title: step.title,
             description: step.description,
             status: i === 0 ? 'running' : 'pending',
             priority: step.priority || 'medium',
-            userId: user.id,
           }),
         });
 
@@ -481,6 +482,7 @@ export function AutomationView() {
       const res = await fetch(`/api/agents/${agentId}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           task: input,
           maxSteps: 10,

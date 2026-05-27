@@ -237,6 +237,7 @@ export function useStreamingChat(
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({
           message: text,
           conversationId: conversationId || undefined,

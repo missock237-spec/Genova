@@ -93,11 +93,12 @@ export function GuardrailCreateDialog({ open, onOpenChange, onSuccess, editGuard
       const method = editGuardrail ? 'PUT' : 'POST';
       const body = editGuardrail
         ? { name: form.name, type: form.type, description: form.description, severity: form.severity, rules }
-        : { name: form.name, type: form.type, description: form.description, severity: form.severity, rules, userId: user?.id };
+        : { name: form.name, type: form.type, description: form.description, severity: form.severity, rules };
 
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(body),
       });
 

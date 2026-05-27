@@ -172,6 +172,7 @@ export function useAgentExecution(options: UseAgentExecutionOptions = {}) {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({
           task,
           maxSteps: maxStepsRef.current,

@@ -11,6 +11,7 @@ import { AutomationView } from '@/components/automation/automation-view';
 import { GuardrailsView } from '@/components/guardrails/guardrails-view';
 import { CoordinationView } from '@/components/coordination/coordination-view';
 import { KnowledgeView } from '@/components/knowledge/knowledge-view';
+import { SettingsView } from '@/components/settings/settings-view';
 import { ThemeProvider } from 'next-themes';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -21,10 +22,11 @@ const viewComponents = {
   knowledge: KnowledgeView,
   guardrails: GuardrailsView,
   coordination: CoordinationView,
+  settings: SettingsView,
 };
 
 function AppContent() {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, validateSession } = useAuthStore();
   const { currentView } = useAppStore();
   const hydrateRef = useRef(false);
 
@@ -32,6 +34,8 @@ function AppContent() {
     if (!hydrateRef.current) {
       hydrateRef.current = true;
       useAuthStore.getState().hydrate();
+      // Validate session with server on startup (httpOnly cookie)
+      validateSession();
     }
   }, []);
 

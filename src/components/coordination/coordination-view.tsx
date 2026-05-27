@@ -86,7 +86,7 @@ export function CoordinationView() {
   const loadWorkflows = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch(`/api/workflows?userId=${user.id}`);
+      const res = await fetch('/api/workflows', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setWorkflows(data);
@@ -101,7 +101,7 @@ export function CoordinationView() {
   const loadAgents = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch(`/api/agents?userId=${user.id}`);
+      const res = await fetch('/api/agents', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setAgents(data);
@@ -148,12 +148,12 @@ export function CoordinationView() {
       const res = await fetch('/api/workflows', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           name: form.name,
           description: form.description,
           steps: form.steps,
           trigger: { type: 'manual' },
-          userId: user?.id,
         }),
       });
 
@@ -174,7 +174,7 @@ export function CoordinationView() {
 
   const handleExecute = async (id: string) => {
     try {
-      const res = await fetch(`/api/workflows/${id}/execute`, { method: 'POST' });
+      const res = await fetch(`/api/workflows/${id}/execute`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
         toast({ title: 'Workflow exécuté', description: 'Les tâches ont été créées' });
         loadWorkflows();
@@ -187,7 +187,7 @@ export function CoordinationView() {
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
-      const res = await fetch(`/api/workflows/${deleteId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/workflows/${deleteId}`, { method: 'DELETE', credentials: 'include' });
       if (res.ok) {
         setWorkflows((prev) => prev.filter((w) => w.id !== deleteId));
         toast({ title: 'Workflow supprimé' });
@@ -201,7 +201,7 @@ export function CoordinationView() {
 
   const handleView = async (workflow: WorkflowData) => {
     try {
-      const res = await fetch(`/api/workflows/${workflow.id}`);
+      const res = await fetch(`/api/workflows/${workflow.id}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setViewWorkflow(data);

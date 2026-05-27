@@ -31,6 +31,7 @@ model User {
   executionPolicies   ExecutionPolicy[]
   websocketSessions   WebSocketSession[]
   sessions            Session[]
+  passwordResets      PasswordReset[]
 }
 
 model Agent {
@@ -401,4 +402,26 @@ model Session {
   @@index([token])
   @@index([userId])
   @@map("sessions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Password Reset
+// Stores 6-digit verification codes sent by email for password recovery.
+// Codes expire after 15 minutes. Max 3 attempts to enter the code.
+// ─────────────────────────────────────────────────────────────────────────────
+model PasswordReset {
+  id         String    @id @default(cuid())
+  email      String
+  code       String    // 6-digit verification code
+  attempts   Int       @default(0)
+  used       Boolean   @default(false)
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email, code])
+  @@index([userId])
+  @@map("password_resets")
 }

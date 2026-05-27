@@ -71,7 +71,8 @@ export function useMemoryStats(userId: string, options: UseMemoryStatsOptions = 
     abortControllerRef.current = abortController;
 
     try {
-      const response = await fetch(`/api/memory/stats?userId=${encodeURIComponent(userId)}`, {
+      const response = await fetch('/api/memory/stats', {
+        credentials: 'include',
         signal: abortController.signal,
       });
 
