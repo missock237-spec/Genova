@@ -1,16 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyPassword } from '@/lib/auth';
-import { createSession } from '@/lib/session';
+import { createSession, setSessionCookie } from '@/lib/session';
+import { validateBody, loginSchema } from '@/lib/validation';
+import { checkRateLimit, secureResponse, RATE_LIMITS } from '@/lib/security';
 
+/**
+ * POST /api/auth/login
+ * FIX: Added Zod validation, rate limiting, httpOnly cookie session.
+ * Token is now set as httpOnly cookie — not returned in response body for XSS protection.
+ */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { email, password } = body;
+    // Rate limit login attempts (brute force protection)
+    const rateLimitError = checkRateLimit(request, undefined, RATE_LIMITS.login);
+    if (rateLimitError) return rateLimitError;
 
-    if (!email || !password) {
-      return NextResponse.json({ error: 'Email et mot de passe requis' }, { status: 400 });
-    }
+    const body = await request.json();
+    const validation = validateBody(loginSchema, body);
+    if (!validation.success) return validation.error;
+
+    const { email, password } = validation.data;
 
     const user = await db.user.findUnique({ where: { email } });
     if (!user) {
@@ -34,14 +44,20 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({
+    // Build response WITHOUT the token in the body (security: httpOnly cookie only)
+    const response = NextResponse.json({
       id: user.id,
       email: user.email,
       name: user.name,
       plan: user.plan,
       avatar: user.avatar,
-      token, // Bearer token for API authorization
+      // Token is NOT in the response body — it's set as httpOnly cookie
     });
+
+    // Set the session token as an httpOnly, Secure, SameSite=Strict cookie
+    setSessionCookie(response, token);
+
+    return secureResponse(request, response);
   } catch (error) {
     return NextResponse.json({ error: 'Erreur lors de la connexion' }, { status: 500 });
   }

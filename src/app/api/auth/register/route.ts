@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { hashPassword } from '@/lib/auth';
-import { createSession } from '@/lib/session';
+import { createSession, setSessionCookie } from '@/lib/session';
 import { validateBody, registerSchema } from '@/lib/validation';
 import { checkRateLimit, secureResponse, RATE_LIMITS } from '@/lib/security';
 
 /**
  * POST /api/auth/register
- * FIX: Added Zod validation (email format, password strength), rate limiting, auto-session creation.
+ * FIX: Token now set as httpOnly cookie instead of response body.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -41,9 +41,14 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return secureResponse(request, NextResponse.json({
-      id: user.id, email: user.email, name: user.name, plan: user.plan, avatar: user.avatar, token,
-    }, { status: 201 }));
+    // Build response WITHOUT token in body — set as httpOnly cookie instead
+    const response = NextResponse.json({
+      id: user.id, email: user.email, name: user.name, plan: user.plan, avatar: user.avatar,
+    }, { status: 201 });
+
+    setSessionCookie(response, token);
+
+    return secureResponse(request, response);
   } catch (error) {
     return NextResponse.json({ error: 'Erreur lors de l\'inscription' }, { status: 500 });
   }
