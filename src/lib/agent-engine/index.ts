@@ -186,5 +186,30 @@ export { executeAgentLoop } from '@/lib/agent-engine/execution-loop';
 export { AgentManager } from '@/lib/agent-engine/agent-manager';
 export { decomposeTask } from '@/lib/agent-engine/planner';
 export { ToolRegistry } from '@/lib/tools/registry';
-export type { ExecutionContext, ExecutionStep } from '@/lib/agent-engine/execution-loop';
+export type { ExecutionContext, ExecutionStep, ExecutionPlan, PlanStep, PlanAdaptation } from '@/lib/agent-engine/execution-loop';
 export type { MultiAgentPlan } from '@/lib/agent-engine/planner';
+
+// Re-export StateGraph module (LangGraph-style state machine — alternative execution mode)
+export {
+  StateGraph,
+  GraphExecutor,
+  StatePersistence,
+  createGenovaAgentGraph,
+  executeWithStateGraph,
+  executionContextToAgentState,
+  agentStateToExecutionContext,
+} from '@/lib/agent-engine/state-graph';
+export type {
+  AgentPhase,
+  AgentState,
+  AgentStateMetadata,
+  NodeHandler,
+  ConditionFn,
+  GraphEdge,
+  GraphNode,
+  CompiledGraph,
+  GraphEventType,
+  GraphEvent,
+  GraphEventCallback,
+  PersistedGraphState,
+} from '@/lib/agent-engine/state-graph';

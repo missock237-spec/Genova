@@ -1,21 +1,35 @@
 // RAG Retriever — Advanced context retrieval with hybrid search
 // Combines BM25 + Semantic embeddings + Reranking for production-quality RAG
+// Uses VectorStoreAdapter for persistent vector storage
 
 import { db } from '@/lib/db';
 import {
-  hybridSearch,
-  rerankResults,
   generateEmbedding,
-  storeEmbedding,
-  searchSimilar,
+  rerankResults,
   type BM25Document,
   type HybridSearchResult,
 } from '@/lib/memory/embeddings';
 import type { DocumentChunk } from './document-processor';
+import {
+  getVectorStore,
+  HybridRetriever,
+  type VectorStoreAdapter,
+  type HybridRetrieverResult,
+} from './vector-store';
 
 export class RAGRetriever {
+  private vectorStore: VectorStoreAdapter;
+  private hybridRetriever: HybridRetriever;
+  private isHybridIndexed: boolean = false;
+
+  constructor() {
+    this.vectorStore = getVectorStore();
+    this.hybridRetriever = new HybridRetriever(this.vectorStore);
+  }
+
   /**
    * Store document chunks in the database and index them for search
+   * Uses VectorStoreAdapter for persistent vector storage
    */
   async storeChunks(chunks: DocumentChunk[], userId: string): Promise<void> {
     const fileName = chunks[0]?.metadata.fileName;
@@ -52,14 +66,33 @@ export class RAGRetriever {
         },
       });
 
-      // Generate and store embedding for this chunk
+      // Generate and store embedding using VectorStoreAdapter for persistence
       try {
         const embedding = await generateEmbedding(chunk.content);
-        storeEmbedding(savedChunk.id, chunk.content, embedding, {
-          documentId,
-          fileName,
-          chunkIndex: chunk.metadata.chunkIndex,
-          userId,
+
+        // Use the VectorStoreAdapter for persistent vector storage
+        await this.vectorStore.upsert({
+          id: savedChunk.id,
+          content: chunk.content,
+          vector: embedding,
+          metadata: {
+            documentId,
+            fileName,
+            chunkIndex: chunk.metadata.chunkIndex,
+            userId,
+          },
+        });
+
+        // Also index in the hybrid retriever for BM25
+        this.hybridRetriever.addDocument({
+          id: savedChunk.id,
+          content: chunk.content,
+          metadata: {
+            documentId,
+            fileName,
+            chunkIndex: chunk.metadata.chunkIndex,
+            userId,
+          },
         });
       } catch {
         // If embedding generation fails, chunk is still stored for BM25/TF-IDF search
@@ -71,10 +104,13 @@ export class RAGRetriever {
       where: { id: documentId },
       data: { status: 'ready' },
     });
+
+    this.isHybridIndexed = true;
   }
 
   /**
-   * Retrieve relevant chunks using hybrid search (BM25 + Semantic + Reranking)
+   * Retrieve relevant chunks using hybrid search (VectorStore + BM25 + RRF)
+   * Falls back to the original hybridSearch from embeddings.ts for compatibility
    */
   async retrieve(
     query: string,
@@ -106,6 +142,61 @@ export class RAGRetriever {
 
     if (chunks.length === 0) return [];
 
+    // Try HybridRetriever with RRF first (if indexed)
+    if (this.isHybridIndexed || this.hybridRetriever.getIndexedCount() > 0) {
+      try {
+        const hybridResults = await this.hybridRetriever.retrieve(query, {
+          topK,
+          semanticWeight,
+          bm25Weight,
+        });
+
+        // Filter by userId if needed
+        const filtered = hybridResults.filter(
+          (r) => !r.metadata.userId || r.metadata.userId === userId
+        );
+
+        if (filtered.length > 0) {
+          // Map results to include source info
+          let results = filtered.map((r) => {
+            const chunk = chunks.find((c) => c.id === r.id);
+            return {
+              content: r.content || chunk?.content || '',
+              source: chunk?.document?.fileName || (r.metadata.source as string) || (r.metadata.fileName as string) || 'Document inconnu',
+              score: r.score,
+              semanticScore: r.semanticScore,
+              bm25Score: r.bm25Score,
+            };
+          });
+
+          // Reranking if enabled
+          if (useReranking && results.length > 0) {
+            const rerankInput: HybridSearchResult[] = results.map((r) => ({
+              id: '',
+              content: r.content,
+              score: r.score,
+              semanticScore: r.semanticScore,
+              bm25Score: r.bm25Score,
+              metadata: { source: r.source },
+            }));
+            const reranked = await rerankResults(query, rerankInput);
+            results = reranked.map((r) => ({
+              content: r.content,
+              source: (r.metadata?.source as string) || 'Document inconnu',
+              score: r.score,
+              semanticScore: r.semanticScore,
+              bm25Score: r.bm25Score,
+            }));
+          }
+
+          return results;
+        }
+      } catch (error) {
+        console.warn('[RAGRetriever] Hybrid retrieval failed, falling back to legacy search:', error);
+      }
+    }
+
+    // Fallback: Use the original hybridSearch from embeddings.ts
     // Convert to BM25 documents for hybrid search
     const documents: BM25Document[] = chunks.map(c => ({
       id: c.id,
@@ -117,7 +208,23 @@ export class RAGRetriever {
       },
     }));
 
-    // Run hybrid search
+    // Also ensure the hybrid retriever is indexed for future queries
+    this.hybridRetriever.indexDocuments(
+      chunks.map(c => ({
+        id: c.id,
+        content: c.content,
+        metadata: {
+          source: c.document.fileName,
+          documentId: c.documentId,
+          chunkIndex: c.chunkIndex,
+          userId,
+        },
+      }))
+    );
+    this.isHybridIndexed = true;
+
+    // Use the legacy hybridSearch from embeddings.ts
+    const { hybridSearch } = await import('@/lib/memory/embeddings');
     const results = await hybridSearch(query, documents, {
       topK,
       semanticWeight,
@@ -220,6 +327,15 @@ Instructions:
       select: { id: true },
     });
 
+    // Delete vectors from the vector store adapter
+    for (const chunk of chunks) {
+      try {
+        await this.vectorStore.delete(chunk.id);
+      } catch (error) {
+        console.warn(`[RAGRetriever] Failed to delete vector ${chunk.id}:`, error);
+      }
+    }
+
     // Delete chunks from database
     await db.documentChunk.deleteMany({
       where: { documentId },
@@ -229,8 +345,19 @@ Instructions:
     await db.document.delete({
       where: { id: documentId },
     });
+  }
 
-    // Note: Embeddings in vector store will be cleaned up on restart
-    // or can be cleaned via clearVectorStore()
+  /**
+   * Get the underlying vector store adapter
+   */
+  getVectorStore(): VectorStoreAdapter {
+    return this.vectorStore;
+  }
+
+  /**
+   * Get the hybrid retriever
+   */
+  getHybridRetriever(): HybridRetriever {
+    return this.hybridRetriever;
   }
 }

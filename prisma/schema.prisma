@@ -2,6 +2,22 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Database Provider Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+// For development (SQLite):   provider = "sqlite"
+// For production (PostgreSQL): provider = "postgresql"
+//
+// To switch to PostgreSQL:
+//   1. Change provider below to "postgresql"
+//   2. Update DATABASE_URL in .env.local to a PostgreSQL connection string
+//   3. Run `bun run db:push` to sync the schema
+//
+// When using PostgreSQL, consider enabling the pgvector extension for native
+// vector similarity search on the EmbeddingVector model:
+//   CREATE EXTENSION IF NOT EXISTS vector;
+//   Then change the `vector` field type from String to Unsupported("vector(384)")
+// ─────────────────────────────────────────────────────────────────────────────
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
@@ -17,14 +33,17 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  agents        Agent[]
-  workflows     Workflow[]
-  guardrails    Guardrail[]
-  activities    ActivityLog[]
-  conversations Conversation[]
-  knowledge     Knowledge[]
-  documents     Document[]
-  executions    AgentExecution[]
+  agents           Agent[]
+  workflows        Workflow[]
+  guardrails       Guardrail[]
+  activities       ActivityLog[]
+  conversations    Conversation[]
+  knowledge        Knowledge[]
+  documents        Document[]
+  executions       AgentExecution[]
+  episodicMemories EpisodicMemory[]
+  memoryAccessLogs MemoryAccessLog[]
+  embeddingVectors EmbeddingVector[]
 }
 
 model Agent {
@@ -231,4 +250,80 @@ model AgentExecution {
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
   @@map("agent_executions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Episodic Memory System
+// Stores agent experiences as discrete episodes with contextual metadata,
+// emotional valence, and learned lessons for future retrieval and reasoning.
+// ─────────────────────────────────────────────────────────────────────────────
+model EpisodicMemory {
+  id              String    @id @default(cuid())
+  userId          String
+  agentId         String
+  episode         String    // What happened
+  context         String    // Context of the episode
+  outcome         String    // What was the result
+  emotionalValence Float    @default(0) // -1 (negative) to 1 (positive)
+  learnedLesson   String    // What was learned
+  tags            String    @default("[]") // JSON array
+  retrievalScore  Float     @default(0.5) // How often this is retrieved
+  accessCount     Int       @default(0)
+  importance      Float     @default(0.5)
+  createdAt       DateTime  @default(now())
+  lastAccessedAt  DateTime  @default(now())
+  expiresAt       DateTime?
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, agentId])
+  @@index([userId, createdAt])
+  @@map("episodic_memories")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Memory Access Log
+// Tracks which memories (Knowledge or EpisodicMemory) are retrieved and used,
+// enabling retrieval score decay/growth, relevance feedback, and analytics.
+// ─────────────────────────────────────────────────────────────────────────────
+model MemoryAccessLog {
+  id          String   @id @default(cuid())
+  memoryId    String   // Reference to Knowledge or EpisodicMemory
+  memoryType  String   // "knowledge" or "episodic"
+  userId      String
+  query       String   // The search query that triggered this access
+  score       Float    // Relevance score at retrieval time
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([memoryId])
+  @@index([userId, createdAt])
+  @@map("memory_access_logs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Embedding Vector Store
+// Persists vector embeddings for RAG (Retrieval-Augmented Generation).
+//
+// With SQLite: vectors are stored as JSON strings (arrays of floats).
+// With PostgreSQL + pgvector: change the `vector` field to:
+//   vector  Unsupported("vector(384)")
+// This enables native cosine / L2 similarity search directly in the database.
+// ─────────────────────────────────────────────────────────────────────────────
+model EmbeddingVector {
+  id          String   @id @default(cuid())
+  entityId    String   // ID of the entity this embedding represents (chunk, knowledge, etc.)
+  entityType  String   // "document_chunk" | "knowledge" | "episodic_memory"
+  vector      String   // JSON array of floats (or use pgvector extension in PostgreSQL)
+  dimension   Int      @default(384)
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([entityId, entityType])
+  @@index([entityType, userId])
+  @@map("embedding_vectors")
 }

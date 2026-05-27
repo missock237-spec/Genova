@@ -1,8 +1,15 @@
 // Agent Execution Loop — True Autonomous ReAct Loop
 // Agent follows: Think → Act → Observe → Reflect → Retry (if needed)
 // With recursive reflection, self-correction, adaptive planning, and persistent state
+//
+// Integration with StateGraph:
+// This execution loop is the original agent execution mode.
+// The LangGraph-style StateGraph (state-graph.ts) provides an alternative execution mode
+// with explicit state transitions, conditional edges, and cycle detection.
+// Both modes share the same ExecutionContext, ExecutionStep types, and ExecutionPlan.
+// Use executeAgentLoop() for the classic loop, or executeWithStateGraph() for the graph-based mode.
 
-import { chatCompletion, streamChat } from '@/lib/ai-router';
+import { chatCompletion } from '@/lib/ai-router';
 import { ToolRegistry } from '@/lib/tools/registry';
 import { ShortTermMemory } from '@/lib/memory/short-term';
 import { LongTermMemory } from '@/lib/memory/long-term';

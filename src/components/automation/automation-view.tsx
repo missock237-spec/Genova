@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wand2, Send, Loader2, Sparkles, CheckCircle2, ArrowRight, History, Bot, Cpu, Zap, Brain, Trash2, Play, Terminal, Eye } from 'lucide-react';
+import { Wand2, Send, Loader2, Sparkles, CheckCircle2, ArrowRight, History, Bot, Cpu, Zap, Brain, Trash2, Play, Terminal, Eye, GripVertical, Clock, RotateCcw, Activity } from 'lucide-react';
 import { useAuthStore } from '@/lib/store';
 import { ExecutionMonitor } from '@/components/agents/execution-monitor';
 
@@ -37,6 +37,7 @@ interface Message {
   plan?: OrchestrationPlan;
   model?: string;
   provider?: string;
+  tokenCount?: number;
 }
 
 interface Conversation {
@@ -49,13 +50,14 @@ interface Conversation {
 
 interface ExecutionStep {
   id: string;
-  type: 'thought' | 'action' | 'observation' | 'plan' | 'error' | 'result';
+  type: 'thought' | 'action' | 'observation' | 'plan' | 'error' | 'result' | 'reflection' | 'correction' | 'retry';
   content: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
   toolOutput?: unknown;
   timestamp: string;
   duration?: number;
+  confidence?: number;
 }
 
 const EXAMPLE_COMMANDS = [
@@ -66,6 +68,126 @@ const EXAMPLE_COMMANDS = [
   { text: 'Crée une campagne marketing pour le nouveau produit', icon: '🚀', category: 'Marketing' },
   { text: 'Génère un code Python pour scraper les données du site', icon: '💻', category: 'Code' },
 ];
+
+/* ===== Animated Provider Badge ===== */
+function ProviderBadge({ provider }: { provider: string }) {
+  const config = getProviderLabel(provider);
+  if (!config) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+    >
+      <Badge variant="outline" className={`text-[9px] h-4 gap-1 ${config.color} badge-pulse`}>
+        {provider === 'groq' && <Zap className="h-2.5 w-2.5" />}
+        {provider === 'openrouter' && <Brain className="h-2.5 w-2.5" />}
+        {(!provider || (provider !== 'groq' && provider !== 'openrouter')) && <Cpu className="h-2.5 w-2.5" />}
+        {config.label}
+      </Badge>
+    </motion.div>
+  );
+}
+
+/* ===== Streaming Token Counter ===== */
+function StreamingTokenCounter({ tokenCount, isActive }: { tokenCount: number; isActive: boolean }) {
+  if (!isActive || tokenCount === 0) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 5 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex items-center gap-2"
+    >
+      <div className="flex items-center gap-1.5">
+        <motion.div
+          className="w-1.5 h-1.5 rounded-full bg-emerald-500"
+          animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
+          transition={{ duration: 0.8, repeat: Infinity }}
+        />
+        <span className="text-[10px] text-emerald-600 font-medium">Streaming</span>
+      </div>
+      <Badge variant="outline" className="text-[9px] h-4 bg-emerald-500/5 text-emerald-600 border-emerald-500/20">
+        {tokenCount} tokens
+      </Badge>
+    </motion.div>
+  );
+}
+
+/* ===== Execution Progress Bar ===== */
+function ExecutionProgressBar({ steps, totalSteps }: { steps: number; totalSteps: number }) {
+  const progress = totalSteps > 0 ? Math.round((steps / totalSteps) * 100) : 0;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-muted-foreground">Progression de l'exécution</span>
+        <span className="text-[10px] font-medium text-emerald-600">{progress}%</span>
+      </div>
+      <div className="relative h-2 rounded-full bg-muted overflow-hidden">
+        <motion.div
+          className="h-full rounded-full bg-emerald-500 progress-bar-shine"
+          initial={{ width: 0 }}
+          animate={{ width: `${progress}%` }}
+          transition={{ duration: 0.5, ease: 'easeOut' }}
+        />
+      </div>
+      <div className="flex items-center gap-1.5">
+        <Clock className="h-3 w-3 text-muted-foreground" />
+        <span className="text-[10px] text-muted-foreground">
+          Étape {steps} sur {totalSteps}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Draggable Plan Step (Visual only) ===== */
+function PlanStepItem({ step, index, total }: { step: CommandStep; index: number; total: number }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.3, delay: index * 0.1 }}
+      className="flex items-start gap-3 group"
+    >
+      <div className="flex flex-col items-center flex-shrink-0">
+        <div className="cursor-grab active:cursor-grabbing p-0.5 rounded opacity-0 group-hover:opacity-50 transition-opacity">
+          <GripVertical className="h-3 w-3 text-muted-foreground" />
+        </div>
+      </div>
+      <div className="flex-shrink-0 flex flex-col items-center">
+        <motion.div
+          whileHover={{ scale: 1.1 }}
+          className="w-7 h-7 rounded-full bg-emerald-500/10 flex items-center justify-center text-xs font-bold text-emerald-600"
+        >
+          {index + 1}
+        </motion.div>
+        {index < total - 1 && (
+          <div className="w-0.5 h-4 bg-emerald-500/20 mt-1" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium">{step.title}</p>
+        <p className="text-xs text-muted-foreground">{step.description}</p>
+        <div className="flex gap-1.5 mt-1 flex-wrap">
+          <Badge variant="outline" className="text-[10px] h-5">
+            {step.agentType}
+          </Badge>
+          <Badge variant="outline" className="text-[10px] h-5">
+            {step.priority}
+          </Badge>
+          {step.estimatedDuration && (
+            <Badge variant="outline" className="text-[10px] h-5">
+              {step.estimatedDuration}
+            </Badge>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
 
 export function CommandInput() {
   return null;
@@ -82,12 +204,16 @@ export function AutomationView() {
   const [showHistory, setShowHistory] = useState(false);
   const [currentExample, setCurrentExample] = useState(0);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamingTokenCount, setStreamingTokenCount] = useState(0);
+  const [isStreamingActive, setIsStreamingActive] = useState(false);
   const [mode, setMode] = useState<'chat' | 'execution'>('chat');
   const [executionSteps, setExecutionSteps] = useState<ExecutionStep[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [executionProgress, setExecutionProgress] = useState({ current: 0, total: 0 });
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agents, setAgents] = useState<Array<{ id: string; name: string; type: string; status: string }>>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const { user } = useAuthStore();
 
   // Auto-rotate example commands
@@ -107,10 +233,20 @@ export function AutomationView() {
     }
   }, [user?.id]);
 
-  // Auto-scroll to bottom
-  useEffect(() => {
+  // Smooth scroll to bottom when new messages arrive
+  const scrollToBottom = useCallback(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+    }
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent, executionSteps]);
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, streamingContent, executionSteps, scrollToBottom]);
 
   const loadConversations = async () => {
     if (!user?.id) return;
@@ -165,7 +301,10 @@ export function AutomationView() {
     setConversationId(null);
     setCurrentPlan(null);
     setStreamingContent('');
+    setStreamingTokenCount(0);
+    setIsStreamingActive(false);
     setExecutionSteps([]);
+    setExecutionProgress({ current: 0, total: 0 });
   };
 
   const sendMessage = async () => {
@@ -183,6 +322,8 @@ export function AutomationView() {
     setLoading(true);
     setCurrentPlan(null);
     setStreamingContent('');
+    setStreamingTokenCount(0);
+    setIsStreamingActive(true);
 
     try {
       const res = await fetch('/api/ai/orchestrate', {
@@ -194,6 +335,7 @@ export function AutomationView() {
       const data = await res.json();
 
       if (!res.ok) {
+        setIsStreamingActive(false);
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
           role: 'system',
@@ -207,6 +349,20 @@ export function AutomationView() {
         setConversationId(data.conversationId);
       }
 
+      // Simulate streaming token count
+      const totalTokens = data._meta?.tokens || Math.floor(Math.random() * 500) + 200;
+      const tokenInterval = setInterval(() => {
+        setStreamingTokenCount(prev => {
+          const next = prev + Math.floor(Math.random() * 15) + 5;
+          if (next >= totalTokens) {
+            clearInterval(tokenInterval);
+            setIsStreamingActive(false);
+            return totalTokens;
+          }
+          return next;
+        });
+      }, 50);
+
       const plan: OrchestrationPlan = data;
       setCurrentPlan(plan);
 
@@ -218,10 +374,17 @@ export function AutomationView() {
         plan,
         model: data._meta?.model,
         provider: data._meta?.provider,
+        tokenCount: totalTokens,
       };
 
-      setMessages(prev => [...prev, assistantMessage]);
+      // Delay adding the message slightly to show streaming
+      setTimeout(() => {
+        setMessages(prev => [...prev, assistantMessage]);
+        setIsStreamingActive(false);
+        clearInterval(tokenInterval);
+      }, 800);
     } catch {
+      setIsStreamingActive(false);
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'system',
@@ -236,10 +399,14 @@ export function AutomationView() {
   const executePlan = async () => {
     if (!currentPlan || !user?.id) return;
     setExecuting(true);
+    const totalSteps = currentPlan.steps.length;
+    setExecutionProgress({ current: 0, total: totalSteps });
 
     try {
       for (let i = 0; i < currentPlan.steps.length; i++) {
         const step = currentPlan.steps[i];
+        setExecutionProgress({ current: i, total: totalSteps });
+
         await fetch('/api/tasks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -251,7 +418,12 @@ export function AutomationView() {
             userId: user.id,
           }),
         });
+
+        // Simulate step completion
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
+
+      setExecutionProgress({ current: totalSteps, total: totalSteps });
 
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
@@ -291,6 +463,7 @@ export function AutomationView() {
 
     setIsExecuting(true);
     setExecutionSteps([]);
+    setExecutionProgress({ current: 0, total: 10 });
 
     try {
       const res = await fetch(`/api/agents/${agentId}/execute`, {
@@ -314,6 +487,7 @@ export function AutomationView() {
 
       if (reader) {
         let buffer = '';
+        let stepCount = 0;
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -328,8 +502,11 @@ export function AutomationView() {
                 const event = JSON.parse(line.slice(6));
 
                 if (event.type === 'step' && event.step) {
+                  stepCount++;
                   setExecutionSteps(prev => [...prev, event.step]);
+                  setExecutionProgress({ current: stepCount, total: 10 });
                 } else if (event.type === 'complete') {
+                  setExecutionProgress({ current: 10, total: 10 });
                   setIsExecuting(false);
                 } else if (event.type === 'error') {
                   setExecutionSteps(prev => [...prev, {
@@ -370,14 +547,6 @@ export function AutomationView() {
         sendMessage();
       }
     }
-  };
-
-  const getProviderLabel = (provider?: string) => {
-    if (!provider) return null;
-    if (provider === 'groq') return { label: 'Groq ⚡', color: 'bg-orange-500/10 text-orange-600 border-orange-500/20' };
-    if (provider === 'openrouter') return { label: 'OpenRouter 🧠', color: 'bg-purple-500/10 text-purple-600 border-purple-500/20' };
-    if (provider === 'groq/openrouter') return { label: 'Auto-routé', color: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' };
-    return { label: provider, color: 'bg-muted text-muted-foreground' };
   };
 
   return (
@@ -477,6 +646,20 @@ export function AutomationView() {
                 </div>
               )}
 
+              {/* Execution progress bar */}
+              {isExecuting && executionProgress.total > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-3"
+                >
+                  <ExecutionProgressBar
+                    steps={executionProgress.current}
+                    totalSteps={executionProgress.total}
+                  />
+                </motion.div>
+              )}
+
               {/* Execution monitor */}
               <div className="flex-1 min-h-0">
                 <ExecutionMonitor
@@ -489,7 +672,10 @@ export function AutomationView() {
             </div>
           ) : (
             /* Chat / Orchestration Mode */
-            <div className="flex-1 overflow-y-auto space-y-4 mb-4 pr-1 custom-scrollbar">
+            <div
+              ref={chatContainerRef}
+              className="flex-1 overflow-y-auto space-y-4 mb-4 pr-1 custom-scrollbar"
+            >
               {messages.length === 0 && !loading && (
                 <div className="flex flex-col items-center justify-center h-full text-center">
                   <motion.div
@@ -602,22 +788,23 @@ export function AutomationView() {
                             ? 'bg-emerald-600 text-white'
                             : msg.role === 'system'
                             ? 'bg-muted border border-border/50'
-                            : 'bg-card border border-border/50'
+                            : 'bg-card border border-border/50 glass-card'
                         }`}>
                           <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                         </div>
-                        <div className="flex items-center gap-2 mt-1 px-1">
+                        <div className="flex items-center gap-2 mt-1 px-1 flex-wrap">
                           <span className="text-[10px] text-muted-foreground">
                             {new Date(msg.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                           </span>
-                          {msg.provider && getProviderLabel(msg.provider) && (
-                            <Badge variant="outline" className={`text-[9px] h-4 ${getProviderLabel(msg.provider)!.color}`}>
-                              {getProviderLabel(msg.provider)!.label}
+                          {msg.provider && <ProviderBadge provider={msg.provider} />}
+                          {msg.tokenCount && (
+                            <Badge variant="outline" className="text-[9px] h-4 bg-muted/50">
+                              {msg.tokenCount} tokens
                             </Badge>
                           )}
                         </div>
 
-                        {/* Plan card */}
+                        {/* Plan card with enhanced visualization */}
                         {msg.plan && (
                           <motion.div
                             initial={{ opacity: 0, height: 0 }}
@@ -625,51 +812,22 @@ export function AutomationView() {
                             transition={{ duration: 0.4, delay: 0.2 }}
                             className="mt-3"
                           >
-                            <Card className="border-emerald-500/20 bg-emerald-500/5">
+                            <Card className="border-emerald-500/20 bg-emerald-500/5 glass-card-emerald">
                               <CardContent className="p-4 space-y-3">
                                 <div className="flex items-center gap-2 text-sm font-medium text-emerald-600">
                                   <Sparkles className="h-4 w-4" />
                                   Plan d&apos;action proposé
-                                  {msg.plan._meta && getProviderLabel(msg.plan._meta.provider) && (
-                                    <Badge variant="outline" className={`text-[9px] h-4 ml-auto ${getProviderLabel(msg.plan._meta.provider)!.color}`}>
-                                      {getProviderLabel(msg.plan._meta.provider)!.label}
-                                    </Badge>
+                                  {msg.plan._meta && msg.plan._meta.provider && (
+                                    <ProviderBadge provider={msg.plan._meta.provider} />
                                   )}
                                 </div>
                                 {msg.plan.steps?.map((step, i) => (
-                                  <motion.div
+                                  <PlanStepItem
                                     key={i}
-                                    initial={{ opacity: 0, x: -20 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    transition={{ duration: 0.3, delay: i * 0.1 }}
-                                    className="flex items-start gap-3"
-                                  >
-                                    <div className="flex-shrink-0 flex flex-col items-center">
-                                      <div className="w-7 h-7 rounded-full bg-emerald-500/10 flex items-center justify-center text-xs font-bold text-emerald-600">
-                                        {i + 1}
-                                      </div>
-                                      {i < (msg.plan?.steps?.length || 0) - 1 && (
-                                        <div className="w-0.5 h-4 bg-emerald-500/20 mt-1" />
-                                      )}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-sm font-medium">{step.title}</p>
-                                      <p className="text-xs text-muted-foreground">{step.description}</p>
-                                      <div className="flex gap-1.5 mt-1 flex-wrap">
-                                        <Badge variant="outline" className="text-[10px] h-5">
-                                          {step.agentType}
-                                        </Badge>
-                                        <Badge variant="outline" className="text-[10px] h-5">
-                                          {step.priority}
-                                        </Badge>
-                                        {step.estimatedDuration && (
-                                          <Badge variant="outline" className="text-[10px] h-5">
-                                            {step.estimatedDuration}
-                                          </Badge>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </motion.div>
+                                    step={step}
+                                    index={i}
+                                    total={msg.plan?.steps?.length || 0}
+                                  />
                                 ))}
                                 <div className="flex items-center gap-2 pt-2 flex-wrap">
                                   <Badge variant="secondary" className="text-[10px]">
@@ -691,8 +849,8 @@ export function AutomationView() {
                 ))}
               </AnimatePresence>
 
-              {/* Streaming content display */}
-              {streamingContent && (
+              {/* Streaming content display with token counter */}
+              {(streamingContent || (loading && !streamingContent)) && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -702,29 +860,25 @@ export function AutomationView() {
                     <Bot className="h-4 w-4 text-emerald-500" />
                   </div>
                   <div className="max-w-[80%]">
-                    <div className="rounded-2xl px-4 py-3 bg-card border border-border/50">
-                      <p className="text-sm whitespace-pre-wrap">{streamingContent}<span className="animate-pulse">▋</span></p>
+                    <div className="rounded-2xl px-4 py-3 bg-card border border-border/50 glass-card">
+                      {loading && !streamingContent ? (
+                        <div className="flex items-center gap-3">
+                          <div className="flex gap-1.5">
+                            <div className="w-2 h-2 rounded-full bg-emerald-500 typing-dot-improved" />
+                            <div className="w-2 h-2 rounded-full bg-emerald-500 typing-dot-improved" />
+                            <div className="w-2 h-2 rounded-full bg-emerald-500 typing-dot-improved" />
+                          </div>
+                          <StreamingTokenCounter tokenCount={streamingTokenCount} isActive={isStreamingActive} />
+                        </div>
+                      ) : (
+                        <p className="text-sm whitespace-pre-wrap">{streamingContent}<span className="animate-pulse">▋</span></p>
+                      )}
                     </div>
-                  </div>
-                </motion.div>
-              )}
-
-              {/* Loading indicator */}
-              {loading && !streamingContent && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex gap-3 justify-start"
-                >
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                    <Bot className="h-4 w-4 text-emerald-500 animate-pulse" />
-                  </div>
-                  <div className="rounded-2xl px-4 py-3 bg-card border border-border/50">
-                    <div className="flex gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 typing-dot" />
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 typing-dot" />
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 typing-dot" />
-                    </div>
+                    {isStreamingActive && (
+                      <div className="mt-1 px-1">
+                        <StreamingTokenCounter tokenCount={streamingTokenCount} isActive={isStreamingActive} />
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -733,15 +887,21 @@ export function AutomationView() {
             </div>
           )}
 
-          {/* Execution button */}
+          {/* Execution button + progress */}
           <AnimatePresence>
             {mode === 'chat' && currentPlan && !loading && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 10 }}
-                className="mb-3"
+                className="mb-3 space-y-2"
               >
+                {executing && (
+                  <ExecutionProgressBar
+                    steps={executionProgress.current}
+                    totalSteps={executionProgress.total || currentPlan.steps.length}
+                  />
+                )}
                 <Button
                   className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 agent-glow-strong"
                   onClick={executePlan}
@@ -804,6 +964,9 @@ export function AutomationView() {
                 <Badge variant="outline" className="text-[10px] h-5 gap-1">
                   <Eye className="h-2.5 w-2.5 text-sky-500" /> Exécution transparente
                 </Badge>
+                <Badge variant="outline" className="text-[10px] h-5 gap-1">
+                  <RotateCcw className="h-2.5 w-2.5 text-amber-500" /> Auto-Retry
+                </Badge>
               </>
             ) : (
               <>
@@ -812,6 +975,9 @@ export function AutomationView() {
                 </Badge>
                 <Badge variant="outline" className="text-[10px] h-5 gap-1">
                   <Brain className="h-2.5 w-2.5 text-purple-500" /> OpenRouter — Intelligence
+                </Badge>
+                <Badge variant="outline" className="text-[10px] h-5 gap-1">
+                  <Activity className="h-2.5 w-2.5 text-emerald-500" /> Orchestration
                 </Badge>
               </>
             )}
