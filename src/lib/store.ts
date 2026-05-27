@@ -28,7 +28,7 @@ interface AppState {
 function getStoredUser(): User | null {
   if (typeof window === 'undefined') return null;
   try {
-    const saved = localStorage.getItem('agentos_user');
+    const saved = localStorage.getItem('genova_user');
     return saved ? JSON.parse(saved) : null;
   } catch {
     return null;
@@ -40,13 +40,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   login: (user) => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('agentos_user', JSON.stringify(user));
+      localStorage.setItem('genova_user', JSON.stringify(user));
     }
     set({ user, isAuthenticated: true });
   },
   logout: () => {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('agentos_user');
+      localStorage.removeItem('genova_user');
     }
     set({ user: null, isAuthenticated: false });
   },

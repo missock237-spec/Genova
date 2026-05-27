@@ -123,7 +123,7 @@
   }
 }
 
-/* Genova Custom Styles */
+/* ===== Genova Custom Styles ===== */
 
 /* Glow effects for active agents */
 .agent-glow {
@@ -155,9 +155,9 @@
   background-size: 40px 40px;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar — smooth & refined */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
@@ -165,12 +165,18 @@
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: oklch(0.696 0.17 162.48 / 0.2);
-  border-radius: 3px;
+  background: oklch(0.696 0.17 162.48 / 0.15);
+  border-radius: 10px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.696 0.17 162.48 / 0.4);
+  background: oklch(0.696 0.17 162.48 / 0.35);
+}
+
+/* Global smooth scrollbar for Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.696 0.17 162.48 / 0.15) transparent;
 }
 
 /* Pulse animation for running tasks */
@@ -181,6 +187,35 @@
 
 .animate-pulse-emerald {
   animation: pulse-emerald 2s ease-in-out infinite;
+}
+
+/* Pulse glow — emerald glow pulse for active agents */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px oklch(0.696 0.17 162.48 / 0.2), 0 0 15px oklch(0.696 0.17 162.48 / 0.1);
+  }
+  50% {
+    box-shadow: 0 0 15px oklch(0.696 0.17 162.48 / 0.4), 0 0 30px oklch(0.696 0.17 162.48 / 0.2), 0 0 45px oklch(0.696 0.17 162.48 / 0.1);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Flow line — animated dashed line for data flow visualization */
+@keyframes flow-line {
+  0% {
+    stroke-dashoffset: 20;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.flow-line-animated {
+  stroke-dasharray: 6 4;
+  animation: flow-line 0.8s linear infinite;
 }
 
 /* Typing animation */
@@ -200,6 +235,30 @@
 
 .typing-dot:nth-child(3) {
   animation-delay: 0.4s;
+}
+
+/* Improved typing dot — bouncing style */
+@keyframes typing-dot-improved {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+.typing-dot-improved {
+  animation: typing-dot-improved 1.4s ease-in-out infinite;
+}
+
+.typing-dot-improved:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dot-improved:nth-child(3) {
+  animation-delay: 0.3s;
 }
 
 /* Shimmer effect */
@@ -271,4 +330,190 @@
   border-radius: 50%;
   pointer-events: none;
   animation: float 15s linear infinite;
+}
+
+/* ===== State Graph Visualization ===== */
+
+/* Active state node — highlighted in the graph */
+.state-node-active {
+  box-shadow: 0 0 12px oklch(0.696 0.17 162.48 / 0.5), 0 0 24px oklch(0.696 0.17 162.48 / 0.2);
+  border-color: oklch(0.696 0.17 162.48) !important;
+  background: oklch(0.696 0.17 162.48 / 0.15) !important;
+}
+
+.state-node-active .state-node-icon {
+  color: oklch(0.696 0.17 162.48);
+}
+
+/* State transition arrow — animated between nodes */
+.state-transition-arrow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.state-transition-arrow::before {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 2px;
+  background: oklch(0.696 0.17 162.48 / 0.2);
+}
+
+.state-transition-arrow.state-transition-active::before {
+  background: oklch(0.696 0.17 162.48 / 0.6);
+  animation: flow-line 0.8s linear infinite;
+  background: repeating-linear-gradient(
+    90deg,
+    oklch(0.696 0.17 162.48 / 0.6) 0px,
+    oklch(0.696 0.17 162.48 / 0.6) 6px,
+    transparent 6px,
+    transparent 10px
+  );
+  background-size: 10px 100%;
+  animation: flow-line 0.5s linear infinite;
+}
+
+/* Memory wave — wave animation for memory visualization */
+@keyframes memory-wave {
+  0% {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+.memory-wave {
+  animation: memory-wave 1s ease-out forwards;
+  transform-origin: left;
+}
+
+/* ===== Glass Morphism ===== */
+
+.glass-card {
+  background: oklch(1 0 0 / 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid oklch(1 0 0 / 0.08);
+}
+
+.dark .glass-card {
+  background: oklch(1 0 0 / 0.03);
+  border: 1px solid oklch(1 0 0 / 0.06);
+}
+
+.glass-card-emerald {
+  background: oklch(0.696 0.17 162.48 / 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid oklch(0.696 0.17 162.48 / 0.15);
+}
+
+.dark .glass-card-emerald {
+  background: oklch(0.696 0.17 162.48 / 0.03);
+  border: 1px solid oklch(0.696 0.17 162.48 / 0.1);
+}
+
+/* ===== Toast Notification Styling ===== */
+
+[data-sonner-toaster] [data-styled="true"] {
+  border-radius: 12px !important;
+  font-size: 13px !important;
+}
+
+[data-sonner-toaster] [data-type="success"] {
+  border-color: oklch(0.696 0.17 162.48 / 0.3) !important;
+  background: oklch(0.696 0.17 162.48 / 0.05) !important;
+}
+
+/* ===== Node pulsing in architecture diagram ===== */
+
+@keyframes node-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 oklch(0.696 0.17 162.48 / 0.3);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 6px oklch(0.696 0.17 162.48 / 0);
+  }
+}
+
+.node-pulse {
+  animation: node-pulse 2s ease-in-out infinite;
+}
+
+/* ===== Activity pulse animation for live feed ===== */
+
+@keyframes activity-pulse {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.activity-pulse {
+  animation: activity-pulse 0.5s ease-out forwards;
+}
+
+/* ===== Progress bar animated shine ===== */
+
+@keyframes progress-shine {
+  0% {
+    left: -40%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+.progress-bar-shine::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -40%;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    oklch(1 0 0 / 0.3),
+    transparent
+  );
+  animation: progress-shine 1.5s ease-in-out infinite;
+}
+
+/* ===== Sidebar hover glow ===== */
+
+.sidebar-item-glow:hover {
+  box-shadow: 0 0 12px oklch(0.696 0.17 162.48 / 0.15), inset 0 0 0 1px oklch(0.696 0.17 162.48 / 0.1);
+}
+
+/* ===== Provider badge pulse ===== */
+
+@keyframes badge-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.badge-pulse {
+  animation: badge-pulse 1.5s ease-in-out infinite;
 }
