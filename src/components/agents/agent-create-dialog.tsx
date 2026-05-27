@@ -127,7 +127,7 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
     setForm((prev) => ({
       ...prev,
       selectedTools: prev.selectedTools.includes(toolId)
-        ? prev.selectedTools.filter((t) => t !== toolId)
+        ? prev.selectedTools.filter((t: string) => t !== toolId)
         : [...prev.selectedTools, toolId],
     }));
   };
@@ -151,11 +151,12 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
       const method = editAgent ? 'PUT' : 'POST';
       const body = editAgent
         ? { name: form.name, type: form.type, description: form.description, config }
-        : { name: form.name, type: form.type, description: form.description, config, userId: user?.id };
+        : { name: form.name, type: form.type, description: form.description, config };
 
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(body),
       });
 
@@ -297,7 +298,7 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
 
             {form.selectedTools.length > 0 && (
               <div className="flex flex-wrap gap-1 pt-1">
-                {form.selectedTools.map((toolId) => {
+                {form.selectedTools.map((toolId: string) => {
                   const tool = AGENT_TOOLS.find(t => t.id === toolId);
                   return tool ? (
                     <Badge key={toolId} variant="secondary" className="text-[10px] h-5 gap-1">

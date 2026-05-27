@@ -311,10 +311,14 @@ export function DashboardView() {
   const loadStats = async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch(`/api/dashboard/stats?userId=${user.id}`);
+      // Credentials included automatically for same-origin — httpOnly cookie sent
+      const res = await fetch('/api/dashboard/stats', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setStats(data);
+      } else if (res.status === 401) {
+        // Session expired — redirect to login
+        console.warn('Session expired');
       }
     } catch (error) {
       console.error('Failed to load stats:', error);
@@ -347,14 +351,14 @@ export function DashboardView() {
           title="Agents actifs"
           value={stats?.activeAgents || 0}
           icon={Bot}
-          description={`${stats?.totalAgents || 0} agents au total`}
-          trend={stats?.activeAgents ? `${Math.round(((stats.activeAgents) / Math.max(stats.totalAgents, 1)) * 100)}% actifs` : undefined}
+          description={stats?.activeAgents ? 'En fonctionnement' : 'Aucun agent actif'}
+          trend={stats?.activeAgents ? `${Math.round(((stats.activeAgents) / Math.max(stats.totalAgents, 1)) * 100)}% du total` : undefined}
         />
         <StatCard
           title="Tâches en cours"
           value={stats?.runningTasks || 0}
           icon={Play}
-          description={`${stats?.totalTasks || 0} tâches au total`}
+          description={stats?.runningTasks ? 'En exécution' : 'Aucune tâche en cours'}
           className={stats?.runningTasks ? 'border-primary/30' : ''}
         />
         <StatCard
@@ -366,7 +370,7 @@ export function DashboardView() {
           title="Workflows actifs"
           value={stats?.activeWorkflows || 0}
           icon={Workflow}
-          description={`${stats?.totalWorkflows || 0} workflows au total`}
+          description={stats?.activeWorkflows ? 'En cours d’exécution' : 'Aucun workflow actif'}
         />
       </div>
 

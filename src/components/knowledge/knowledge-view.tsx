@@ -71,7 +71,7 @@ export function KnowledgeView() {
   const loadDocuments = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch(`/api/rag/documents?userId=${user.id}`);
+      const res = await fetch('/api/rag/documents', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setDocuments(data.documents || []);
@@ -84,7 +84,7 @@ export function KnowledgeView() {
   const loadKnowledge = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch(`/api/knowledge?userId=${user.id}`);
+      const res = await fetch('/api/knowledge', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setKnowledge(data.entries || []);
@@ -108,10 +108,10 @@ export function KnowledgeView() {
       for (const file of Array.from(files)) {
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('userId', user.id);
 
         const res = await fetch('/api/rag/upload', {
           method: 'POST',
+          credentials: 'include',
           body: formData,
         });
 
@@ -138,7 +138,8 @@ export function KnowledgeView() {
       const res = await fetch('/api/rag/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery, userId: user.id, topK: 5 }),
+        credentials: 'include',
+        body: JSON.stringify({ query: searchQuery, topK: 5 }),
       });
 
       if (res.ok) {
@@ -174,13 +175,13 @@ export function KnowledgeView() {
       const res = await fetch('/api/knowledge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           content: newEntry.content,
           category: newEntry.category,
           tags: newEntry.tags.split(',').map(t => t.trim()).filter(Boolean),
           source: 'manual',
           relevance: 0.7,
-          userId: user.id,
         }),
       });
 
@@ -196,7 +197,7 @@ export function KnowledgeView() {
 
   const handleDeleteKnowledge = async (id: string) => {
     try {
-      await fetch(`/api/knowledge?id=${id}`, { method: 'DELETE' });
+      await fetch(`/api/knowledge?id=${id}`, { method: 'DELETE', credentials: 'include' });
       await loadKnowledge();
     } catch {
       // ignore

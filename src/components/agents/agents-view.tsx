@@ -68,7 +68,7 @@ export function AgentsView() {
   const loadAgents = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch(`/api/agents?userId=${user.id}`);
+      const res = await fetch('/api/agents', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setAgents(data);
@@ -90,7 +90,7 @@ export function AgentsView() {
 
   const handleToggle = async (id: string) => {
     try {
-      const res = await fetch(`/api/agents/${id}/toggle`, { method: 'POST' });
+      const res = await fetch(`/api/agents/${id}/toggle`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
         const updated = await res.json();
         setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, status: updated.status } : a)));
@@ -107,7 +107,7 @@ export function AgentsView() {
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
-      const res = await fetch(`/api/agents/${deleteId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/agents/${deleteId}`, { method: 'DELETE', credentials: 'include' });
       if (res.ok) {
         setAgents((prev) => prev.filter((a) => a.id !== deleteId));
         toast({ title: 'Agent supprimé', description: 'L\'agent a été supprimé' });
@@ -151,6 +151,7 @@ export function AgentsView() {
     try {
       const res = await fetch(`/api/agents/${chatAgent.id}/chat`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: chatInput,

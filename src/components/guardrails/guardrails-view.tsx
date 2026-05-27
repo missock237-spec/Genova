@@ -41,7 +41,7 @@ export function GuardrailsView() {
   const loadGuardrails = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch(`/api/guardrails?userId=${user.id}`);
+      const res = await fetch('/api/guardrails', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setGuardrails(data);
@@ -59,7 +59,7 @@ export function GuardrailsView() {
 
   const handleToggle = async (id: string) => {
     try {
-      const res = await fetch(`/api/guardrails/${id}/toggle`, { method: 'POST' });
+      const res = await fetch(`/api/guardrails/${id}/toggle`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
         const updated = await res.json();
         setGuardrails((prev) => prev.map((g) => (g.id === id ? { ...g, isActive: updated.isActive } : g)));
@@ -75,7 +75,7 @@ export function GuardrailsView() {
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
-      const res = await fetch(`/api/guardrails/${deleteId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/guardrails/${deleteId}`, { method: 'DELETE', credentials: 'include' });
       if (res.ok) {
         setGuardrails((prev) => prev.filter((g) => g.id !== deleteId));
         toast({ title: 'Garde-fou supprimé' });
