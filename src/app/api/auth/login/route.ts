@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyPassword } from '@/lib/auth';
+import { createSession } from '@/lib/session';
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,6 +22,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Identifiants incorrects' }, { status: 401 });
     }
 
+    // Create a session and get the token
+    const token = await createSession(user.id);
+
     await db.activityLog.create({
       data: {
         action: 'Connexion',
@@ -36,6 +40,7 @@ export async function POST(request: NextRequest) {
       name: user.name,
       plan: user.plan,
       avatar: user.avatar,
+      token, // Bearer token for API authorization
     });
   } catch (error) {
     return NextResponse.json({ error: 'Erreur lors de la connexion' }, { status: 500 });

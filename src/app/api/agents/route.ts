@@ -1,15 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getAuthenticatedUser } from '@/lib/session';
 
+/**
+ * GET /api/agents
+ * FIX (Bug #5): Original accepted `userId` from query params without verifying
+ * the authenticated user — any client could read another user's agents.
+ * Now uses Bearer token authorization: the userId is extracted from the
+ * validated session token, NOT from the query string.
+ */
 export async function GET(request: NextRequest) {
   try {
-    const userId = request.nextUrl.searchParams.get('userId');
-    if (!userId) {
-      return NextResponse.json({ error: 'userId requis' }, { status: 400 });
+    const auth = await getAuthenticatedUser(request);
+    if (!auth) {
+      return NextResponse.json({ error: 'Non autorisé — token invalide ou manquant' }, { status: 401 });
     }
 
+    // Use the authenticated user's ID — ignore any userId in query params
     const agents = await db.agent.findMany({
-      where: { userId },
+      where: { userId: auth.userId },
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { tasks: true } } },
     });
@@ -20,15 +29,27 @@ export async function GET(request: NextRequest) {
   }
 }
 
+/**
+ * POST /api/agents
+ * FIX (Bug #5): Original accepted `userId` from request body without verifying
+ * the authenticated user — any client could create agents under another user.
+ * Now uses Bearer token authorization: the userId comes from the validated session.
+ */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { name, type, description, config, avatar, userId } = body;
-
-    if (!name || !type || !userId) {
-      return NextResponse.json({ error: 'Nom, type et userId requis' }, { status: 400 });
+    const auth = await getAuthenticatedUser(request);
+    if (!auth) {
+      return NextResponse.json({ error: 'Non autorisé — token invalide ou manquant' }, { status: 401 });
     }
 
+    const body = await request.json();
+    const { name, type, description, config, avatar } = body;
+
+    if (!name || !type) {
+      return NextResponse.json({ error: 'Nom et type requis' }, { status: 400 });
+    }
+
+    // Always use the authenticated user's ID — ignore any userId in body
     const agent = await db.agent.create({
       data: {
         name,
@@ -36,7 +57,7 @@ export async function POST(request: NextRequest) {
         description: description || '',
         config: config ? JSON.stringify(config) : '{}',
         avatar: avatar || null,
-        userId,
+        userId: auth.userId, // Secure: comes from validated session token
       },
     });
 
@@ -45,7 +66,7 @@ export async function POST(request: NextRequest) {
         action: 'Agent créé',
         details: JSON.stringify({ agentName: name, type }),
         category: 'agent',
-        userId,
+        userId: auth.userId,
       },
     });
 

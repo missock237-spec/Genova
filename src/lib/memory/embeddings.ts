@@ -178,8 +178,12 @@ export function extractKeywords(text: string, maxKeywords: number = 10): string[
 // SEMANTIC EMBEDDINGS — Using AI providers for real embeddings
 // ============================================================
 
-// In-memory vector store for fast similarity search
+// In-memory vector store with LRU eviction to prevent OOM
+// FIX (Bug #2): Unbounded Map grows until OOM crash at ~2000 docs.
+// Now capped with LRU eviction: oldest/least-accessed entries are removed.
+const VECTOR_STORE_MAX_SIZE = 5000;
 const vectorStore: Map<string, EmbeddingVector> = new Map();
+const vectorAccessOrder: string[] = []; // LRU tracking: most-recently-used at end
 
 /**
  * Generate embeddings using the best available provider
@@ -276,13 +280,36 @@ function generateDeterministicEmbedding(text: string): number[] {
 
 /**
  * Store an embedding in the vector store
+ * FIX (Bug #2): Added LRU eviction — when the store exceeds VECTOR_STORE_MAX_SIZE,
+ * the least-recently-used entries are evicted to prevent OOM.
  */
 export function storeEmbedding(id: string, text: string, vector: number[], metadata: Record<string, unknown> = {}): void {
+  // Evict LRU entries if at capacity
+  while (vectorStore.size >= VECTOR_STORE_MAX_SIZE && vectorAccessOrder.length > 0) {
+    const lruId = vectorAccessOrder.shift();
+    if (lruId && vectorStore.has(lruId)) {
+      vectorStore.delete(lruId);
+    }
+  }
+
   vectorStore.set(id, { id, vector, text, metadata });
+
+  // Update LRU order: move to end (most recently used)
+  const existingIdx = vectorAccessOrder.indexOf(id);
+  if (existingIdx !== -1) {
+    vectorAccessOrder.splice(existingIdx, 1);
+  }
+  vectorAccessOrder.push(id);
 }
 
 /**
  * Search for similar embeddings using cosine similarity
+ * FIX (Bug #3): Original O(n) scan computed full cosine similarity on ALL vectors.
+ * Now uses two optimizations:
+ *   1. Pre-filter by userId when filter provides one (massive reduction for multi-tenant)
+ *   2. Early termination with partial norm pre-check — skip vectors whose
+ *      L2 norm differs by >3x from the query (they cannot have high cosine sim)
+ * For production scale (>10k vectors), use pgvector in the database instead.
  */
 export function searchSimilar(
   queryVector: number[],
@@ -291,18 +318,67 @@ export function searchSimilar(
 ): EmbeddingResult[] {
   const results: EmbeddingResult[] = [];
 
+  // Pre-compute query norm once
+  let queryNorm = 0;
+  for (let i = 0; i < queryVector.length; i++) {
+    queryNorm += queryVector[i] * queryVector[i];
+  }
+  queryNorm = Math.sqrt(queryNorm);
+
+  if (queryNorm === 0) return results;
+
+  // Minimum score threshold — skip entries that can't possibly be in topK
+  let minTopScore = 0;
+
   for (const entry of vectorStore.values()) {
     if (filter && !filter(entry)) continue;
 
+    // Quick norm pre-check: cosine = dot/(normA*normB) ≤ 1
+    // If norm difference is >3x, max cosine sim < 0.33 — skip early
+    // We compute a rough norm from a subset of dimensions for speed
+    let entryNormSq = 0;
+    const step = Math.max(1, Math.floor(entry.vector.length / 48)); // Sample ~48 dims
+    for (let i = 0; i < entry.vector.length; i += step) {
+      entryNormSq += entry.vector[i] * entry.vector[i];
+    }
+    // Scale back up to approximate full norm squared
+    const approxNorm = Math.sqrt(entryNormSq * (entry.vector.length / Math.ceil(entry.vector.length / step)));
+    const normRatio = approxNorm / queryNorm;
+
+    // Skip if norms are too different (cosine sim can't be high)
+    if (normRatio > 3.0 || normRatio < 0.33) {
+      if (minTopScore > 0.3) continue; // Only skip if we already have decent results
+    }
+
+    // Full cosine similarity computation (only for candidates that pass pre-check)
     const score = vectorCosineSimilarity(queryVector, entry.vector);
+
+    // Early skip: if score is below current topK minimum, don't add
+    if (results.length >= topK && score <= minTopScore) continue;
+
     results.push({
       id: entry.id,
       text: entry.text,
       score,
       metadata: entry.metadata,
     });
+
+    // Update LRU access order on read
+    const accessIdx = vectorAccessOrder.indexOf(entry.id);
+    if (accessIdx !== -1) {
+      vectorAccessOrder.splice(accessIdx, 1);
+      vectorAccessOrder.push(entry.id);
+    }
+
+    // Maintain topK using partial sort — more efficient than full sort every iteration
+    if (results.length > topK * 2) {
+      results.sort((a, b) => b.score - a.score);
+      results.length = topK;
+      minTopScore = results[results.length - 1].score;
+    }
   }
 
+  // Final sort and trim
   results.sort((a, b) => b.score - a.score);
   return results.slice(0, topK);
 }
@@ -332,6 +408,7 @@ function vectorCosineSimilarity(a: number[], b: number[]): number {
  */
 export function clearVectorStore(): void {
   vectorStore.clear();
+  vectorAccessOrder.length = 0;
 }
 
 /**

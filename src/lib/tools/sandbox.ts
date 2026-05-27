@@ -78,16 +78,37 @@ export type ExecutionMethod = 'docker' | 'subprocess' | 'simulated';
 
 let dockerAvailableCache: boolean | null = null;
 let dockerCheckPromise: Promise<boolean> | null = null;
+const DOCKER_CACHE_TTL_MS = 60_000; // Re-check Docker availability every 60s
+let dockerCacheTimestamp: number = 0;
 
 /**
  * Check if Docker is available on the system
+ * FIX: Race condition — the Promise could resolve twice (close + timeout),
+ * overwriting the cache. Now uses a `resolved` flag to guarantee single resolution,
+ * clears `dockerCheckPromise` after resolution so memory is reclaimed, and
+ * adds a TTL so stale "unavailable" results don't persist forever.
  */
 async function isDockerAvailable(): Promise<boolean> {
-  if (dockerAvailableCache !== null) return dockerAvailableCache;
+  // Return cached result if still fresh
+  if (dockerAvailableCache !== null && (Date.now() - dockerCacheTimestamp) < DOCKER_CACHE_TTL_MS) {
+    return dockerAvailableCache;
+  }
 
+  // Dedup concurrent checks
   if (dockerCheckPromise) return dockerCheckPromise;
 
   dockerCheckPromise = new Promise((resolve) => {
+    let resolved = false; // Guard: resolve only once
+
+    const safeResolve = (value: boolean) => {
+      if (resolved) return;
+      resolved = true;
+      dockerAvailableCache = value;
+      dockerCacheTimestamp = Date.now();
+      dockerCheckPromise = null; // Allow future re-checks after TTL
+      resolve(value);
+    };
+
     const proc = spawn('docker', ['--version'], {
       stdio: 'pipe',
       timeout: 5000,
@@ -99,20 +120,17 @@ async function isDockerAvailable(): Promise<boolean> {
     });
 
     proc.on('error', () => {
-      dockerAvailableCache = false;
-      resolve(false);
+      safeResolve(false);
     });
 
     proc.on('close', (code) => {
-      dockerAvailableCache = code === 0 && output.includes('Docker');
-      resolve(dockerAvailableCache);
+      safeResolve(code === 0 && output.includes('Docker'));
     });
 
-    // Timeout fallback
+    // Timeout fallback — only fires if close/error didn't fire within 6s
     setTimeout(() => {
-      proc.kill();
-      dockerAvailableCache = false;
-      resolve(false);
+      try { proc.kill(); } catch { /* already dead */ }
+      safeResolve(false);
     }, 6000);
   });
 
@@ -125,6 +143,7 @@ async function isDockerAvailable(): Promise<boolean> {
 export function resetDockerCache(): void {
   dockerAvailableCache = null;
   dockerCheckPromise = null;
+  dockerCacheTimestamp = 0;
 }
 
 // ============================================================
