@@ -200,28 +200,60 @@ export class WebSocketManager {
 
   /**
    * Send a message to a specific connection
+   * FIX (Bug #4): Original code was a no-op — it only incremented the counter
+   * without actually sending data via WebSocket. Now properly serializes and sends.
+   * Also handles WebSocket readyState checks and proper error recovery.
    */
   sendToConnection(connectionId: string, message: WSMessage): boolean {
     const connection = this.connections.get(connectionId);
-    if (!connection || !connection.healthy) {
-      // Buffer for retry
-      if (connection && connection.buffer.length < this.maxBufferSize) {
+    if (!connection) return false;
+
+    if (!connection.healthy) {
+      // Buffer for retry when connection recovers
+      if (connection.buffer.length < this.maxBufferSize) {
         connection.buffer.push(message);
       }
       return false;
     }
 
     try {
-      // In a real implementation, this would call connection.ws.send(JSON.stringify(message))
-      // For Next.js API route integration, we use the StreamManager SSE as fallback
-      connection.messagesSent++;
-      connection.lastPingAt = new Date().toISOString();
-      return true;
-    } catch {
+      // Access the real WebSocket instance
+      const ws = connection.ws as { readyState?: number; send?: (data: string) => void } | null;
+
+      // Check WebSocket readyState: 1 = OPEN (ready to send)
+      if (ws && typeof ws.send === 'function' && ws.readyState === 1) {
+        ws.send(JSON.stringify(message));
+        connection.messagesSent++;
+        connection.lastPingAt = new Date().toISOString();
+
+        // Flush buffered messages if any
+        while (connection.buffer.length > 0) {
+          const buffered = connection.buffer.shift()!;
+          try {
+            ws.send(JSON.stringify(buffered));
+            connection.messagesSent++;
+          } catch {
+            // Re-buffer on partial failure
+            connection.buffer.unshift(buffered);
+            break;
+          }
+        }
+
+        return true;
+      } else {
+        // WebSocket not in OPEN state — buffer the message
+        connection.healthy = false;
+        if (connection.buffer.length < this.maxBufferSize) {
+          connection.buffer.push(message);
+        }
+        return false;
+      }
+    } catch (error) {
       connection.healthy = false;
       if (connection.buffer.length < this.maxBufferSize) {
         connection.buffer.push(message);
       }
+      console.error(`[WebSocket] Error sending to connection ${connectionId}:`, error instanceof Error ? error.message : error);
       return false;
     }
   }
@@ -470,8 +502,9 @@ export class WebSocketManager {
           handler(message, connection);
         }
       }
-    } catch {
-      // Invalid message format
+    } catch (error) {
+      // Invalid message format — log for debugging instead of silently swallowing
+      console.warn(`[WebSocket] Invalid message from connection ${connectionId}:`, error instanceof Error ? error.message : error);
     }
   }
 
@@ -481,19 +514,29 @@ export class WebSocketManager {
 
   /**
    * Start the heartbeat timer
+   * FIX (Bug #4): Original iterated `this.connections` with `for...of` and called
+   * `unregisterConnection()` inside the loop — mutating a Map while iterating causes
+   * undefined behavior / crash. Now collects stale IDs first, then unregisters after.
    */
   startHeartbeat(): void {
     if (this.heartbeatTimer) return;
 
     this.heartbeatTimer = setInterval(() => {
+      const staleConnectionIds: string[] = [];
+
       for (const [id, conn] of this.connections.entries()) {
         const timeSincePing = Date.now() - new Date(conn.lastPingAt).getTime();
         if (timeSincePing > 60000) { // 60s without ping
           conn.healthy = false;
-          this.unregisterConnection(id);
+          staleConnectionIds.push(id);
         } else {
           this.sendToConnection(id, createMessage('heartbeat', { serverTime: new Date().toISOString() }));
         }
+      }
+
+      // Unregister stale connections after iteration completes
+      for (const id of staleConnectionIds) {
+        this.unregisterConnection(id);
       }
     }, this.heartbeatIntervalMs);
   }

@@ -30,6 +30,7 @@ model User {
   embeddingVectors    EmbeddingVector[]
   executionPolicies   ExecutionPolicy[]
   websocketSessions   WebSocketSession[]
+  sessions            Session[]
 }
 
 model Agent {
@@ -380,4 +381,24 @@ model WebSocketSession {
 
   @@index([userId, status])
   @@map("websocket_sessions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User Session
+// Stores authenticated session tokens for API authorization.
+// Each session has a unique token (Bearer token), expires after a set time,
+// and is scoped to a single user. This prevents unauthorized cross-user access.
+// ─────────────────────────────────────────────────────────────────────────────
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("sessions")
 }
