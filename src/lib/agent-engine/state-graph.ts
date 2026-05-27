@@ -73,6 +73,7 @@ export interface AgentState {
   task: string;
   conversationId?: string;
   userId: string;
+  executionId?: string;
 
   // Phase tracking
   currentPhase: AgentPhase;

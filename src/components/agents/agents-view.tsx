@@ -236,7 +236,7 @@ export function AgentsView() {
           <h2 className="text-lg font-semibold">Vos Agents IA</h2>
           <p className="text-sm text-muted-foreground">{agents.length} agent(s) configuré(s)</p>
         </div>
-        <Button className="gap-2" onClick={() => { setEditAgent(null); setCreateOpen(true); }}>
+        <Button className="gap-2 float-action" onClick={() => { setEditAgent(null); setCreateOpen(true); }}>
           <Plus className="h-4 w-4" />
           Créer un agent
         </Button>
@@ -252,15 +252,21 @@ export function AgentsView() {
         />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {agents.map((agent) => (
-            <AgentCard
+          {agents.map((agent, index) => (
+            <motion.div
               key={agent.id}
-              agent={agent}
-              onToggle={handleToggle}
-              onDelete={setDeleteId}
-              onEdit={handleEdit}
-              onChat={agent.status === 'active' ? openChat : undefined}
-            />
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.08, duration: 0.35, ease: 'easeOut' }}
+            >
+              <AgentCard
+                agent={agent}
+                onToggle={handleToggle}
+                onDelete={setDeleteId}
+                onEdit={handleEdit}
+                onChat={agent.status === 'active' ? openChat : undefined}
+              />
+            </motion.div>
           ))}
         </div>
       )}

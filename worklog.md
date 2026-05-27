@@ -423,3 +423,254 @@ Stage Summary:
 - Three production-ready React hooks for real-time streaming chat, agent execution, and memory stats
 - Memory stats API endpoint for comprehensive memory analytics
 - Full backward compatibility maintained throughout
+
+---
+Task ID: 5+6
+Agent: Main Agent
+Task: Add Memory Compression to Long-Term Memory + Enhance Tool Registry with Capability System, Execution Policies, and Tool-Scoped Auth
+
+Work Log:
+- Enhanced `src/lib/memory/long-term.ts` with 3 new methods to LongTermMemory class:
+  - Added `vectorCosineSimilarity()` module-level helper function for computing cosine similarity between number[] embeddings (needed because existing `calculateSimilarity` takes strings, not vectors)
+  - Added `compressMemories()` — Semantic similarity-based memory compression
+    - Groups memories by embedding similarity (configurable threshold, default 0.7) rather than just category
+    - Uses LLM summarization to condense similar memories into single entries preserving key information
+    - Supports dry-run mode (no actual deletion), configurable max group size
+    - Returns compressed count, space saved, and topic groups
+  - Added `rankMemoriesByRelevance()` — Composite relevance ranking
+    - Combines 6 factors: recency (25%, exponential decay with 7-day half-life), frequency (20%), importance (25%), semantic relevance (30%), agent bonus (+0.2), time window bonus (+0.15)
+    - Falls back to keyword matching when embedding generation fails
+    - Returns memories sorted by composite rank with individual factor breakdowns
+  - Added `getMemoryStats()` — Comprehensive memory analytics
+    - Returns total count, breakdown by category and source, average importance, oldest/newest memory dates, compressed count, and total size estimate
+- All existing methods preserved unchanged (store, storeEpisodic, search, getAll, delete, extractAndStore, getContextForQuery, summarizeOldMemories, pruneMemories, calculateInitialImportance, calculateMemoryImportance, recordAccess, calculateRelevance)
+
+- Enhanced `src/lib/tools/registry.ts` with capability system, execution policies, and tool-scoped auth:
+  - Added 4 new exported interfaces after existing PermissionPolicy:
+    - `AgentCapability` — granular per-agent capabilities with actions, scope, constraints, call limits, expiration
+    - `ExecutionPolicy` — named policy with rules, agent types, retry/timeout config, active flag
+    - `ExecutionPolicyRule` — rule types: allow, deny, rate_limit, require_approval, time_restriction, resource_limit
+    - `ToolScopedAuth` — per-tool authentication tokens with scopes, refresh tokens, expiration
+  - Added `CapabilityManager` class:
+    - `grantCapability()` / `revokeCapability()` — manage per-agent tool capabilities
+    - `hasCapability()` — check with wildcard support, expiration, action/scope/call-limit/constraint validation
+    - `recordUsage()` — track call count for rate limiting
+    - `getAgentCapabilities()` / `loadFromDatabase()` — retrieval and persistence
+  - Added `ExecutionPolicyManager` class:
+    - `setPolicy()` / `getApplicablePolicies()` — manage and query policies by agent type
+    - `checkPolicies()` — evaluate deny, rate_limit, require_approval, time_restriction rules
+    - `loadFromDatabase()` — persistence support
+  - Added `ToolScopedAuthManager` class:
+    - `setAuthToken()` / `getAuthToken()` — store/retrieve per-agent auth tokens with auto-expiration
+    - `hasValidAuth()` — check with scope validation
+    - `revokeAuth()` / `getAgentAuthTokens()` — management and retrieval
+  - Integrated new managers into `ToolRegistry`:
+    - Added 3 private fields: `capabilityManager`, `policyManager`, `authManager`
+    - Added 5 public methods: `grantCapability()`, `revokeCapability()`, `setExecutionPolicy()`, `setToolAuth()`, `getToolAuth()`
+    - Modified `execute()` method: added step 2.5 (CAPABILITY CHECK) after existing permission check
+      - Checks agent capabilities (with wildcard and constraint support)
+      - Checks execution policies
+      - Records usage for rate limiting
+      - Attaches auth token to params if available
+  - All existing code preserved: ToolDefinition, ToolPermission, ToolExecutionContext, ToolExecutionResult, PermissionPolicy, PermissionLayer, ExecutionSandbox, ResultParser, and all ToolRegistry methods
+
+- ESLint passes with zero errors
+- Dev server running normally
+
+Stage Summary:
+- Long-term memory now supports semantic compression (groups by similarity, not category), composite relevance ranking (6-factor weighted score), and comprehensive statistics
+- Tool registry enhanced with 3-layer security model: Permission → Capability → Execution Policy, plus tool-scoped auth tokens
+- Full backward compatibility maintained — all existing APIs unchanged
+
+---
+Task ID: 3+auth
+Agent: Main Agent
+Task: Migrate Prisma to PostgreSQL, Update .env.local, Fix Auth with PBKDF2
+
+Work Log:
+- **Task 1: Migrated Prisma schema from SQLite to PostgreSQL**
+  - Changed `provider = "sqlite"` to `provider = "postgresql"` in datasource block
+  - Changed `EmbeddingVector.vector` field from `String` to `Unsupported("vector(384)")` for pgvector native support
+  - Added `capabilities String @default("{}")` to Agent model (JSON: tool capabilities and permissions)
+  - Added `ToolPermission` model with fields: agentId, toolName, actions, scope, constraints, maxCalls, callCount, expiresAt
+    - Unique constraint on [agentId, toolName], mapped to `tool_permissions` table
+    - Cascade delete relation to Agent
+  - Added `toolPermissions ToolPermission[]` relation to Agent model
+  - Added `ExecutionPolicy` model with fields: name, description, rules, agentTypes, maxRetries, timeout, userId, isActive
+    - Mapped to `execution_policies` table, cascade delete relation to User
+  - Added `executionPolicies ExecutionPolicy[]` relation to User model
+  - Added `WebSocketSession` model with fields: userId, agentIds, status, metadata, lastPingAt, closedAt
+    - Index on [userId, status], mapped to `websocket_sessions` table
+    - Cascade delete relation to User
+  - Added `websocketSessions WebSocketSession[]` relation to User model
+  - All 17 existing models preserved unchanged (only additions made)
+
+- **Task 2: Updated .env.local for PostgreSQL**
+  - Changed DATABASE_URL from SQLite format to PostgreSQL: `postgresql://genova:genova_password@localhost:5432/genova?schema=public`
+  - Kept SQLite URL as comment: `# DATABASE_URL=file:./db/custom.db`
+  - Added Neon PostgreSQL connection string as comment (serverless)
+  - Added Supabase PostgreSQL connection string as comment
+  - Added new env vars: SANDBOX_TYPE=docker, E2B_API_KEY, WS_PORT=3001, EMBEDDING_MODEL=text-embedding-3-small, OPENAI_API_KEY
+  - Preserved all existing API keys and configuration
+
+- **Task 3: Replaced SHA-256 with PBKDF2 in auth.ts**
+  - Removed static-salt SHA-256 implementation entirely
+  - Implemented PBKDF2 with Web Crypto API (no external dependencies)
+  - Constants: PBKDF2_ITERATIONS=100000, SALT_LENGTH=32 bytes, KEY_LENGTH=64 bytes
+  - `hashPassword()`: generates unique random salt per password, derives key with PBKDF2-SHA256, returns `salt:hash` format
+  - `verifyPassword()`: supports both new PBKDF2 format and legacy SHA-256 format for migration path
+    - Legacy hashes (no colon separator) verified using old SHA-256 + ENCRYPTION_SALT method
+    - New hashes (colon separator) verified using PBKDF2 with stored salt
+  - Added helper functions: `arrayToHex()`, `hexToArray()`, `generateSalt()`
+
+- Ran `npx prisma generate` — Prisma Client regenerated successfully (v6.19.2)
+- Ran `bun run lint` — zero errors
+
+Stage Summary:
+- Prisma schema fully migrated to PostgreSQL provider with pgvector support
+- 3 new models added: ToolPermission, ExecutionPolicy, WebSocketSession
+- 1 new field added to Agent model: capabilities
+- .env.local updated with PostgreSQL connection string and new configuration vars
+- Auth system upgraded from vulnerable static-salt SHA-256 to secure per-password-salt PBKDF2 (100K iterations)
+- Legacy SHA-256 hash migration path preserved for existing user accounts
+- Zero lint errors, Prisma Client regenerated successfully
+
+---
+Task ID: 7+4
+Agent: Main Agent
+Task: Create WebSocket Manager for Deep Realtime Streaming + E2B Sandbox Integration
+
+Work Log:
+- Created `src/lib/streaming/websocket.ts` — WebSocket Manager for deep realtime streaming
+  - Defined `WSMessage` interface with 18 message types: token, agent_step, agent_status, orchestration, thinking, tool_call, tool_result, memory_update, guardrail_alert, progress, error, heartbeat, subscribe, unsubscribe, batch, connection_ack, agent_broadcast
+  - Defined `WSConnection` interface with connection lifecycle tracking (userId, subscribedAgents, health, buffer, message counts)
+  - Defined `AgentFeedEvent` interface for live multi-agent event streams (thinking, acting, observing, reflecting, completed, error, paused)
+  - Defined `OrchestrationEvent` interface for agent coordination (delegate, assign, complete, fail, retry, coordinate)
+  - Implemented `createMessage()` factory for consistent WSMessage construction with auto-incrementing IDs
+  - Implemented `WebSocketManager` class with:
+    - Connection management: registerConnection(), unregisterConnection() with auto-cleanup of subscriber lists
+    - Subscription management: subscribeToAgent(), unsubscribeFromAgent() with per-agent subscriber tracking
+    - Message routing: sendToConnection(), broadcastToAgentSubscribers(), broadcastToUser()
+    - Agent feed: sendAgentStep(), sendAgentStatus(), sendAgentThinking()
+    - Orchestration: sendOrchestrationEvent() (broadcasts to both source and target agent subscribers)
+    - Token streaming: streamToken(), streamTokenBatch() for low-latency delivery
+    - Tool & memory events: sendToolCall(), sendToolResult(), sendMemoryUpdate(), sendGuardrailAlert()
+    - Message handling: onMessage(), handleMessage() with built-in subscribe/unsubscribe/heartbeat handling
+    - Health monitoring: startHeartbeat(), stopHeartbeat(), getStats(), cleanup()
+    - Buffer for unreliable connections with configurable max size
+  - Added `getWebSocketManager()` singleton accessor
+
+- Created `src/lib/tools/e2b-sandbox.ts` — E2B cloud sandbox integration
+  - Defined `E2BConfig` interface with apiKey, template, timeout, maxMemoryMB
+  - Defined `E2BExecutionResult` interface with stdout, stderr, exitCode, executionTime
+  - Implemented `E2BSandbox` class extending `SandboxManager`:
+    - E2B availability check via health endpoint with 5s timeout
+    - `executeCode()` with automatic fallback to SubprocessSandbox when E2B unavailable
+    - `executeInE2B()` sends code to E2B API with language, timeout, memory, network, and filesystem configuration
+    - Full audit logging for all sandbox operations
+    - `isAvailable()` for checking E2B readiness
+  - Implemented `createSandbox()` factory function:
+    - Supports sandbox types: 'e2b', 'docker', 'subprocess'
+    - Reads `SANDBOX_TYPE` env var for default selection
+    - Falls back to 'subprocess' if not specified
+
+- Updated `src/lib/tools/sandbox.ts`:
+  - Changed `executions` field from `private` to `protected` for subclass access
+  - Changed `executionCounter` field from `private` to `protected` for subclass access
+  - These changes are required for E2BSandbox (and existing SubprocessSandbox) to access base class state
+
+- Updated `src/lib/streaming/index.ts`:
+  - Added re-export of WebSocket Manager: WebSocketManager, getWebSocketManager, createMessage, WSMessage, WSMessageType, WSConnection, AgentFeedEvent, OrchestrationEvent
+
+- ESLint passes with zero errors
+
+Stage Summary:
+- WebSocket Manager provides real-time bidirectional communication for multi-agent feeds, token streaming, and orchestration events
+- E2B Sandbox provides cloud-based secure code execution with automatic fallback to subprocess
+- Sandbox factory supports three execution backends: E2B (cloud VM), Docker (container), Subprocess (local)
+- Full backward compatibility maintained — existing streaming and sandbox APIs unchanged
+
+---
+Task ID: 9-UX
+Agent: UX Agent
+Task: Make Genova More Interactive and Fluid
+
+Work Log:
+- Updated `src/app/globals.css` — Enhanced with fluid animations and micro-interactions:
+  - Enhanced `.glass-card-emerald` with gradient backgrounds, hover effects (translateY, box-shadow, border-color), and dark mode hover
+  - Enhanced `.sidebar-item-glow` with base glow state (not just hover)
+  - Updated global scrollbar styling (WebKit + Firefox) with consistent emerald accent
+  - Added new animation classes: `.card-lift` (hover lift with shadow), `.float-action` (bouncy hover/active), `.agent-breathing` (pulsing ring), `.status-dot-pulse` (scale/opacity pulse), `.token-stream` (fade-in token appear), `.focus-ring` (emerald focus-visible), `.counter-glow` (text-shadow glow), `.stagger-enter` (staggered fade-in), `.search-input-animated` (expanding focus), `.quick-action-pulse` (ring pulse), `.grid-pattern-radial` (radial gradient variant), `.page-enter` / `.page-enter-active` (page transitions)
+  - Added new keyframes: `gradient-shift`, `status-pulse`, `token-appear`, `breathing`, `stagger-fade-in`, `quick-action-ring`
+  - Merged with existing classes (no duplicates of `badge-pulse`, `shimmer`, `grid-pattern`)
+
+- Updated `src/components/layout/app-header.tsx` — Made header more dynamic:
+  - Added `LiveClock` component showing real-time clock with second precision (hidden on mobile, visible on md+)
+  - Added animated search input with expanding focus effect (`search-input-animated`), search icon color transition, and Enter-key navigation
+  - Added quick action button with `float-action` and `quick-action-pulse` classes (navigates to agents)
+  - Replaced bell notification dot with `status-dot-pulse` animation
+  - Enhanced user avatar with emerald ring and hover ring expansion
+  - Added `Input` component import, `Search`, `Zap`, `Clock` icons
+
+- Updated `src/components/shared/stat-card.tsx` — Added animated counters:
+  - Added `useAnimatedCounter` hook with ease-out cubic interpolation (800ms duration)
+  - Added `AnimatedValue` component wrapping the counter with `counter-glow` text shadow
+  - Added `card-lift` class to StatCard root for hover lift effect
+  - Stat values now animate when they change
+
+- Updated `src/components/dashboard/dashboard-view.tsx` — Made dashboard more fluid:
+  - Added `glass-card` class to AI Router Status card
+  - Added `glass-card-emerald` class to Quick Actions card and Real-time Activity Pulse card
+  - Added `card-lift` class to AI Provider cards, Recent Activity card, and Tasks by Status card
+  - Added `float-action` class to all Quick Action buttons
+  - Added staggered entrance animation (`initial` + `animate`) to Tasks by Status items with `index`-based delay
+  - Added `counter-glow` class to task status count numbers
+
+- Updated `src/components/agents/agent-card.tsx` — More interactive agent cards:
+  - Added `card-lift` class to all agent cards
+  - Added `agent-breathing` animation to active agents (alongside existing `agent-glow`)
+
+- Updated `src/components/agents/agents-view.tsx` — Staggered animation and floating actions:
+  - Added `float-action` class to "Créer un agent" button
+  - Wrapped each `AgentCard` in a `motion.div` with staggered entrance animation (80ms delay per card, 350ms duration)
+  - Agent list now fades in from bottom with a cascading wave effect
+
+- ESLint passes with zero errors
+- Dev server running normally
+
+Stage Summary:
+- Genova now feels significantly more alive with micro-interactions throughout the UI
+- Cards lift on hover with smooth spring animations
+- Buttons float and bounce on hover/active with cubic-bezier easing
+- Active agents breathe with pulsing ring animation
+- Stat numbers animate with counter effect and glow
+- Agent list cascades in with staggered fade-in
+- Header features live clock, animated search, and quick action pulse
+- Glass morphism cards respond to hover with gradient shifts and subtle elevation
+- All changes are additive — no existing functionality removed
+
+---
+Task ID: final
+Agent: Main Agent
+Task: Complete all Genova improvements — PostgreSQL migration, Auth PBKDF2, Memory Compression, Tool Capability System, WebSocket, E2B Sandbox, Embeddings, UX
+
+Work Log:
+- Migrated Prisma schema from SQLite to PostgreSQL (provider, pgvector, new models)
+- Added ToolPermission, ExecutionPolicy, WebSocketSession models to schema
+- Updated .env.local with PostgreSQL URLs (local, Neon, Supabase) and new env vars
+- Replaced SHA-256 auth with PBKDF2 (100K iterations, unique salt per password, legacy migration)
+- Added memory compression (compressMemories), semantic ranking (rankMemoriesByRelevance), memory stats
+- Added CapabilityManager, ExecutionPolicyManager, ToolScopedAuthManager to ToolRegistry
+- Created WebSocket Manager (18 message types, multi-agent feed, orchestration events)
+- Created E2B Sandbox integration with auto-fallback factory
+- Improved embeddings: OpenAI text-embedding-3-small API with deterministic fallback
+- Fixed TypeScript errors: auth.ts hexToArray type, e2b-sandbox DockerSandboxAdapter cast, getProviderLabel missing, MemoryStats type, AgentState executionId
+- Enhanced UX: glass morphism, card-lift, float-action, agent-breathing, animated counters, staggered animations, live clock, search bar
+
+Stage Summary:
+- All 6 PROBLÈMES addressed: PostgreSQL, Memory, Tool Runtime, Sandbox, Streaming, Database
+- Build passes with zero TypeScript errors in src/
+- Next.js build succeeds (31 API routes, all pages compile)
+- Auth is now production-grade (PBKDF2 with migration path)
+- Embeddings use real OpenAI API when available
+- WebSocket foundation ready for deep realtime

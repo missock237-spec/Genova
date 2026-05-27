@@ -834,3 +834,6 @@ export function getStreamManager(): StreamManager {
   }
   return globalStreamManager;
 }
+
+// Re-export WebSocket Manager
+export { WebSocketManager, getWebSocketManager, createMessage, type WSMessage, type WSMessageType, type WSConnection, type AgentFeedEvent, type OrchestrationEvent } from './websocket';

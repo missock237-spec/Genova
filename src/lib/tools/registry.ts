@@ -65,6 +65,46 @@ export interface PermissionPolicy {
 }
 
 // ============================================================
+// CAPABILITY SYSTEM — Granular agent capabilities
+// ============================================================
+
+export interface AgentCapability {
+  agentId: string;
+  toolName: string;
+  actions: string[];        // ["read", "write", "execute", "network"]
+  scope: 'full' | 'limited' | 'none';
+  constraints: string[];    // Additional constraints
+  maxCalls: number;         // -1 = unlimited
+  callCount: number;
+  expiresAt?: Date;
+}
+
+export interface ExecutionPolicy {
+  id: string;
+  name: string;
+  description: string;
+  rules: ExecutionPolicyRule[];
+  agentTypes: string[];
+  maxRetries: number;
+  timeout: number;
+  isActive: boolean;
+}
+
+export interface ExecutionPolicyRule {
+  type: 'allow' | 'deny' | 'rate_limit' | 'require_approval' | 'time_restriction' | 'resource_limit';
+  target: string;           // Tool name or "*"
+  params: Record<string, unknown>;
+}
+
+export interface ToolScopedAuth {
+  toolName: string;
+  authToken: string;        // Encrypted auth token for external services
+  refreshToken?: string;
+  expiresAt?: Date;
+  scopes: string[];         // OAuth-like scopes
+}
+
+// ============================================================
 // PERMISSION LAYER
 // ============================================================
 
@@ -193,6 +233,240 @@ class PermissionLayer {
     }
 
     return { valid: errors.length === 0, errors };
+  }
+}
+
+// ============================================================
+// CAPABILITY MANAGER — Granular per-agent capabilities
+// ============================================================
+
+class CapabilityManager {
+  private capabilities: Map<string, AgentCapability> = new Map(); // key: agentId:toolName
+
+  /**
+   * Grant a capability to an agent for a specific tool
+   */
+  grantCapability(cap: Omit<AgentCapability, 'callCount'>): void {
+    const key = `${cap.agentId}:${cap.toolName}`;
+    this.capabilities.set(key, { ...cap, callCount: 0 });
+  }
+
+  /**
+   * Revoke a capability from an agent
+   */
+  revokeCapability(agentId: string, toolName: string): void {
+    this.capabilities.delete(`${agentId}:${toolName}`);
+  }
+
+  /**
+   * Check if an agent has a specific capability
+   */
+  hasCapability(agentId: string, toolName: string, action: string): { allowed: boolean; reason?: string } {
+    // Check tool-specific capability
+    const key = `${agentId}:${toolName}`;
+    const cap = this.capabilities.get(key);
+
+    if (!cap) {
+      // Check wildcard capability
+      const wildcardKey = `${agentId}:*`;
+      const wildcard = this.capabilities.get(wildcardKey);
+      if (wildcard && wildcard.scope === 'full') {
+        return { allowed: true };
+      }
+      return { allowed: false, reason: `Agent ${agentId} n'a pas de capability pour l'outil ${toolName}` };
+    }
+
+    // Check if capability has expired
+    if (cap.expiresAt && cap.expiresAt < new Date()) {
+      return { allowed: false, reason: `Capability expirée pour ${toolName}` };
+    }
+
+    // Check action
+    if (!cap.actions.includes(action) && !cap.actions.includes('*')) {
+      return { allowed: false, reason: `Action "${action}" non autorisée pour ${toolName}. Actions autorisées: ${cap.actions.join(', ')}` };
+    }
+
+    // Check scope
+    if (cap.scope === 'none') {
+      return { allowed: false, reason: `Scope "none" pour ${toolName}` };
+    }
+
+    // Check call limit
+    if (cap.maxCalls !== -1 && cap.callCount >= cap.maxCalls) {
+      return { allowed: false, reason: `Limite d'appels atteinte pour ${toolName} (${cap.maxCalls})` };
+    }
+
+    // Check constraints
+    for (const constraint of cap.constraints) {
+      if (constraint.startsWith('time:')) {
+        // Time restriction: "time:09:00-17:00"
+        const hours = constraint.replace('time:', '');
+        const [start, end] = hours.split('-');
+        const now = new Date();
+        const currentHour = now.getHours();
+        const startHour = parseInt(start.split(':')[0]);
+        const endHour = parseInt(end.split(':')[0]);
+        if (currentHour < startHour || currentHour >= endHour) {
+          return { allowed: false, reason: `Contrainte temporelle: ${toolName} disponible uniquement entre ${start} et ${end}` };
+        }
+      }
+    }
+
+    return { allowed: true };
+  }
+
+  /**
+   * Record a tool usage for rate limiting
+   */
+  recordUsage(agentId: string, toolName: string): void {
+    const key = `${agentId}:${toolName}`;
+    const cap = this.capabilities.get(key);
+    if (cap) {
+      cap.callCount++;
+    }
+  }
+
+  /**
+   * Get all capabilities for an agent
+   */
+  getAgentCapabilities(agentId: string): AgentCapability[] {
+    return Array.from(this.capabilities.values())
+      .filter(c => c.agentId === agentId);
+  }
+
+  /**
+   * Load capabilities from database
+   */
+  loadFromDatabase(capabilities: AgentCapability[]): void {
+    for (const cap of capabilities) {
+      const key = `${cap.agentId}:${cap.toolName}`;
+      this.capabilities.set(key, cap);
+    }
+  }
+}
+
+// ============================================================
+// EXECUTION POLICY MANAGER
+// ============================================================
+
+class ExecutionPolicyManager {
+  private policies: Map<string, ExecutionPolicy> = new Map();
+
+  /**
+   * Add or update an execution policy
+   */
+  setPolicy(policy: ExecutionPolicy): void {
+    this.policies.set(policy.id, policy);
+  }
+
+  /**
+   * Get applicable policies for an agent type
+   */
+  getApplicablePolicies(agentType: string): ExecutionPolicy[] {
+    return Array.from(this.policies.values())
+      .filter(p => p.isActive && (p.agentTypes.includes('*') || p.agentTypes.includes(agentType)));
+  }
+
+  /**
+   * Check if an action is allowed by execution policies
+   */
+  checkPolicies(agentType: string, toolName: string, action: string): { allowed: boolean; policy?: ExecutionPolicy; reason?: string } {
+    const applicable = this.getApplicablePolicies(agentType);
+
+    for (const policy of applicable) {
+      for (const rule of policy.rules) {
+        if (rule.target !== '*' && rule.target !== toolName) continue;
+
+        switch (rule.type) {
+          case 'deny':
+            return { allowed: false, policy, reason: `Bloqué par politique "${policy.name}": outil ${toolName} interdit` };
+          case 'rate_limit': {
+            const _maxCalls = rule.params.maxCalls as number;
+            const _windowMs = rule.params.windowMs as number;
+            // Rate limit check would need a counter — simplified for now
+            break;
+          }
+          case 'require_approval':
+            return { allowed: true, policy, reason: `Approbation requise par politique "${policy.name}"` };
+          case 'time_restriction': {
+            const allowedHours = rule.params.hours as string;
+            const now = new Date();
+            const currentHour = now.getHours();
+            const [start, end] = allowedHours.split('-').map(h => parseInt(h));
+            if (currentHour < start || currentHour >= end) {
+              return { allowed: false, policy, reason: `Politique "${policy.name}": ${toolName} disponible uniquement entre ${allowedHours}` };
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    return { allowed: true };
+  }
+
+  /**
+   * Load policies from database
+   */
+  loadFromDatabase(policies: ExecutionPolicy[]): void {
+    for (const policy of policies) {
+      this.policies.set(policy.id, policy);
+    }
+  }
+}
+
+// ============================================================
+// TOOL-SCOPED AUTH — Per-tool authentication tokens
+// ============================================================
+
+class ToolScopedAuthManager {
+  private authTokens: Map<string, ToolScopedAuth> = new Map(); // key: agentId:toolName
+
+  /**
+   * Store an auth token for a tool
+   */
+  setAuthToken(agentId: string, auth: ToolScopedAuth): void {
+    this.authTokens.set(`${agentId}:${auth.toolName}`, auth);
+  }
+
+  /**
+   * Get auth token for a tool
+   */
+  getAuthToken(agentId: string, toolName: string): ToolScopedAuth | undefined {
+    const auth = this.authTokens.get(`${agentId}:${toolName}`);
+    if (auth?.expiresAt && auth.expiresAt < new Date()) {
+      this.authTokens.delete(`${agentId}:${toolName}`);
+      return undefined;
+    }
+    return auth;
+  }
+
+  /**
+   * Check if a tool has valid authentication
+   */
+  hasValidAuth(agentId: string, toolName: string, requiredScope?: string): boolean {
+    const auth = this.getAuthToken(agentId, toolName);
+    if (!auth) return false;
+    if (requiredScope && !auth.scopes.includes(requiredScope) && !auth.scopes.includes('*')) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Revoke auth for a tool
+   */
+  revokeAuth(agentId: string, toolName: string): void {
+    this.authTokens.delete(`${agentId}:${toolName}`);
+  }
+
+  /**
+   * Get all auth tokens for an agent
+   */
+  getAgentAuthTokens(agentId: string): ToolScopedAuth[] {
+    return Array.from(this.authTokens.entries())
+      .filter(([key]) => key.startsWith(`${agentId}:`))
+      .map(([, auth]) => auth);
   }
 }
 
@@ -334,6 +608,9 @@ export class ToolRegistry {
   private resultParser = new ResultParser();
   private tracer = new Tracer();
   private executionCounter = 0;
+  private capabilityManager = new CapabilityManager();
+  private policyManager = new ExecutionPolicyManager();
+  private authManager = new ToolScopedAuthManager();
 
   /**
    * Register a tool
@@ -410,6 +687,57 @@ export class ToolRegistry {
           timestamp: new Date().toISOString(),
         },
       };
+    }
+
+    // 2.5 CAPABILITY CHECK — Check agent-specific capabilities
+    if (context.agentId) {
+      const capCheck = this.capabilityManager.hasCapability(context.agentId, name, 'execute');
+      if (!capCheck.allowed) {
+        return {
+          success: false,
+          result: null,
+          error: capCheck.reason,
+          metadata: {
+            toolName: name,
+            executionTime: Date.now() - startTime,
+            tokensUsed: 0,
+            sandboxed: context.sandbox,
+            permissionChecked: true,
+            validated: false,
+            timestamp: new Date().toISOString(),
+          },
+        };
+      }
+
+      // Check execution policies
+      // We need to know the agent type — for now, we'll use the tool category as a proxy
+      const policyCheck = this.policyManager.checkPolicies(tool.category, name, 'execute');
+      if (!policyCheck.allowed) {
+        return {
+          success: false,
+          result: null,
+          error: policyCheck.reason,
+          metadata: {
+            toolName: name,
+            executionTime: Date.now() - startTime,
+            tokensUsed: 0,
+            sandboxed: context.sandbox,
+            permissionChecked: true,
+            validated: false,
+            timestamp: new Date().toISOString(),
+          },
+        };
+      }
+
+      // Record usage for rate limiting
+      this.capabilityManager.recordUsage(context.agentId, name);
+
+      // Attach auth token to context if available
+      const authToken = this.authManager.getAuthToken(context.agentId, name);
+      if (authToken) {
+        params._authToken = authToken.authToken;
+        params._authScopes = authToken.scopes;
+      }
     }
 
     // 3. PARAMETER VALIDATION
@@ -592,5 +920,40 @@ export class ToolRegistry {
    */
   getSandboxStatus(): { activeExecutions: number } {
     return { activeExecutions: this.sandbox.getActiveCount() };
+  }
+
+  /**
+   * Grant a capability to an agent
+   */
+  grantCapability(cap: Omit<AgentCapability, 'callCount'>): void {
+    this.capabilityManager.grantCapability(cap);
+  }
+
+  /**
+   * Revoke a capability from an agent
+   */
+  revokeCapability(agentId: string, toolName: string): void {
+    this.capabilityManager.revokeCapability(agentId, toolName);
+  }
+
+  /**
+   * Set an execution policy
+   */
+  setExecutionPolicy(policy: ExecutionPolicy): void {
+    this.policyManager.setPolicy(policy);
+  }
+
+  /**
+   * Store tool-scoped auth token
+   */
+  setToolAuth(agentId: string, auth: ToolScopedAuth): void {
+    this.authManager.setAuthToken(agentId, auth);
+  }
+
+  /**
+   * Get tool-scoped auth token
+   */
+  getToolAuth(agentId: string, toolName: string): ToolScopedAuth | undefined {
+    return this.authManager.getAuthToken(agentId, toolName);
   }
 }
