@@ -41,7 +41,7 @@ export function AppHeader() {
           <Menu className="h-5 w-5" />
         </Button>
         <div>
-          <h1 className="text-sm sm:text-base font-semibold">{viewTitles[currentView] || 'AgentOS'}</h1>
+          <h1 className="text-sm sm:text-base font-semibold">{viewTitles[currentView] || 'Genova'}</h1>
         </div>
       </div>
 

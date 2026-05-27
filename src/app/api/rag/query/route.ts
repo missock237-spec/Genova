@@ -24,10 +24,12 @@ export async function POST(request: NextRequest) {
       query,
       chunks,
       knowledge: knowledge.map(k => ({
-        content: k.content,
-        category: k.category,
-        source: k.source,
-        relevance: k.relevance,
+        content: k.entry.content,
+        category: k.entry.category,
+        source: k.entry.source,
+        relevance: k.entry.relevance,
+        score: k.score,
+        matchType: k.matchType,
       })),
     });
   } catch (error) {

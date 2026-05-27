@@ -14,7 +14,7 @@ export async function POST(
     }
 
     const steps = JSON.parse(workflow.steps || '[]');
-    const tasks = [];
+    const tasks: Array<{ id: string; title: string; status: string; [key: string]: unknown }> = [];
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];

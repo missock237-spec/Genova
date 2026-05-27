@@ -66,11 +66,16 @@ export async function POST(
       conversationId,
       userId: agent.userId,
       maxSteps,
+      maxRetries: 3,
       steps: [],
       status: 'running',
       memory: { shortTerm: [], longTermContext: '' },
       tools: toolMapping[agent.type] || allTools,
       guardrailsActive: true,
+      startedAt: new Date().toISOString(),
+      lastUpdatedAt: new Date().toISOString(),
+      totalTokensUsed: 0,
+      totalCost: 0,
     };
 
     // Create SSE stream

@@ -648,7 +648,7 @@ export function AutomationView() {
                                       <div className="w-7 h-7 rounded-full bg-emerald-500/10 flex items-center justify-center text-xs font-bold text-emerald-600">
                                         {i + 1}
                                       </div>
-                                      {i < msg.plan.steps.length - 1 && (
+                                      {i < (msg.plan?.steps?.length || 0) - 1 && (
                                         <div className="w-0.5 h-4 bg-emerald-500/20 mt-1" />
                                       )}
                                     </div>

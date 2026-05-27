@@ -159,6 +159,7 @@ export class AgentManager {
       task,
       userId,
       maxSteps: 8,
+      maxRetries: 3,
       steps: [],
       status: 'running',
       memory: {
@@ -167,6 +168,10 @@ export class AgentManager {
       },
       tools: agentTools,
       guardrailsActive: true,
+      startedAt: new Date().toISOString(),
+      lastUpdatedAt: new Date().toISOString(),
+      totalTokensUsed: 0,
+      totalCost: 0,
     };
 
     return executeAgentLoop(executionContext, this.toolRegistry, onStep);

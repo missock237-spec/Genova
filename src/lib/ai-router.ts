@@ -1,7 +1,8 @@
 // AI Router — Routes to Groq (speed) or OpenRouter (intelligence) based on task type
+// ⚠️ API keys are loaded from environment variables for security
 
-const GROQ_API_KEY = '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';
-const OPENROUTER_API_KEY = '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';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
@@ -68,8 +69,8 @@ export async function streamChat(
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       ...(config.provider === 'openrouter' && {
-        'HTTP-Referer': 'https://agentos.ai',
-        'X-Title': 'AgentOS',
+        'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://genova.ai',
+        'X-Title': 'Genova',
       }),
     },
     body: JSON.stringify({
@@ -103,8 +104,8 @@ export async function chatCompletion(
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       ...(config.provider === 'openrouter' && {
-        'HTTP-Referer': 'https://agentos.ai',
-        'X-Title': 'AgentOS',
+        'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://genova.ai',
+        'X-Title': 'Genova',
       }),
     },
     body: JSON.stringify({
@@ -136,7 +137,7 @@ export async function orchestrate(
   const messages = [
     {
       role: 'system',
-      content: `Tu es l'orchestrateur AgentOS. Tu analyses les commandes en langage naturel et les transforme en plans d'action utilisant les agents IA disponibles. Réponds TOUJOURS en JSON valide avec cette structure:
+      content: `Tu es l'orchestrateur Genova. Tu analyses les commandes en langage naturel et les transforme en plans d'action utilisant les agents IA disponibles. Réponds TOUJOURS en JSON valide avec cette structure:
 {
   "understanding": "Compréhension de la demande",
   "steps": [
@@ -168,7 +169,7 @@ export async function validateAction(
   const messages = [
     {
       role: 'system',
-      content: `Tu es le système de validation AgentOS. Tu vérifies si une action respecte les garde-fous définis. Réponds TOUJOURS en JSON valide:
+      content: `Tu es le système de validation Genova. Tu vérifies si une action respecte les garde-fous définis. Réponds TOUJOURS en JSON valide:
 {
   "valid": true/false,
   "message": "Message explicatif",

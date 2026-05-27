@@ -52,7 +52,7 @@ export function AppSidebar() {
               <Cpu className="h-5 w-5 text-emerald-500" />
             </div>
             <div>
-              <h2 className="font-bold text-sm tracking-tight">AgentOS</h2>
+              <h2 className="font-bold text-sm tracking-tight">Genova</h2>
               <p className="text-[10px] text-muted-foreground">AI Operating System</p>
             </div>
           </div>

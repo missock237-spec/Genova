@@ -1,4 +1,4 @@
-// Agent Engine Index — Initialize and wire everything together
+// Genova Agent Engine Index — Initialize and wire everything together
 
 import { ToolRegistry } from '@/lib/tools/registry';
 import { webSearchTool } from '@/lib/tools/web-search';
@@ -16,11 +16,13 @@ import { DocumentProcessor } from '@/lib/rag/document-processor';
 import { RAGRetriever } from '@/lib/rag/retriever';
 import { AgentManager } from '@/lib/agent-engine/agent-manager';
 import { executeAgentLoop } from '@/lib/agent-engine/execution-loop';
+import { SandboxManager, getSandboxManager } from '@/lib/tools/sandbox';
+import { getStreamManager, StreamManager } from '@/lib/streaming';
 
 // Singleton instance
-let engineInstance: AgentEngine | null = null;
+let engineInstance: GenovaEngine | null = null;
 
-export interface AgentEngine {
+export interface GenovaEngine {
   toolRegistry: ToolRegistry;
   jobQueue: JobQueue;
   tracer: Tracer;
@@ -31,15 +33,17 @@ export interface AgentEngine {
   documentProcessor: DocumentProcessor;
   ragRetriever: RAGRetriever;
   agentManager: AgentManager;
+  sandboxManager: SandboxManager;
+  streamManager: StreamManager;
 }
 
 /**
- * Initialize the Agent Engine with all subsystems
+ * Initialize the Genova Agent Engine with all subsystems
  */
-export function initializeAgentEngine(): AgentEngine {
+export function initializeAgentEngine(): GenovaEngine {
   if (engineInstance) return engineInstance;
 
-  // Create tool registry
+  // Create tool registry with permission layer
   const toolRegistry = new ToolRegistry();
   toolRegistry.register(webSearchTool);
   toolRegistry.register(calculatorTool);
@@ -68,6 +72,12 @@ export function initializeAgentEngine(): AgentEngine {
   // Create agent manager
   const agentManager = new AgentManager(toolRegistry);
 
+  // Create sandbox manager
+  const sandboxManager = getSandboxManager();
+
+  // Create stream manager
+  const streamManager = getStreamManager();
+
   // Register job handlers
   jobQueue.registerHandler('agent_execution', async (job) => {
     const { agentId, task, userId, conversationId, maxSteps } = job.payload;
@@ -81,11 +91,16 @@ export function initializeAgentEngine(): AgentEngine {
         conversationId: conversationId as string | undefined,
         userId: userId as string,
         maxSteps: (maxSteps as number) || 10,
+        maxRetries: 3,
         steps: [],
         status: 'running',
         memory: { shortTerm: [], longTermContext: '' },
         tools: toolRegistry.getToolNames(),
         guardrailsActive: true,
+        startedAt: new Date().toISOString(),
+        lastUpdatedAt: new Date().toISOString(),
+        totalTokensUsed: 0,
+        totalCost: 0,
       },
       toolRegistry,
     );
@@ -103,6 +118,31 @@ export function initializeAgentEngine(): AgentEngine {
     return { chunkCount: chunks.length };
   });
 
+  jobQueue.registerHandler('memory_pruning', async (job) => {
+    const { userId } = job.payload;
+    const result = await longTermMemory.pruneMemories(userId as string);
+    return result;
+  });
+
+  jobQueue.registerHandler('memory_summarization', async (job) => {
+    const { userId, olderThanDays } = job.payload;
+    const result = await longTermMemory.summarizeOldMemories(userId as string, {
+      olderThanDays: (olderThanDays as number) || 30,
+    });
+    return result;
+  });
+
+  jobQueue.registerHandler('sandbox_execution', async (job) => {
+    const { code, language, sandboxId, userId, agentId } = job.payload;
+    const result = await sandboxManager.executeCode(
+      code as string,
+      language as string,
+      sandboxId as string,
+      { userId: userId as string, agentId: agentId as string }
+    );
+    return result;
+  });
+
   // Start the job queue
   jobQueue.start();
 
@@ -111,6 +151,8 @@ export function initializeAgentEngine(): AgentEngine {
     setInterval(() => {
       rateLimiter.cleanup();
       tracer.cleanup();
+      sandboxManager.cleanup();
+      streamManager.cleanupStaleConnections();
     }, 300000);
   }
 
@@ -125,15 +167,17 @@ export function initializeAgentEngine(): AgentEngine {
     documentProcessor,
     ragRetriever,
     agentManager,
+    sandboxManager,
+    streamManager,
   };
 
   return engineInstance;
 }
 
 /**
- * Get the Agent Engine instance (initializes if needed)
+ * Get the Genova Engine instance (initializes if needed)
  */
-export function getAgentEngine(): AgentEngine {
+export function getAgentEngine(): GenovaEngine {
   return initializeAgentEngine();
 }
 
