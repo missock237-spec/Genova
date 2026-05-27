@@ -50,12 +50,27 @@ export async function hashPassword(password: string): Promise<string> {
   return `${salt}:${hash}`;
 }
 
+// Lazy-loaded legacy salt — read once from env, fail loudly if missing
+let _legacySalt: string | null = null;
+function getLegacySalt(): string {
+  if (_legacySalt === null) {
+    _legacySalt = process.env.ENCRYPTION_SALT || '';
+    if (!_legacySalt) {
+      throw new Error(
+        'ENCRYPTION_SALT environment variable is required. ' +
+        'Set it before starting the server. Example: ENCRYPTION_SALT=$(openssl rand -hex 32)'
+      );
+    }
+  }
+  return _legacySalt;
+}
+
 export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
   // Support legacy SHA-256 hashes (migration path)
   if (!storedHash.includes(':')) {
     // Legacy SHA-256 hash — verify using old method then rehash
     const encoder = new TextEncoder();
-    const salt = process.env.ENCRYPTION_SALT || 'genova-salt-2025-secure';
+    const salt = getLegacySalt();
     const data = encoder.encode(password + salt);
     const hash = await crypto.subtle.digest('SHA-256', data);
     const legacyHash = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
