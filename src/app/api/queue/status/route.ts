@@ -1,18 +1,17 @@
-// Queue Status Route — Get job queue status
-
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getAgentEngine } from '@/lib/agent-engine';
+import { applySecurity, secureResponse } from '@/lib/security';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'read' });
+    if (error) return error;
+
     const engine = getAgentEngine();
     const status = engine.jobQueue.getStatus();
 
-    return NextResponse.json(status);
+    return secureResponse(request, NextResponse.json(status));
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Erreur serveur' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Erreur serveur' }, { status: 500 });
   }
 }

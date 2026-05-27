@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { applySecurity, secureResponse } from '@/lib/security';
+import { validateBody, createGuardrailSchema } from '@/lib/validation';
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = request.nextUrl.searchParams.get('userId');
-    if (!userId) {
-      return NextResponse.json({ error: 'userId requis' }, { status: 400 });
-    }
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'read' });
+    if (error) return error;
 
     const guardrails = await db.guardrail.findMany({
-      where: { userId },
+      where: { userId: auth!.userId },
       orderBy: { createdAt: 'desc' },
     });
 
-    return NextResponse.json(guardrails);
+    return secureResponse(request, NextResponse.json(guardrails));
   } catch (error) {
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
@@ -21,34 +21,24 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { name, type, description, rules, severity, userId } = body;
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'write' });
+    if (error) return error;
 
-    if (!name || !type || !userId) {
-      return NextResponse.json({ error: 'Nom, type et userId requis' }, { status: 400 });
-    }
+    const body = await request.json();
+    const validation = validateBody(createGuardrailSchema, body);
+    if (!validation.success) return validation.error;
+
+    const { name, type, description, rules, severity } = validation.data;
 
     const guardrail = await db.guardrail.create({
-      data: {
-        name,
-        type,
-        description: description || '',
-        rules: rules ? JSON.stringify(rules) : '{}',
-        severity: severity || 'warning',
-        userId,
-      },
+      data: { name, type, description: description || '', rules: JSON.stringify(rules), severity, userId: auth!.userId },
     });
 
     await db.activityLog.create({
-      data: {
-        action: 'Garde-fou créé',
-        details: JSON.stringify({ guardrailName: name, type }),
-        category: 'guardrail',
-        userId,
-      },
+      data: { action: 'Garde-fou créé', details: JSON.stringify({ guardrailName: name, type }), category: 'guardrail', userId: auth!.userId },
     });
 
-    return NextResponse.json(guardrail, { status: 201 });
+    return secureResponse(request, NextResponse.json(guardrail, { status: 201 }));
   } catch (error) {
     return NextResponse.json({ error: 'Erreur lors de la création' }, { status: 500 });
   }

@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { applySecurity, verifyOwnership, secureResponse } from '@/lib/security';
+import { validateBody, updateGuardrailSchema } from '@/lib/validation';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'read' });
+    if (error) return error;
+
     const { id } = await params;
     const guardrail = await db.guardrail.findUnique({
       where: { id },
@@ -16,7 +21,10 @@ export async function GET(
       return NextResponse.json({ error: 'Garde-fou non trouvé' }, { status: 404 });
     }
 
-    return NextResponse.json(guardrail);
+    const ownershipError = verifyOwnership(auth!.userId, guardrail.userId, 'Garde-fou');
+    if (ownershipError) return ownershipError;
+
+    return secureResponse(request, NextResponse.json(guardrail));
   } catch (error) {
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
@@ -27,51 +35,64 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
-    const body = await request.json();
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'write' });
+    if (error) return error;
 
-    const guardrail = await db.guardrail.update({
+    const { id } = await params;
+    const guardrail = await db.guardrail.findUnique({ where: { id } });
+    if (!guardrail) {
+      return NextResponse.json({ error: 'Garde-fou non trouvé' }, { status: 404 });
+    }
+
+    const ownershipError = verifyOwnership(auth!.userId, guardrail.userId, 'Garde-fou');
+    if (ownershipError) return ownershipError;
+
+    const body = await request.json();
+    const validation = validateBody(updateGuardrailSchema, body);
+    if (!validation.success) return validation.error;
+
+    const updated = await db.guardrail.update({
       where: { id },
       data: {
-        ...(body.name && { name: body.name }),
-        ...(body.type && { type: body.type }),
-        ...(body.description !== undefined && { description: body.description }),
-        ...(body.rules && { rules: JSON.stringify(body.rules) }),
-        ...(body.severity && { severity: body.severity }),
-        ...(body.isActive !== undefined && { isActive: body.isActive }),
+        ...(validation.data.name && { name: validation.data.name }),
+        ...(validation.data.type && { type: validation.data.type }),
+        ...(validation.data.description !== undefined && { description: validation.data.description }),
+        ...(validation.data.rules && { rules: JSON.stringify(validation.data.rules) }),
+        ...(validation.data.severity && { severity: validation.data.severity }),
+        ...(validation.data.isActive !== undefined && { isActive: validation.data.isActive }),
       },
     });
 
-    return NextResponse.json(guardrail);
+    return secureResponse(request, NextResponse.json(updated));
   } catch (error) {
     return NextResponse.json({ error: 'Erreur lors de la mise à jour' }, { status: 500 });
   }
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'delete' });
+    if (error) return error;
+
     const { id } = await params;
     const guardrail = await db.guardrail.findUnique({ where: { id } });
-
     if (!guardrail) {
       return NextResponse.json({ error: 'Garde-fou non trouvé' }, { status: 404 });
     }
 
+    const ownershipError = verifyOwnership(auth!.userId, guardrail.userId, 'Garde-fou');
+    if (ownershipError) return ownershipError;
+
     await db.guardrail.delete({ where: { id } });
 
     await db.activityLog.create({
-      data: {
-        action: 'Garde-fou supprimé',
-        details: JSON.stringify({ guardrailName: guardrail.name }),
-        category: 'guardrail',
-        userId: guardrail.userId,
-      },
+      data: { action: 'Garde-fou supprimé', details: JSON.stringify({ guardrailName: guardrail.name }), category: 'guardrail', userId: auth!.userId },
     });
 
-    return NextResponse.json({ success: true });
+    return secureResponse(request, NextResponse.json({ success: true }));
   } catch (error) {
     return NextResponse.json({ error: 'Erreur lors de la suppression' }, { status: 500 });
   }

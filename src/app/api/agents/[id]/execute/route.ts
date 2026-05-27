@@ -1,8 +1,8 @@
-// Agent Execute Route — Execute agent with ReAct loop (SSE streaming)
-
 import { NextRequest } from 'next/server';
 import { getAgentEngine } from '@/lib/agent-engine';
 import { db } from '@/lib/db';
+import { applySecurity, verifyOwnership } from '@/lib/security';
+import { validateBody, executeAgentSchema } from '@/lib/validation';
 import type { ExecutionContext } from '@/lib/agent-engine';
 
 export async function POST(
@@ -10,42 +10,39 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'aiExecute' });
+    if (error) return error;
+
     const { id } = await params;
     const body = await request.json();
-    const { task, maxSteps = 10, conversationId } = body;
-
-    if (!task) {
-      return new Response(JSON.stringify({ error: 'Tâche requise' }), { status: 400 });
+    const validation = validateBody(executeAgentSchema, body);
+    if (!validation.success) {
+      return new Response(JSON.stringify(validation.error), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
-    // Get agent
+    const { task, context: inputContext } = validation.data;
+    const maxSteps = body.maxSteps || 10;
+    const conversationId = body.conversationId;
+
     const agent = await db.agent.findUnique({ where: { id } });
     if (!agent) {
-      return new Response(JSON.stringify({ error: 'Agent non trouvé' }), { status: 404 });
+      return new Response(JSON.stringify({ error: 'Agent non trouvé' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
     }
+
+    const ownershipError = verifyOwnership(auth!.userId, agent.userId, 'Agent');
+    if (ownershipError) return ownershipError;
 
     const engine = getAgentEngine();
 
-    // Rate limit check
-    if (!engine.rateLimiter.isAllowed(`agent_exec_${agent.userId}`, 10, 60000)) {
-      return new Response(JSON.stringify({ error: 'Limite de taux dépassée. Réessayez dans un moment.' }), { status: 429 });
-    }
-
     // Validate prompt
-    const validation = engine.promptValidator.validatePrompt(task);
-    if (!validation.safe && validation.threatLevel === 'critical') {
-      return new Response(JSON.stringify({ error: 'Tâche rejetée pour des raisons de sécurité', risks: validation.risks }), { status: 400 });
+    const promptValidation = engine.promptValidator.validatePrompt(task);
+    if (!promptValidation.safe && promptValidation.threatLevel === 'critical') {
+      return new Response(JSON.stringify({ error: 'Tâche rejetée pour des raisons de sécurité', risks: promptValidation.risks }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
-    // Build execution context
     let agentConfig: Record<string, unknown> = {};
-    try {
-      agentConfig = JSON.parse(agent.config);
-    } catch {
-      agentConfig = {};
-    }
+    try { agentConfig = JSON.parse(agent.config); } catch { agentConfig = {}; }
 
-    // Get tools for agent type
     const allTools = engine.toolRegistry.getToolNames();
     const toolMapping: Record<string, string[]> = {
       sales: ['web_search', 'database_query', 'calculator'],
@@ -64,7 +61,7 @@ export async function POST(
       agentConfig,
       task,
       conversationId,
-      userId: agent.userId,
+      userId: auth!.userId,
       maxSteps,
       maxRetries: 3,
       steps: [],
@@ -78,48 +75,29 @@ export async function POST(
       totalCost: 0,
     };
 
-    // Create SSE stream
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
-        // Send initial event
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'start', agentId: agent.id, agentName: agent.name, task })}\n\n`));
-
         try {
-          const steps = await engine.agentManager.delegateTask(
-            agent.id,
-            task,
-            '',
-            agent.userId,
-            (step) => {
-              // Stream each step as an SSE event
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'step', step })}\n\n`));
-            }
+          const steps = await engine.agentManager.delegateTask(agent.id, task, '', auth!.userId,
+            (step) => { controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'step', step })}\n\n`)); }
           );
-
-          // Send completion event
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'complete', steps, totalSteps: steps.length })}\n\n`));
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-        } catch (error) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: error instanceof Error ? error.message : 'Erreur inconnue' })}\n\n`));
+        } catch (err) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err instanceof Error ? err.message : 'Erreur inconnue' })}\n\n`));
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-        } finally {
-          controller.close();
-        }
+        } finally { controller.close(); }
       },
     });
 
     return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
     });
-  } catch (error) {
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : 'Erreur serveur' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err instanceof Error ? err.message : 'Erreur serveur' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
     });
   }
 }

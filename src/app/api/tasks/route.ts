@@ -1,37 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { applySecurity, secureResponse } from '@/lib/security';
+import { validateBody, createTaskSchema } from '@/lib/validation';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { title, description, status, priority, agentId, workflowId, userId } = body;
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'write' });
+    if (error) return error;
 
-    if (!title || !userId) {
-      return NextResponse.json({ error: 'Titre et userId requis' }, { status: 400 });
-    }
+    const body = await request.json();
+    const validation = validateBody(createTaskSchema, body);
+    if (!validation.success) return validation.error;
+
+    const { title, description, priority, agentId, workflowId } = validation.data;
 
     const task = await db.task.create({
       data: {
         title,
         description: description || null,
-        status: status || 'pending',
-        priority: priority || 'medium',
+        status: 'pending',
+        priority,
         agentId: agentId || null,
         workflowId: workflowId || null,
-        userId,
+        userId: auth!.userId,
       },
     });
 
     await db.activityLog.create({
-      data: {
-        action: 'Tâche créée',
-        details: JSON.stringify({ taskId: task.id, title }),
-        category: 'system',
-        userId,
-      },
+      data: { action: 'Tâche créée', details: JSON.stringify({ taskId: task.id, title }), category: 'system', userId: auth!.userId },
     });
 
-    return NextResponse.json(task, { status: 201 });
+    return secureResponse(request, NextResponse.json(task, { status: 201 }));
   } catch (error) {
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
@@ -39,30 +38,22 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = request.nextUrl.searchParams.get('userId');
+    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'read' });
+    if (error) return error;
+
     const status = request.nextUrl.searchParams.get('status');
     const workflowId = request.nextUrl.searchParams.get('workflowId');
 
-    if (!userId) {
-      return NextResponse.json({ error: 'userId requis' }, { status: 400 });
-    }
-
-    const where: Record<string, unknown> = { userId };
+    const where: Record<string, unknown> = { userId: auth!.userId };
     if (status) where.status = status;
     if (workflowId) where.workflowId = workflowId;
 
     const tasks = await db.task.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-      include: {
-        agent: { select: { name: true, type: true } },
-        workflow: { select: { name: true } },
-        validations: true,
-      },
+      where, orderBy: { createdAt: 'desc' }, take: 50,
+      include: { agent: { select: { name: true, type: true } }, workflow: { select: { name: true } }, validations: true },
     });
 
-    return NextResponse.json(tasks);
+    return secureResponse(request, NextResponse.json(tasks));
   } catch (error) {
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
