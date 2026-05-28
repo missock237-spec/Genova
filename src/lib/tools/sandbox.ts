@@ -11,6 +11,9 @@
 import { db } from '@/lib/db';
 import { spawn, exec } from 'child_process';
 import type { ChildProcess } from 'child_process';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('sandbox');
 
 // ============================================================
 // INTERFACES
@@ -1255,10 +1258,10 @@ export async function getAutoSandbox(): Promise<{ sandbox: SandboxManager; metho
     try {
       autoSandboxInstance = new DockerSandboxAdapter();
       detectedMethod = 'docker';
-      console.info('[Sandbox] Auto-detected: Docker container execution');
+      log.info('Auto-detected: Docker container execution');
       return { sandbox: autoSandboxInstance, method: 'docker' };
     } catch (error) {
-      console.warn('[Sandbox] Docker available but initialization failed:', error);
+      log.warn('Docker available but initialization failed', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -1282,7 +1285,7 @@ export async function getAutoSandbox(): Promise<{ sandbox: SandboxManager; metho
     if (pythonCheck) {
       autoSandboxInstance = new SubprocessSandbox();
       detectedMethod = 'subprocess';
-      console.info('[Sandbox] Auto-detected: Subprocess execution (python3 available)');
+      log.info('Auto-detected: Subprocess execution (python3 available)');
       return { sandbox: autoSandboxInstance, method: 'subprocess' };
     }
   } catch {
@@ -1292,7 +1295,7 @@ export async function getAutoSandbox(): Promise<{ sandbox: SandboxManager; metho
   // Fall back to simulated execution
   autoSandboxInstance = new SandboxManager();
   detectedMethod = 'simulated';
-  console.info('[Sandbox] Auto-detected: Simulated execution (no python3 or Docker)');
+  log.info('Auto-detected: Simulated execution (no python3 or Docker)');
   return { sandbox: autoSandboxInstance, method: 'simulated' };
 }
 

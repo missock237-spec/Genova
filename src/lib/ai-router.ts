@@ -12,6 +12,9 @@
  */
 
 import ZAI from 'z-ai-web-dev-sdk';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('ai-router');
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,10 +98,14 @@ const DEFAULT_CONFIG: AIRouterConfig = {
 // Cost estimation (USD per 1 K tokens — approximate)
 // ---------------------------------------------------------------------------
 
+// Groq pricing as of 2025 — USD per 1K tokens
+// Source: https://console.groq.com/docs/models
+// llama-3.3-70b-versatile: $0.59/M input, $0.79/M output
+// llama-3.1-8b-instant:   $0.05/M input, $0.08/M output
 const GROQ_COST_PER_K: Record<string, { prompt: number; completion: number }> = {
-  default:   { prompt: 0, completion: 0 },
-  fast:      { prompt: 0, completion: 0 },
-  powerful:  { prompt: 0, completion: 0 },
+  default:   { prompt: 0.00059, completion: 0.00079 },   // llama-3.3-70b-versatile
+  fast:      { prompt: 0.00005, completion: 0.00008 },   // llama-3.1-8b-instant
+  powerful:  { prompt: 0.00059, completion: 0.00079 },   // llama-3.3-70b-versatile
 };
 
 const OPENROUTER_COST_PER_K: Record<string, { prompt: number; completion: number }> = {
@@ -175,6 +182,21 @@ interface ProviderCallResult {
 /**
  * Call via z-ai-web-dev-sdk (the universal fallback).
  */
+/**
+ * Create a promise that rejects when the AbortController signals.
+ * This enables proper timeout cancellation even for SDK calls
+ * that don't natively accept an AbortSignal.
+ */
+function abortRace(controller: AbortController, timeoutMs: number): Promise<never> {
+  return new Promise((_, reject) => {
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    controller.signal.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new Error(`Request timed out after ${timeoutMs}ms`));
+    }, { once: true });
+  });
+}
+
 async function callZAI(
   messages: AIMessage[],
   model: string,
@@ -184,14 +206,17 @@ async function callZAI(
   const zai = await ZAI.create();
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const completion = await zai.chat.completions.create({
-      messages,
-      model,
-      stream: false,
-    });
+    // Race the SDK call against the abort timeout
+    const completion = await Promise.race([
+      zai.chat.completions.create({
+        messages,
+        model,
+        stream: false,
+      }),
+      abortRace(controller, timeoutMs),
+    ]);
 
     const content = completion.choices?.[0]?.message?.content ?? '';
     const usage = completion.usage ?? {};
@@ -207,7 +232,10 @@ async function callZAI(
       model,
     };
   } finally {
-    clearTimeout(timer);
+    // Ensure abort is triggered to clean up any pending race
+    if (!controller.signal.aborted) {
+      controller.abort();
+    }
   }
 }
 
@@ -323,17 +351,28 @@ async function* streamZAI(
   const zai = await ZAI.create();
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Set up a timeout that aborts the controller for the initial connection
+  const connectionTimer = setTimeout(() => controller.abort(), timeoutMs);
 
   let totalDelta = '';
   try {
-    const completion = await zai.chat.completions.create({
-      messages,
-      model,
-      stream: true,
-    });
+    // Race the initial stream creation against timeout
+    const completion = await Promise.race([
+      zai.chat.completions.create({
+        messages,
+        model,
+        stream: true,
+      }),
+      abortRace(controller, timeoutMs),
+    ]);
+
+    // Connection established — clear the connection timeout
+    clearTimeout(connectionTimer);
 
     for await (const chunk of completion) {
+      // Check if aborted during streaming
+      if (controller.signal.aborted) break;
+
       const delta = chunk.choices?.[0]?.delta?.content ?? '';
       if (delta) {
         totalDelta += delta;
@@ -347,7 +386,10 @@ async function* streamZAI(
       usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
     };
   } finally {
-    clearTimeout(timer);
+    clearTimeout(connectionTimer);
+    if (!controller.signal.aborted) {
+      controller.abort();
+    }
   }
 }
 
@@ -750,12 +792,15 @@ export class AIRouter {
       // Analytics module not available yet — silent fail is intentional
     }
 
-    // Also log to console in development
-    if (process.env.NODE_ENV === 'development') {
-      console.log(
-        `[AI Router] provider=${provider} model=${model} tokens=${promptTokens}+${completionTokens} cost=$${costUsd.toFixed(6)} requestId=${requestId}`,
-      );
-    }
+    // Structured logging via centralized logger
+    log.info('AI request completed', {
+      provider,
+      model,
+      promptTokens,
+      completionTokens,
+      costUsd: costUsd.toFixed(6),
+      requestId,
+    });
   }
 }
 

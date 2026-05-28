@@ -1,11 +1,16 @@
 import { db } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { createAuditLog } from '@/lib/auth';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('session');
 
 const SESSION_DURATION_HOURS = 24;
 const REFRESH_TOKEN_DURATION_HOURS = 168; // 7 days
 const COOKIE_NAME = 'genova_session';
 const REFRESH_COOKIE_NAME = 'genova_refresh';
+const MAX_SESSIONS_PER_USER = 10; // Prevent session flooding
 
 export function createRefreshToken(): string {
   return crypto.randomBytes(48).toString('hex');
@@ -25,6 +30,41 @@ export async function createSession(
   const expiresAt = new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000);
   const refreshExpiresAt = new Date(Date.now() + REFRESH_TOKEN_DURATION_HOURS * 60 * 60 * 1000);
 
+  // Session hardening: Enforce max sessions per user
+  // If user has too many active sessions, revoke the oldest ones
+  const activeSessions = await db.session.findMany({
+    where: { userId, expiresAt: { gt: new Date() } },
+    orderBy: { lastAccessedAt: 'asc' },
+    select: { id: true },
+  });
+
+  if (activeSessions.length >= MAX_SESSIONS_PER_USER) {
+    // Remove oldest sessions to make room
+    const sessionsToRemove = activeSessions.slice(0, activeSessions.length - MAX_SESSIONS_PER_USER + 1);
+    const idsToRemove = sessionsToRemove.map(s => s.id);
+
+    await db.session.deleteMany({
+      where: { id: { in: idsToRemove } },
+    }).catch(() => {});
+
+    log.info('Evicted oldest sessions for user', {
+      userId,
+      evictedCount: idsToRemove.length,
+      remainingActive: activeSessions.length - idsToRemove.length,
+    });
+
+    // Audit log for session eviction
+    await createAuditLog({
+      userId,
+      action: 'session_evict',
+      resource: 'session',
+      details: { evictedCount: idsToRemove.length, reason: 'max_sessions_exceeded' },
+      ipAddress: options.ipAddress,
+      userAgent: options.userAgent,
+      severity: 'info',
+    });
+  }
+
   await db.session.create({
     data: {
       token,
@@ -35,6 +75,17 @@ export async function createSession(
       ipAddress: options.ipAddress || null,
       userAgent: options.userAgent || null,
     },
+  });
+
+  // Audit log for new session creation
+  await createAuditLog({
+    userId,
+    action: 'session_create',
+    resource: 'session',
+    details: { expiresAt: expiresAt.toISOString() },
+    ipAddress: options.ipAddress,
+    userAgent: options.userAgent,
+    severity: 'info',
   });
 
   return { token, refreshToken };
@@ -55,7 +106,7 @@ export async function validateSession(token: string): Promise<string | null> {
     return null;
   }
 
-  // Update last accessed timestamp
+  // Update last accessed timestamp (fire-and-forget)
   await db.session.update({
     where: { token },
     data: { lastAccessedAt: new Date() },
@@ -105,6 +156,15 @@ export async function refreshSession(
     },
   });
 
+  // Audit log for session refresh
+  await createAuditLog({
+    userId: session.userId,
+    action: 'session_refresh',
+    resource: 'session',
+    resourceId: session.id,
+    severity: 'info',
+  });
+
   return { token: newToken, refreshToken: newRefreshToken };
 }
 
@@ -136,14 +196,20 @@ export function extractRefreshToken(request: NextRequest): string | null {
 
 export async function getAuthenticatedUser(
   request: NextRequest
-): Promise<{ userId: string } | null> {
+): Promise<{ userId: string; role?: string } | null> {
   const token = extractToken(request);
   if (!token) return null;
 
   const userId = await validateSession(token);
   if (!userId) return null;
 
-  return { userId };
+  // Fetch user role for RBAC
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  });
+
+  return { userId, role: user?.role || 'user' };
 }
 
 export function setSessionCookie(response: NextResponse, token: string): void {
@@ -201,15 +267,51 @@ export function clearSessionCookie(response: NextResponse): void {
 }
 
 export async function deleteSession(token: string): Promise<void> {
+  const session = await db.session.findUnique({
+    where: { token },
+    select: { userId: true },
+  });
+
   await db.session.delete({ where: { token } }).catch(() => {});
+
+  if (session) {
+    await createAuditLog({
+      userId: session.userId,
+      action: 'logout',
+      resource: 'session',
+      severity: 'info',
+    });
+  }
 }
 
 export async function deleteSessionByRefreshToken(refreshToken: string): Promise<void> {
+  const session = await db.session.findUnique({
+    where: { refreshToken },
+    select: { userId: true },
+  });
+
   await db.session.delete({ where: { refreshToken } }).catch(() => {});
+
+  if (session) {
+    await createAuditLog({
+      userId: session.userId,
+      action: 'session_revoke_refresh',
+      resource: 'session',
+      severity: 'info',
+    });
+  }
 }
 
 export async function deleteAllUserSessions(userId: string): Promise<void> {
-  await db.session.deleteMany({ where: { userId } }).catch(() => {});
+  const result = await db.session.deleteMany({ where: { userId } }).catch(() => {});
+
+  await createAuditLog({
+    userId,
+    action: 'session_revoke_all',
+    resource: 'session',
+    details: { sessionsRevoked: result?.count || 0 },
+    severity: 'warning',
+  });
 }
 
 // Periodic cleanup of expired sessions (runs every hour)
@@ -218,12 +320,17 @@ if (typeof globalThis !== 'undefined') {
   if (!globalForCleanup.sessionCleanupInterval && process.env.NODE_ENV !== 'test') {
     globalForCleanup.sessionCleanupInterval = setInterval(async () => {
       try {
-        await db.session.deleteMany({
+        const result = await db.session.deleteMany({
           where: { expiresAt: { lt: new Date() } },
         });
+        if (result.count > 0) {
+          log.info('Cleaned up expired sessions', { count: result.count });
+        }
       } catch {
         // Silently fail - cleanup will retry next interval
       }
     }, 60 * 60 * 1000); // Every hour
   }
 }
+
+export { COOKIE_NAME, REFRESH_COOKIE_NAME, MAX_SESSIONS_PER_USER };

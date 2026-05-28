@@ -3,6 +3,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { applySecurity, secureResponse } from '@/lib/security';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('memory-stats');
 
 export async function GET(request: NextRequest) {
   const { auth, error: secError } = await applySecurity(request, { requireAuth: true });
@@ -120,7 +123,7 @@ export async function GET(request: NextRequest) {
       recentAgentMemories,
     }), request);
   } catch (err) {
-    console.error('Memory stats error:', err);
+    log.error('Memory stats error', { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
 }
