@@ -1,40 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUser, deleteSession, clearSessionCookie } from '@/lib/session';
-import { secureResponse } from '@/lib/security';
+import { extractToken, extractRefreshToken, deleteSession, deleteSessionByRefreshToken, clearSessionCookie } from '@/lib/session';
+import { applySecurity, secureResponse } from '@/lib/security';
+import { db } from '@/lib/db';
 
-/**
- * POST /api/auth/logout
- * FIX: Now requires valid auth (rejects unauthenticated requests).
- * Clears the httpOnly session cookie and deletes the session from DB.
- */
+export async function OPTIONS(request: NextRequest) {
+  const { error } = await applySecurity(request);
+  if (error) return error;
+  return new NextResponse(null, { status: 204 });
+}
+
 export async function POST(request: NextRequest) {
+  const { auth, error: secError } = await applySecurity(request, {
+    requireAuth: true,
+  });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
+
   try {
-    const auth = await getAuthenticatedUser(request);
-
-    // Even if auth fails, clear the cookie (best-effort logout)
-    const response = NextResponse.json({
-      success: true,
-      message: 'Déconnexion réussie',
-    });
-
-    // If we have a valid session, delete it from the database
-    if (auth) {
-      // Extract the token to delete from DB
-      const cookieToken = request.cookies.get('genova_session')?.value;
-      const authHeader = request.headers.get('Authorization');
-      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-      const token = cookieToken || bearerToken;
-
-      if (token) {
-        await deleteSession(token);
-      }
+    // Delete the session by session token
+    const token = extractToken(request);
+    if (token) {
+      await deleteSession(token);
     }
 
-    // Always clear the cookie
-    clearSessionCookie(response);
+    // Also delete by refresh token if present
+    const refreshToken = extractRefreshToken(request);
+    if (refreshToken) {
+      await deleteSessionByRefreshToken(refreshToken);
+    }
 
-    return secureResponse(request, response);
-  } catch (error) {
-    return NextResponse.json({ error: 'Erreur lors de la déconnexion' }, { status: 500 });
+    await db.activityLog.create({
+      data: {
+        action: 'Logout',
+        details: '{}',
+        category: 'auth',
+        userId: auth.userId,
+      },
+    });
+
+    const res = NextResponse.json({ success: true });
+    clearSessionCookie(res);
+    return secureResponse(res, request);
+  } catch {
+    const res = NextResponse.json(
+      { error: 'Logout failed' },
+      { status: 500 }
+    );
+    return secureResponse(res, request);
   }
 }

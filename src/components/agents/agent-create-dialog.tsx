@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -18,12 +18,40 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Mail, MessageCircle, Smartphone, Calendar, Search, Users, Database, Plug, GitBranch, Clock, BarChart3, Heart, Target, Code, FileText, ImageIcon } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import {
+  Globe,
+  Youtube,
+  Facebook,
+  Instagram,
+  Music2,
+  Linkedin,
+  Megaphone,
+  MessageCircle,
+  Phone,
+  Cpu,
+  Server,
+  Zap,
+  Mail,
+  Database,
+  Calendar,
+  Search,
+  Bot,
+  Loader2,
+  ShieldCheck,
+  ShoppingCart,
+  Headphones,
+  TrendingUp,
+  Microscope,
+  Users,
+  Calculator,
+  Puzzle,
+  Monitor,
+} from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useAuthStore } from '@/lib/store';
-import { AGENT_TOOLS, getToolsForAgentType, type AgentTool } from '@/lib/agent-tools';
+import { apiFetch } from '@/lib/api';
 
 interface AgentCreateDialogProps {
   open: boolean;
@@ -39,52 +67,68 @@ interface AgentCreateDialogProps {
 }
 
 const agentTypes = [
-  { value: 'sales', label: 'Commercial' },
-  { value: 'support', label: 'Support' },
-  { value: 'marketing', label: 'Marketing' },
-  { value: 'research', label: 'Recherche' },
-  { value: 'rh', label: 'RH' },
-  { value: 'accounting', label: 'Comptabilité' },
-  { value: 'custom', label: 'Personnalisé' },
+  { value: 'social_media', label: 'Social Media', icon: Megaphone },
+  { value: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
+  { value: 'browser', label: 'Navigateur', icon: Monitor },
+  { value: 'sales', label: 'Commercial', icon: ShoppingCart },
+  { value: 'support', label: 'Support', icon: Headphones },
+  { value: 'marketing', label: 'Marketing', icon: TrendingUp },
+  { value: 'research', label: 'Recherche', icon: Microscope },
+  { value: 'rh', label: 'RH', icon: Users },
+  { value: 'accounting', label: 'Comptabilité', icon: Calculator },
+  { value: 'custom', label: 'Personnalisé', icon: Puzzle },
 ];
 
-const toolIconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-  Mail,
-  MessageCircle,
-  Smartphone,
-  Calendar,
-  Search,
-  Users,
-  Database,
-  Plug,
-  GitBranch,
-  Clock,
-  BarChart3,
-  Heart,
-  Target,
-  Code,
-  FileText,
-  Image: ImageIcon,
-};
+const toolCategories = [
+  {
+    name: 'Navigation Web',
+    tools: [
+      { id: 'browse_web', label: 'Naviguer sur le web', icon: Globe, color: 'text-sky-500' },
+    ],
+  },
+  {
+    name: 'Réseaux Sociaux',
+    tools: [
+      { id: 'social_youtube', label: 'YouTube', icon: Youtube, color: 'text-red-500' },
+      { id: 'social_facebook', label: 'Facebook', icon: Facebook, color: 'text-blue-500' },
+      { id: 'social_instagram', label: 'Instagram', icon: Instagram, color: 'text-pink-500' },
+      { id: 'social_tiktok', label: 'TikTok', icon: Music2, color: 'text-rose-400' },
+      { id: 'social_linkedin', label: 'LinkedIn', icon: Linkedin, color: 'text-blue-400' },
+      { id: 'social_post', label: 'Publier sur les réseaux', icon: Megaphone, color: 'text-orange-500' },
+    ],
+  },
+  {
+    name: 'WhatsApp',
+    tools: [
+      { id: 'whatsapp_message', label: 'Envoyer des messages', icon: MessageCircle, color: 'text-green-500' },
+      { id: 'whatsapp_call', label: 'Passer des appels', icon: Phone, color: 'text-green-400' },
+    ],
+  },
+  {
+    name: 'Ressources',
+    tools: [
+      { id: 'use_api', label: 'Utiliser les APIs', icon: Zap, color: 'text-yellow-500' },
+      { id: 'use_cpu', label: 'Utiliser le CPU', icon: Cpu, color: 'text-purple-400' },
+      { id: 'use_mvp', label: 'Utiliser le MVP', icon: Server, color: 'text-emerald-500' },
+    ],
+  },
+  {
+    name: 'Classiques',
+    tools: [
+      { id: 'email', label: 'Email', icon: Mail, color: 'text-amber-500' },
+      { id: 'crm', label: 'CRM', icon: Database, color: 'text-cyan-500' },
+      { id: 'calendar', label: 'Calendrier', icon: Calendar, color: 'text-indigo-400' },
+      { id: 'web_search', label: 'Recherche Web', icon: Search, color: 'text-teal-500' },
+    ],
+  },
+];
 
-const categoryLabels: Record<string, string> = {
-  communication: 'Communication',
-  data: 'Données',
-  automation: 'Automatisation',
-  analysis: 'Analyse',
-  creation: 'Création',
-};
-
-const categoryColors: Record<string, string> = {
-  communication: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  data: 'bg-orange-500/10 text-orange-600 border-orange-500/20',
-  automation: 'bg-purple-500/10 text-purple-600 border-purple-500/20',
-  analysis: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20',
-  creation: 'bg-pink-500/10 text-pink-600 border-pink-500/20',
-};
+interface ToolConfig {
+  enabled: boolean;
+  requiresApproval: boolean;
+}
 
 export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: AgentCreateDialogProps) {
-  const { user } = useAuthStore();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
 
@@ -96,39 +140,56 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
     }
   };
 
+  const buildInitialTools = (): Record<string, ToolConfig> => {
+    const tools: Record<string, ToolConfig> = {};
+    toolCategories.forEach((cat) => {
+      cat.tools.forEach((tool) => {
+        tools[tool.id] = { enabled: false, requiresApproval: true };
+      });
+    });
+    if (editAgent) {
+      const parsed = parseConfig(editAgent.config);
+      const enabledTools: string[] = parsed.tools || [];
+      const approvalTools: string[] = parsed.approvalTools || [];
+      enabledTools.forEach((t: string) => {
+        if (tools[t]) {
+          tools[t].enabled = true;
+        }
+      });
+      approvalTools.forEach((t: string) => {
+        if (tools[t]) {
+          tools[t].requiresApproval = true;
+        }
+      });
+      // If a tool is enabled, set its approval based on config
+      if (parsed.toolConfigs) {
+        Object.entries(parsed.toolConfigs as Record<string, ToolConfig>).forEach(([key, val]) => {
+          if (tools[key]) {
+            tools[key] = val;
+          }
+        });
+      }
+    }
+    return tools;
+  };
+
   const [form, setForm] = useState({
     name: editAgent?.name || '',
     type: editAgent?.type || '',
     description: editAgent?.description || '',
     instructions: editAgent ? parseConfig(editAgent.config).instructions || '' : '',
     personality: editAgent ? parseConfig(editAgent.config).personality || 'professional' : 'professional',
-    selectedTools: editAgent ? parseConfig(editAgent.config).tools || [] : [] as string[],
   });
 
-  // Get recommended tools based on agent type
-  const recommendedTools = useMemo(() => {
-    if (!form.type) return AGENT_TOOLS;
-    return getToolsForAgentType(form.type);
-  }, [form.type]);
+  const [toolConfigs, setToolConfigs] = useState<Record<string, ToolConfig>>(buildInitialTools);
 
-  // Group tools by category
-  const toolsByCategory = useMemo(() => {
-    const categories: Record<string, AgentTool[]> = {};
-    for (const tool of recommendedTools) {
-      if (!categories[tool.category]) {
-        categories[tool.category] = [];
-      }
-      categories[tool.category].push(tool);
-    }
-    return categories;
-  }, [recommendedTools]);
-
-  const handleToolToggle = (toolId: string) => {
-    setForm((prev) => ({
+  const handleToolToggle = (toolId: string, field: 'enabled' | 'requiresApproval') => {
+    setToolConfigs((prev) => ({
       ...prev,
-      selectedTools: prev.selectedTools.includes(toolId)
-        ? prev.selectedTools.filter((t: string) => t !== toolId)
-        : [...prev.selectedTools, toolId],
+      [toolId]: {
+        ...prev[toolId],
+        [field]: !prev[toolId][field],
+      },
     }));
   };
 
@@ -141,29 +202,29 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
 
     setLoading(true);
     try {
+      const enabledTools = Object.entries(toolConfigs)
+        .filter(([, cfg]) => cfg.enabled)
+        .map(([id]) => id);
+
       const config = {
         instructions: form.instructions,
         personality: form.personality,
-        tools: form.selectedTools,
+        tools: enabledTools,
+        toolConfigs: Object.fromEntries(
+          Object.entries(toolConfigs).filter(([, cfg]) => cfg.enabled)
+        ),
       };
 
-      const url = editAgent ? `/api/agents/${editAgent.id}` : '/api/agents';
-      const method = editAgent ? 'PUT' : 'POST';
-      const body = editAgent
-        ? { name: form.name, type: form.type, description: form.description, config }
-        : { name: form.name, type: form.type, description: form.description, config };
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        toast({ title: 'Erreur', description: data.error, variant: 'destructive' });
-        return;
+      if (editAgent) {
+        await apiFetch(`/api/agents/${editAgent.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ name: form.name, type: form.type, description: form.description, config }),
+        });
+      } else {
+        await apiFetch('/api/agents', {
+          method: 'POST',
+          body: JSON.stringify({ name: form.name, type: form.type, description: form.description, config }),
+        });
       }
 
       toast({
@@ -172,149 +233,157 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
       });
       onOpenChange(false);
       onSuccess();
-      setForm({ name: '', type: '', description: '', instructions: '', personality: 'professional', selectedTools: [] });
-    } catch {
-      toast({ title: 'Erreur', description: 'Erreur serveur', variant: 'destructive' });
+      setForm({ name: '', type: '', description: '', instructions: '', personality: 'professional' });
+      setToolConfigs(buildInitialTools());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erreur serveur';
+      toast({ title: 'Erreur', description: message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
   };
 
+  const enabledToolCount = Object.values(toolConfigs).filter((c) => c.enabled).length;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
         <DialogHeader>
-          <DialogTitle>{editAgent ? 'Modifier l\'agent' : 'Créer un agent IA'}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            <Bot className="h-5 w-5 text-primary" />
+            {editAgent ? 'Modifier l\'agent' : 'Créer un agent IA'}
+          </DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label>Nom de l&apos;agent</Label>
-            <Input
-              placeholder="Ex: Agent Commercial Pro"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Type</Label>
-            <Select value={form.type} onValueChange={(value) => setForm({ ...form, type: value })}>
-              <SelectTrigger>
-                <SelectValue placeholder="Sélectionner un type" />
-              </SelectTrigger>
-              <SelectContent>
-                {agentTypes.map((type) => (
-                  <SelectItem key={type.value} value={type.value}>
-                    {type.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Description</Label>
-            <Textarea
-              placeholder="Décrivez le rôle de cet agent..."
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              rows={3}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Instructions</Label>
-            <Textarea
-              placeholder="Instructions spécifiques pour l'agent..."
-              value={form.instructions}
-              onChange={(e) => setForm({ ...form, instructions: e.target.value })}
-              rows={3}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Personnalité</Label>
-            <Select value={form.personality} onValueChange={(value) => setForm({ ...form, personality: value })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="professional">Professionnel</SelectItem>
-                <SelectItem value="friendly">Amical</SelectItem>
-                <SelectItem value="formal">Formel</SelectItem>
-                <SelectItem value="creative">Créatif</SelectItem>
-                <SelectItem value="analytical">Analytique</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Enhanced Tools Selection */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label>Outils</Label>
-              {form.type && (
-                <Badge variant="outline" className="text-[10px]">
-                  {recommendedTools.length} outil(s) recommandé(s)
-                </Badge>
-              )}
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Basic Info */}
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nom de l&apos;agent</Label>
+              <Input
+                placeholder="Ex: Agent Commercial Pro"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
             </div>
 
-            {Object.entries(toolsByCategory).map(([category, tools]) => (
-              <div key={category} className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className={`text-[10px] h-5 ${categoryColors[category] || ''}`}>
-                    {categoryLabels[category] || category}
-                  </Badge>
-                </div>
-                <div className="grid grid-cols-2 gap-2 pl-1">
-                  {tools.map((tool) => {
-                    const ToolIcon = toolIconMap[tool.icon];
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <Select value={form.type} onValueChange={(value) => setForm({ ...form, type: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Sélectionner un type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {agentTypes.map((type) => (
+                    <SelectItem key={type.value} value={type.value}>
+                      <div className="flex items-center gap-2">
+                        <type.icon className="h-4 w-4" />
+                        {type.label}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea
+                placeholder="Décrivez le rôle de cet agent..."
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                rows={2}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Personnalité</Label>
+              <Select value={form.personality} onValueChange={(value) => setForm({ ...form, personality: value })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="professional">Professionnel</SelectItem>
+                  <SelectItem value="friendly">Amical</SelectItem>
+                  <SelectItem value="formal">Formel</SelectItem>
+                  <SelectItem value="creative">Créatif</SelectItem>
+                  <SelectItem value="analytical">Analytique</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Instructions</Label>
+              <Textarea
+                placeholder="Instructions spécifiques pour l'agent..."
+                value={form.instructions}
+                onChange={(e) => setForm({ ...form, instructions: e.target.value })}
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Tools/Capabilities Section */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-base">Outils & Capacités</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Configurez les permissions de l&apos;agent
+                </p>
+              </div>
+              <Badge variant="secondary" className="text-xs">
+                {enabledToolCount} outil{enabledToolCount !== 1 ? 's' : ''} activé{enabledToolCount !== 1 ? 's' : ''}
+              </Badge>
+            </div>
+
+            {toolCategories.map((category) => (
+              <div key={category.name} className="space-y-2">
+                <h4 className="text-sm font-medium text-muted-foreground">{category.name}</h4>
+                <div className="space-y-2">
+                  {category.tools.map((tool) => {
+                    const config = toolConfigs[tool.id] || { enabled: false, requiresApproval: true };
                     return (
                       <div
                         key={tool.id}
-                        className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
-                          form.selectedTools.includes(tool.id)
-                            ? 'border-primary/50 bg-primary/5'
-                            : 'border-border/50 hover:border-primary/20'
+                        className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                          config.enabled
+                            ? 'border-primary/30 bg-primary/5'
+                            : 'border-border/50 bg-card'
                         }`}
-                        onClick={() => handleToolToggle(tool.id)}
                       >
-                        <Checkbox
-                          id={tool.id}
-                          checked={form.selectedTools.includes(tool.id)}
-                          onCheckedChange={() => handleToolToggle(tool.id)}
-                          className="pointer-events-none"
-                        />
-                        {ToolIcon && <ToolIcon className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
-                        <label htmlFor={tool.id} className="text-xs cursor-pointer truncate">
-                          {tool.name}
-                        </label>
+                        <div className="flex items-center gap-3">
+                          <div className={`p-1.5 rounded-md ${config.enabled ? 'bg-primary/10' : 'bg-muted'}`}>
+                            <tool.icon className={`h-4 w-4 ${config.enabled ? tool.color : 'text-muted-foreground'}`} />
+                          </div>
+                          <span className={`text-sm ${config.enabled ? 'text-foreground' : 'text-muted-foreground'}`}>
+                            {tool.label}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {config.enabled && (
+                            <div className="flex items-center gap-2">
+                              <ShieldCheck className={`h-3.5 w-3.5 ${config.requiresApproval ? 'text-amber-500' : 'text-muted-foreground'}`} />
+                              <span className="text-[10px] text-muted-foreground">Approbation</span>
+                              <Switch
+                                checked={config.requiresApproval}
+                                onCheckedChange={() => handleToolToggle(tool.id, 'requiresApproval')}
+                                className="scale-75"
+                              />
+                            </div>
+                          )}
+                          <Switch
+                            checked={config.enabled}
+                            onCheckedChange={() => handleToolToggle(tool.id, 'enabled')}
+                          />
+                        </div>
                       </div>
                     );
                   })}
                 </div>
               </div>
             ))}
-
-            {form.selectedTools.length > 0 && (
-              <div className="flex flex-wrap gap-1 pt-1">
-                {form.selectedTools.map((toolId: string) => {
-                  const tool = AGENT_TOOLS.find(t => t.id === toolId);
-                  return tool ? (
-                    <Badge key={toolId} variant="secondary" className="text-[10px] h-5 gap-1">
-                      {tool.name}
-                      <button
-                        type="button"
-                        className="ml-0.5 hover:text-destructive"
-                        onClick={() => handleToolToggle(toolId)}
-                      >
-                        ×
-                      </button>
-                    </Badge>
-                  ) : null;
-                })}
-              </div>
-            )}
           </div>
 
           <div className="flex justify-end gap-2 pt-2">

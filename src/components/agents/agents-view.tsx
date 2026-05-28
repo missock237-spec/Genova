@@ -1,12 +1,21 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { useAuthStore } from '@/lib/store';
+import { useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { AgentCard } from './agent-card';
 import { AgentCreateDialog } from './agent-create-dialog';
+import { AgentDetailView } from './agent-detail-view';
 import { EmptyState } from '@/components/shared/empty-state';
-import { Plus, Bot, Loader2, Send, X, Zap, Brain } from 'lucide-react';
+import { Plus, Bot, Loader2, Search, Filter } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,16 +26,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
-import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/hooks/use-toast';
+import { apiFetch } from '@/lib/api';
 
 interface Agent {
   id: string;
@@ -37,79 +38,54 @@ interface Agent {
   config: string;
   avatar?: string | null;
   _count?: { tasks: number };
-}
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
+  permissions?: Array<{
+    id: string;
+    permission: string;
+    granted: boolean;
+    requiresApproval: boolean;
+  }>;
 }
 
 export function AgentsView() {
-  const { user } = useAuthStore();
   const { toast } = useToast();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [editAgent, setEditAgent] = useState<Agent | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
-  // Chat state
-  const [chatAgent, setChatAgent] = useState<Agent | null>(null);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatStreaming, setChatStreaming] = useState('');
-  const [chatConversationId, setChatConversationId] = useState<string | null>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
 
   const loadAgents = useCallback(async () => {
-    if (!user?.id) return;
     try {
-      // Only fetch ACTIVE agents for the main agents view
-      // Inactive agents are managed in Settings
-      const res = await fetch('/api/agents?status=active', { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setAgents(data);
-      }
+      const data = await apiFetch<Agent[]>('/api/agents');
+      setAgents(data);
     } catch (error) {
       console.error('Failed to load agents:', error);
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, []);
 
   useEffect(() => {
     loadAgents();
   }, [loadAgents]);
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages, chatStreaming]);
-
   const handleToggle = async (id: string) => {
     try {
-      const res = await fetch(`/api/agents/${id}/toggle`, { method: 'POST', credentials: 'include' });
-      if (res.ok) {
-        const updated = await res.json();
-        if (updated.status === 'inactive') {
-          // Remove from active agents view — it'll show in Settings
-          setAgents((prev) => prev.filter((a) => a.id !== id));
-          toast({
-            title: 'Agent désactivé',
-            description: `L'agent a été désactivé. Retrouvez-le dans les Paramètres.`,
-          });
-        } else {
-          setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, status: updated.status } : a)));
-          toast({
-            title: 'Agent activé',
-            description: `L'agent a été activé`,
-          });
-        }
+      const updated = await apiFetch<{ status: string }>(`/api/agents/${id}/toggle`, {
+        method: 'POST',
+      });
+      setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, status: updated.status } : a)));
+      if (selectedAgent?.id === id) {
+        setSelectedAgent((prev) => prev ? { ...prev, status: updated.status } : null);
       }
+      toast({
+        title: updated.status === 'active' ? 'Agent activé' : 'Agent désactivé',
+        description: `L'agent a été ${updated.status === 'active' ? 'activé' : 'désactivé'}`,
+      });
     } catch {
       toast({ title: 'Erreur', description: 'Erreur lors du changement de statut', variant: 'destructive' });
     }
@@ -118,11 +94,12 @@ export function AgentsView() {
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
-      const res = await fetch(`/api/agents/${deleteId}`, { method: 'DELETE', credentials: 'include' });
-      if (res.ok) {
-        setAgents((prev) => prev.filter((a) => a.id !== deleteId));
-        toast({ title: 'Agent supprimé', description: 'L\'agent a été supprimé' });
+      await apiFetch(`/api/agents/${deleteId}`, { method: 'DELETE' });
+      setAgents((prev) => prev.filter((a) => a.id !== deleteId));
+      if (selectedAgent?.id === deleteId) {
+        setSelectedAgent(null);
       }
+      toast({ title: 'Agent supprimé', description: 'L\'agent a été supprimé' });
     } catch {
       toast({ title: 'Erreur', description: 'Erreur lors de la suppression', variant: 'destructive' });
     } finally {
@@ -135,103 +112,22 @@ export function AgentsView() {
     setCreateOpen(true);
   };
 
-  const openChat = (agent: Agent) => {
-    setChatAgent(agent);
-    setChatMessages([]);
-    setChatInput('');
-    setChatStreaming('');
-    setChatConversationId(null);
-    setChatOpen(true);
+  const handleSelectAgent = (agent: Agent) => {
+    setSelectedAgent(agent);
   };
 
-  const sendChatMessage = async () => {
-    if (!chatInput.trim() || !chatAgent || chatLoading) return;
+  // Get unique types for filter
+  const uniqueTypes = Array.from(new Set(agents.map((a) => a.type)));
 
-    const userMsg: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: chatInput,
-      timestamp: new Date().toISOString(),
-    };
-
-    setChatMessages(prev => [...prev, userMsg]);
-    setChatInput('');
-    setChatLoading(true);
-    setChatStreaming('');
-
-    try {
-      const res = await fetch(`/api/agents/${chatAgent.id}/chat`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: chatInput,
-          conversationId: chatConversationId,
-          taskType: 'quick_chat',
-        }),
-      });
-
-      if (!res.ok) throw new Error('Erreur serveur');
-
-      const newConvId = res.headers.get('X-Conversation-Id');
-      if (newConvId) setChatConversationId(newConvId);
-
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let fullContent = '';
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-              try {
-                const json = JSON.parse(line.slice(6));
-                const delta = json.choices?.[0]?.delta?.content;
-                if (delta) {
-                  fullContent += delta;
-                  setChatStreaming(fullContent);
-                }
-              } catch {
-                // skip
-              }
-            }
-          }
-        }
-      }
-
-      if (fullContent) {
-        setChatMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: fullContent,
-          timestamp: new Date().toISOString(),
-        }]);
-      }
-      setChatStreaming('');
-    } catch {
-      setChatMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: 'Erreur de connexion au serveur IA. Veuillez réessayer.',
-        timestamp: new Date().toISOString(),
-      }]);
-    } finally {
-      setChatLoading(false);
-    }
-  };
-
-  const handleChatKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendChatMessage();
-    }
-  };
+  // Filter agents
+  const filteredAgents = agents.filter((agent) => {
+    const matchesSearch = !searchQuery ||
+      agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      agent.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = statusFilter === 'all' || agent.status === statusFilter;
+    const matchesType = typeFilter === 'all' || agent.type === typeFilter;
+    return matchesSearch && matchesStatus && matchesType;
+  });
 
   if (loading) {
     return (
@@ -241,18 +137,69 @@ export function AgentsView() {
     );
   }
 
+  // Show detail view if an agent is selected
+  if (selectedAgent) {
+    return (
+      <AgentDetailView
+        agent={selectedAgent}
+        onBack={() => setSelectedAgent(null)}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Agents actifs</h2>
-          <p className="text-sm text-muted-foreground">{agents.length} agent(s) actif(s) — les agents inactifs sont dans les Paramètres</p>
+          <h2 className="text-lg font-semibold">Vos Agents IA</h2>
+          <p className="text-sm text-muted-foreground">{agents.length} agent(s) configuré(s)</p>
         </div>
-        <Button className="gap-2 float-action" onClick={() => { setEditAgent(null); setCreateOpen(true); }}>
+        <Button className="gap-2" onClick={() => { setEditAgent(null); setCreateOpen(true); }}>
           <Plus className="h-4 w-4" />
           Créer un agent
         </Button>
       </div>
+
+      {/* Search & Filters */}
+      {agents.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Rechercher un agent..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-full sm:w-[160px]">
+              <Filter className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
+              <SelectValue placeholder="Statut" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tous les statuts</SelectItem>
+              <SelectItem value="active">Actif</SelectItem>
+              <SelectItem value="inactive">Inactif</SelectItem>
+            </SelectContent>
+          </Select>
+          {uniqueTypes.length > 1 && (
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="w-full sm:w-[160px]">
+                <SelectValue placeholder="Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les types</SelectItem>
+                {uniqueTypes.map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {type}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      )}
 
       {agents.length === 0 ? (
         <EmptyState
@@ -262,23 +209,22 @@ export function AgentsView() {
           actionLabel="Créer un agent"
           onAction={() => { setEditAgent(null); setCreateOpen(true); }}
         />
+      ) : filteredAgents.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          <Search className="h-8 w-8 mx-auto mb-3 opacity-30" />
+          <p className="text-sm">Aucun agent ne correspond à votre recherche</p>
+        </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {agents.map((agent, index) => (
-            <motion.div
+          {filteredAgents.map((agent) => (
+            <AgentCard
               key={agent.id}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.08, duration: 0.35, ease: 'easeOut' }}
-            >
-              <AgentCard
-                agent={agent}
-                onToggle={handleToggle}
-                onDelete={setDeleteId}
-                onEdit={handleEdit}
-                onChat={agent.status === 'active' ? openChat : undefined}
-              />
-            </motion.div>
+              agent={agent}
+              onToggle={handleToggle}
+              onDelete={setDeleteId}
+              onEdit={handleEdit}
+              onSelect={handleSelectAgent}
+            />
           ))}
         </div>
       )}
@@ -309,122 +255,6 @@ export function AgentsView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Agent Chat Sheet */}
-      <Sheet open={chatOpen} onOpenChange={setChatOpen}>
-        <SheetContent className="w-full sm:max-w-lg p-0 flex flex-col">
-          <SheetHeader className="p-4 border-b border-border/50">
-            <SheetTitle className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-primary/10">
-                <Bot className="h-4 w-4 text-primary" />
-              </div>
-              Discussion avec {chatAgent?.name}
-              {chatAgent && (
-                <Badge variant="outline" className="text-[10px] ml-1">
-                  {chatAgent.type}
-                </Badge>
-              )}
-            </SheetTitle>
-          </SheetHeader>
-
-          {/* Chat messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-            {chatMessages.length === 0 && !chatLoading && (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <div className="p-3 rounded-2xl bg-primary/10 mb-3">
-                  <Bot className="h-8 w-8 text-primary" />
-                </div>
-                <h3 className="text-sm font-semibold mb-1">{chatAgent?.name}</h3>
-                <p className="text-xs text-muted-foreground max-w-xs">
-                  Discutez directement avec cet agent IA. Il se souviendra de votre conversation.
-                </p>
-              </div>
-            )}
-
-            <AnimatePresence mode="popLayout">
-              {chatMessages.map((msg) => (
-                <motion.div
-                  key={msg.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.2 }}
-                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-                    msg.role === 'user'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-card border border-border/50'
-                  }`}>
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                    <p className={`text-[10px] mt-1 ${msg.role === 'user' ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
-                      {new Date(msg.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-
-            {/* Streaming content */}
-            {chatStreaming && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex justify-start"
-              >
-                <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border/50">
-                  <p className="text-sm whitespace-pre-wrap">{chatStreaming}<span className="animate-pulse">▋</span></p>
-                </div>
-              </motion.div>
-            )}
-
-            {/* Loading indicator */}
-            {chatLoading && !chatStreaming && (
-              <div className="flex justify-start">
-                <div className="rounded-2xl px-4 py-3 bg-card border border-border/50">
-                  <div className="flex gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-primary typing-dot" />
-                    <div className="w-2 h-2 rounded-full bg-primary typing-dot" />
-                    <div className="w-2 h-2 rounded-full bg-primary typing-dot" />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div ref={chatEndRef} />
-          </div>
-
-          {/* Chat input */}
-          <div className="p-4 border-t border-border/50">
-            <div className="flex items-end gap-2">
-              <Textarea
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={handleChatKeyDown}
-                placeholder={`Envoyer un message à ${chatAgent?.name || 'l\'agent'}...`}
-                className="min-h-[40px] max-h-24 resize-none text-sm"
-                rows={1}
-              />
-              <Button
-                size="icon"
-                onClick={sendChatMessage}
-                disabled={chatLoading || !chatInput.trim()}
-                className="flex-shrink-0 h-10 w-10"
-              >
-                <Send className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="flex items-center justify-center gap-3 mt-2">
-              <Badge variant="outline" className="text-[9px] h-4 gap-1">
-                <Zap className="h-2 w-2 text-orange-500" /> Groq
-              </Badge>
-              <Badge variant="outline" className="text-[9px] h-4 gap-1">
-                <Brain className="h-2 w-2 text-purple-500" /> OpenRouter
-              </Badge>
-            </div>
-          </div>
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }

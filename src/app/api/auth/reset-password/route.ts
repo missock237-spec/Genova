@@ -1,34 +1,63 @@
 import { NextRequest, NextResponse } from 'next/server';
+import nodeCrypto from 'crypto';
 import { db } from '@/lib/db';
 import { hashPassword } from '@/lib/auth';
-import { validateBody, resetPasswordSchema } from '@/lib/validation';
-import { checkRateLimit, secureResponse, RATE_LIMITS } from '@/lib/security';
+import { deleteAllUserSessions } from '@/lib/session';
+import { applySecurity, secureResponse } from '@/lib/security';
 
-const MAX_CODE_ATTEMPTS = 3;
+export async function OPTIONS(request: NextRequest) {
+  const { error } = await applySecurity(request);
+  if (error) return error;
+  return new NextResponse(null, { status: 204 });
+}
 
-/**
- * POST /api/auth/reset-password
- * Verifies the 6-digit code and resets the user's password.
- *
- * Rate limited: 5 requests per 15 minutes per IP.
- * Max 3 attempts to enter the code before it's invalidated.
- */
 export async function POST(request: NextRequest) {
+  const { error: secError } = await applySecurity(request, {
+    rateLimit: { limit: 5, windowMs: 60000 },
+  });
+  if (secError) return secError;
+
   try {
-    const rateLimitError = checkRateLimit(request, undefined, RATE_LIMITS.login);
-    if (rateLimitError) return rateLimitError;
-
     const body = await request.json();
-    const validation = validateBody(resetPasswordSchema, body);
-    if (!validation.success) return validation.error;
+    const { email, code, newPassword } = body;
 
-    const { email, code, newPassword } = validation.data;
+    if (!email || !code || !newPassword) {
+      const res = NextResponse.json(
+        { error: 'Email, code, and new password are required' },
+        { status: 400 }
+      );
+      return secureResponse(res, request);
+    }
 
-    // Find the most recent unused reset code for this email
+    // Input length validation
+    if (email.length > 255) {
+      const res = NextResponse.json(
+        { error: 'Email must be at most 255 characters' },
+        { status: 400 }
+      );
+      return secureResponse(res, request);
+    }
+
+    if (newPassword.length < 8) {
+      const res = NextResponse.json(
+        { error: 'Password must be at least 8 characters' },
+        { status: 400 }
+      );
+      return secureResponse(res, request);
+    }
+
+    if (newPassword.length > 128) {
+      const res = NextResponse.json(
+        { error: 'Password must be at most 128 characters' },
+        { status: 400 }
+      );
+      return secureResponse(res, request);
+    }
+
+    // Find the reset entry without filtering by code (so we can track attempts)
     const resetEntry = await db.passwordReset.findFirst({
       where: {
         email,
-        code,
         used: false,
         expiresAt: { gt: new Date() },
       },
@@ -36,83 +65,83 @@ export async function POST(request: NextRequest) {
     });
 
     if (!resetEntry) {
-      // Increment attempts on any existing codes for this email
-      const anyCode = await db.passwordReset.findFirst({
-        where: { email, used: false, expiresAt: { gt: new Date() } },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      if (anyCode) {
-        const newAttempts = anyCode.attempts + 1;
-        if (newAttempts >= MAX_CODE_ATTEMPTS) {
-          // Invalidate the code after too many attempts
-          await db.passwordReset.update({
-            where: { id: anyCode.id },
-            data: { used: true, attempts: newAttempts },
-          });
-          return NextResponse.json(
-            { error: 'Trop de tentatives. Veuillez demander un nouveau code.' },
-            { status: 429 }
-          );
-        }
-
-        await db.passwordReset.update({
-          where: { id: anyCode.id },
-          data: { attempts: newAttempts },
-        });
-      }
-
-      return NextResponse.json(
-        { error: 'Code invalide ou expiré' },
+      const res = NextResponse.json(
+        { error: 'Invalid or expired verification code' },
         { status: 400 }
       );
+      return secureResponse(res, request);
     }
 
-    // Verify the user still exists
-    const user = await db.user.findUnique({ where: { id: resetEntry.userId } });
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Utilisateur non trouvé' },
-        { status: 404 }
-      );
-    }
-
-    // Hash the new password
-    const hashedPassword = await hashPassword(newPassword);
-
-    // Update the user's password in a transaction
-    await db.$transaction([
-      db.user.update({
-        where: { id: user.id },
-        data: { password: hashedPassword },
-      }),
-      db.passwordReset.update({
+    // Check max attempts
+    if (resetEntry.attempts >= 3) {
+      await db.passwordReset.update({
         where: { id: resetEntry.id },
         data: { used: true },
-      }),
-      // Invalidate all existing sessions for security (force re-login)
-      db.session.deleteMany({
-        where: { userId: user.id },
-      }),
-    ]);
+      });
+      const res = NextResponse.json(
+        { error: 'Maximum attempts exceeded. Please request a new code.' },
+        { status: 400 }
+      );
+      return secureResponse(res, request);
+    }
 
-    // Log the password change
+    // Verify the code matches using timing-safe comparison
+    const codeBuffer = Buffer.from(String(resetEntry.code), 'utf-8');
+    const inputBuffer = Buffer.from(String(code), 'utf-8');
+    const codeMatches = codeBuffer.length === inputBuffer.length
+      && nodeCrypto.timingSafeEqual(codeBuffer, inputBuffer);
+
+    if (!codeMatches) {
+      await db.passwordReset.update({
+        where: { id: resetEntry.id },
+        data: { attempts: resetEntry.attempts + 1 },
+      });
+      const remaining = 3 - (resetEntry.attempts + 1);
+      const res = NextResponse.json(
+        {
+          error: `Invalid verification code. ${remaining} attempts remaining.`,
+        },
+        { status: 400 }
+      );
+      return secureResponse(res, request);
+    }
+
+    // Hash new password
+    const hashedPassword = await hashPassword(newPassword);
+
+    // Update user password
+    await db.user.update({
+      where: { id: resetEntry.userId },
+      data: { password: hashedPassword },
+    });
+
+    // Mark reset code as used
+    await db.passwordReset.update({
+      where: { id: resetEntry.id },
+      data: { used: true },
+    });
+
+    // Invalidate all existing sessions for this user
+    await deleteAllUserSessions(resetEntry.userId);
+
     await db.activityLog.create({
       data: {
-        action: 'Mot de passe modifié',
-        details: JSON.stringify({ email: user.email, method: 'reset_code' }),
+        action: 'Password Reset',
+        details: JSON.stringify({ email }),
         category: 'auth',
-        userId: user.id,
+        userId: resetEntry.userId,
       },
     });
 
-    const response = NextResponse.json({
-      message: 'Mot de passe modifié avec succès. Veuillez vous reconnecter.',
+    const res = NextResponse.json({
+      message: 'Password has been reset successfully',
     });
-
-    return secureResponse(request, response);
-  } catch (error) {
-    console.error('[RESET-PASSWORD] Error:', error);
-    return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
+    return secureResponse(res, request);
+  } catch {
+    const res = NextResponse.json(
+      { error: 'Password reset failed' },
+      { status: 500 }
+    );
+    return secureResponse(res, request);
   }
 }

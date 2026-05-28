@@ -3,72 +3,254 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  password  String
-  avatar    String?
-  plan      String   @default("free")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String
+  password       String
+  avatar         String?
+  plan           String   @default("free")
+  emailVerified  DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  agents              Agent[]
-  workflows           Workflow[]
-  guardrails          Guardrail[]
-  activities          ActivityLog[]
-  conversations       Conversation[]
-  knowledge           Knowledge[]
-  documents           Document[]
-  executions          AgentExecution[]
-  episodicMemories    EpisodicMemory[]
-  memoryAccessLogs    MemoryAccessLog[]
-  embeddingVectors    EmbeddingVector[]
-  executionPolicies   ExecutionPolicy[]
-  websocketSessions   WebSocketSession[]
-  sessions            Session[]
-  passwordResets      PasswordReset[]
+  agents           Agent[]
+  workflows        Workflow[]
+  guardrails       Guardrail[]
+  activities       ActivityLog[]
+  sessions         Session[]
+  socialAccounts   SocialAccount[]
+  whatsappConfig   WhatsAppConfig?
+  resources        UserResource[]
+  approvalRequests ApprovalRequest[]
+  agentPermissions AgentPermission[]
+  agentActionLogs  AgentActionLog[]
+  browserSessions  BrowserSession[]
+  passwordResets   PasswordReset[]
+  agentUsages      AgentUsage[]
+  aiCosts          AICost[]
+  usageDaily       UsageDaily[]
+  monitoringEvents MonitoringEvent[]
+  emailVerifications EmailVerification[]
+  imageGenerations  ImageGeneration[]
+  memories          AgentMemory[]
+  conversations     Conversation[]
+  knowledgeEntries  Knowledge[]
+  documents         Document[]
+  documentChunks    DocumentChunk[]
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  token            String    @unique
+  userId           String
+  refreshToken     String?   @unique
+  expiresAt        DateTime
+  refreshExpiresAt DateTime?
+  createdAt        DateTime  @default(now())
+  lastAccessedAt   DateTime  @default(now())
+  ipAddress        String?
+  userAgent        String?
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  attempts  Int      @default(0)
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userId    String
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email, code])
+  @@map("password_resets")
+}
+
+model EmailVerification {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  attempts  Int      @default(0)
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userId    String
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email, code])
+  @@map("email_verifications")
 }
 
 model Agent {
-  id           String   @id @default(cuid())
-  name         String
-  type         String
-  description  String
-  status       String   @default("inactive")
-  config       String
-  avatar       String?
-  capabilities String   @default("{}") // JSON: tool capabilities and permissions per agent
-  userId       String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tasks           Task[]
-  conversations   Conversation[]
-  executions      AgentExecution[]
-  toolPermissions ToolPermission[]
-
-  @@map("agents")
-}
-
-model Workflow {
   id          String   @id @default(cuid())
   name        String
+  type        String
   description String
-  status      String   @default("draft")
-  steps       String
-  trigger     String
+  status      String   @default("inactive")
+  config      String
+  avatar      String?
   userId      String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   tasks       Task[]
+  permissions AgentPermission[]
+  actions     AgentActionLog[]
+  browserSessions BrowserSession[]
+  agentUsages AgentUsage[]
+  memories    AgentMemory[]
+
+  @@map("agents")
+}
+
+model AgentPermission {
+  id               String  @id @default(cuid())
+  agentId          String
+  permission       String
+  granted          Boolean @default(false)
+  requiresApproval Boolean @default(true)
+  userId           String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  agent            Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user             User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, permission])
+  @@map("agent_permissions")
+}
+
+model AgentActionLog {
+  id        String   @id @default(cuid())
+  agentId   String?
+  action    String
+  details   String
+  status    String   @default("pending")
+  result    String?
+  userId    String
+  createdAt DateTime @default(now())
+  resolvedAt DateTime?
+
+  agent     Agent?   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("agent_action_logs")
+}
+
+model BrowserSession {
+  id         String   @id @default(cuid())
+  agentId    String
+  url        String   @default("about:blank")
+  title      String?
+  status     String   @default("idle")
+  screenshot String?
+  userId     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("browser_sessions")
+}
+
+model SocialAccount {
+  id           String   @id @default(cuid())
+  platform     String
+  accountId    String
+  accountName  String
+  accessToken  String
+  refreshToken String?
+  isActive     Boolean  @default(true)
+  userId       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform, accountId])
+  @@map("social_accounts")
+}
+
+model WhatsAppConfig {
+  id            String   @id @default(cuid())
+  phoneNumber   String
+  whatsappId    String?
+  phoneNumberId String?   // WhatsApp Cloud API Phone Number ID (from Meta Business settings)
+  apiToken      String?
+  isActive      Boolean  @default(false)
+  autoMessage   Boolean  @default(false)
+  autoCall      Boolean  @default(false)
+  userId        String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@map("whatsapp_configs")
+}
+
+model UserResource {
+  id        String   @id @default(cuid())
+  type      String
+  name      String
+  config    String
+  apiKey    String?
+  endpoint  String?
+  isActive  Boolean  @default(true)
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_resources")
+}
+
+model ApprovalRequest {
+  id          String   @id @default(cuid())
+  agentId     String
+  action      String
+  details     String
+  status      String   @default("pending")
+  result      String?
+  userId      String
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("approval_requests")
+}
+
+model Workflow {
+  id               String   @id @default(cuid())
+  name             String
+  description      String
+  status           String   @default("draft")
+  steps            String
+  trigger          String
+  currentTaskIndex Int      @default(0)
+  userId           String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks            Task[]
 
   @@map("workflows")
 }
@@ -138,289 +320,287 @@ model ActivityLog {
   @@map("activity_logs")
 }
 
-model Conversation {
-  id          String    @id @default(cuid())
-  title       String
-  type        String    @default("automation") // automation, agent_chat, orchestration
-  status      String    @default("active") // active, archived
-  agentId     String?
+model AgentUsage {
+  id          String   @id @default(cuid())
+  agentId     String
   userId      String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  action      String
+  tokensUsed  Int      @default(0)
+  duration    Int      @default(0)
+  status      String   @default("success")
+  metadata    String   @default("{}")
+  createdAt   DateTime @default(now())
 
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  agent       Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  messages    Message[]
-  executions  AgentExecution[]
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([agentId, createdAt])
+  @@index([userId, createdAt])
+  @@map("agent_usage")
+}
+
+model AICost {
+  id              String   @id @default(cuid())
+  userId          String
+  agentId         String?
+  provider        String
+  model           String
+  promptTokens    Int      @default(0)
+  completionTokens Int     @default(0)
+  totalTokens     Int      @default(0)
+  costUsd         Float    @default(0)
+  requestId       String?
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([provider, createdAt])
+  @@map("ai_costs")
+}
+
+model UsageDaily {
+  id           String   @id @default(cuid())
+  userId       String
+  date         DateTime
+  agentCount   Int      @default(0)
+  taskCount    Int      @default(0)
+  totalTokens  Int      @default(0)
+  totalCostUsd Float    @default(0)
+  apiCalls     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("usage_daily")
+}
+
+model MonitoringEvent {
+  id         String    @id @default(cuid())
+  userId     String
+  eventType  String
+  source     String
+  message    String
+  details    String    @default("{}")
+  severity   String    @default("info")
+  resolved   Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([eventType, severity])
+  @@map("monitoring_events")
+}
+
+// ============================================================
+// Agent Memory — Per-agent learning database
+// Each agent has its own knowledge base that grows with use,
+// allowing it to better understand user requests over time.
+// ============================================================
+
+model AgentMemory {
+  id            String   @id @default(cuid())
+  agentId       String
+  userId        String
+  category      String   @default("general")   // general, preference, episodic, procedural, semantic
+  content       String                          // The learned knowledge
+  context       String   @default("{}")         // JSON: context in which this was learned
+  source        String   @default("interaction") // interaction, observation, feedback, system
+  relevance     Float    @default(0.5)          // 0-1, how important this memory is
+  accessCount   Int      @default(0)            // How often this memory is retrieved
+  tags          String   @default("[]")         // JSON array of tags for categorization
+  embedding     String?                          // Vector embedding for semantic search (JSON)
+  createdAt     DateTime @default(now())
+  lastAccessedAt DateTime @default(now())
+  expiresAt     DateTime?                        // Optional TTL for temporary memories
+
+  agent         Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, category])
+  @@index([agentId, createdAt])
+  @@index([userId, createdAt])
+  @@map("agent_memories")
+}
+
+// ============================================================
+// URL Blocklist — Malicious site protection
+// Stores known malicious URLs/domains to protect the system
+// from phishing, malware, and other threats.
+// ============================================================
+
+model URLBlocklist {
+  id          String   @id @default(cuid())
+  domain      String   @unique                    // Domain or URL pattern
+  reason      String                              // Why it's blocked
+  threatType  String   @default("malware")        // malware, phishing, spam, scam, suspicious
+  severity    String   @default("high")           // low, medium, high, critical
+  source      String   @default("system")         // system, user, auto_detected
+  isActive    Boolean  @default(true)
+  hits        Int      @default(0)                // How many times this was triggered
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([domain])
+  @@index([isActive])
+  @@map("url_blocklist")
+}
+
+// ============================================================
+// Image Generation — Track AI-generated images
+// ============================================================
+
+model ImageGeneration {
+  id              String   @id @default(cuid())
+  userId          String
+  prompt          String                          // The text prompt used
+  model           String                          // Model used for generation
+  provider        String   @default("openrouter") // Provider (openrouter, etc.)
+  imageUrl        String?                         // URL or base64 of generated image
+  status          String   @default("pending")    // pending, completed, failed
+  costUsd         Float    @default(0)
+  width           Int?
+  height          Int?
+  metadata        String   @default("{}")         // JSON metadata
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([provider, createdAt])
+  @@map("image_generations")
+}
+
+// ============================================================
+// Conversation — Chat conversations with agents
+// ============================================================
+
+model Conversation {
+  id        String   @id @default(cuid())
+  title     String
+  type      String   @default("chat")     // chat, automation, support
+  userId    String
+  agentId   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@index([userId, createdAt])
   @@map("conversations")
 }
 
+// ============================================================
+// Message — Individual messages within conversations
+// ============================================================
+
 model Message {
   id             String   @id @default(cuid())
-  role           String   // user, assistant, system
+  role           String                       // user, assistant, system
   content        String
-  model          String?  // Which AI model was used
-  provider       String?  // groq or openrouter
-  tokensUsed     Int?
+  model          String?
+  provider       String?
   conversationId String
   createdAt      DateTime @default(now())
 
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
+  @@index([conversationId, createdAt])
   @@map("messages")
 }
 
+// ============================================================
+// Knowledge — User knowledge base for long-term memory & RAG
+// ============================================================
+
 model Knowledge {
-  id          String   @id @default(cuid())
-  content     String
-  category    String   // preference, project, document, workflow_context, agent_learning
-  tags        String   // JSON array of tags
-  source      String   // conversation, document, manual
-  relevance   Float    @default(0.5)
-  userId      String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  content   String
+  category  String   @default("general")   // preference, project, document, workflow_context, agent_learning, episodic, semantic
+  tags      String   @default("[]")
+  source    String   @default("manual")     // conversation, document, manual, episodic, summarization
+  relevance Float    @default(0.5)
+  userId    String
+  createdAt DateTime @default(now())
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId, category])
+  @@index([userId, createdAt])
   @@map("knowledge")
 }
 
+// ============================================================
+// Document & DocumentChunk — RAG document storage
+// ============================================================
+
 model Document {
-  id          String   @id @default(cuid())
-  fileName    String
-  fileType    String
-  fileSize    Int
-  content     String?  // Full text content
-  status      String   @default("processing") // processing, ready, error
-  userId      String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  fileName  String
+  fileType  String   @default("unknown")
+  fileSize  Int      @default(0)
+  content   String   @default("")
+  status    String   @default("processing")  // processing, ready, failed
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  chunks      DocumentChunk[]
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks    DocumentChunk[]
 
+  @@index([userId, createdAt])
   @@map("documents")
 }
 
 model DocumentChunk {
   id          String   @id @default(cuid())
   content     String
-  chunkIndex  Int
+  chunkIndex  Int      @default(0)
   pageNumber  Int?
-  metadata    String   // JSON: additional metadata
+  metadata    String   @default("{}")
   documentId  String
   userId      String
   createdAt   DateTime @default(now())
 
   document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([documentId])
+  @@index([userId])
   @@map("document_chunks")
 }
 
+// ============================================================
+// Agent Execution — Execution state persistence for agents
+// ============================================================
+
 model AgentExecution {
-  id          String   @id @default(cuid())
-  agentId     String
-  task        String
-  steps       String   // JSON: array of execution steps
-  status      String   @default("running") // running, completed, failed, paused
-  totalDuration Int?
-  totalTokens Int?
-  estimatedCost Float?
-  model       String?
-  provider    String?
-  userId      String
-  conversationId String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  agent       Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-
-  @@map("agent_executions")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Episodic Memory System
-// Stores agent experiences as discrete episodes with contextual metadata,
-// emotional valence, and learned lessons for future retrieval and reasoning.
-// ─────────────────────────────────────────────────────────────────────────────
-model EpisodicMemory {
-  id              String    @id @default(cuid())
-  userId          String
+  id              String   @id @default(cuid())
   agentId         String
-  episode         String    // What happened
-  context         String    // Context of the episode
-  outcome         String    // What was the result
-  emotionalValence Float    @default(0) // -1 (negative) to 1 (positive)
-  learnedLesson   String    // What was learned
-  tags            String    @default("[]") // JSON array
-  retrievalScore  Float     @default(0.5) // How often this is retrieved
-  accessCount     Int       @default(0)
-  importance      Float     @default(0.5)
-  createdAt       DateTime  @default(now())
-  lastAccessedAt  DateTime  @default(now())
-  expiresAt       DateTime?
+  userId          String
+  task            String   @default("")
+  steps           String   @default("[]")
+  currentStep     Int      @default(0)
+  totalSteps      Int      @default(0)
+  status          String   @default("pending")    // pending, running, completed, failed, paused
+  totalDuration   Int      @default(0)
+  totalTokens     Int      @default(0)
+  estimatedCost   Float    @default(0)
+  model           String?
+  provider        String?
+  result          String?
+  error           String?
+  state           String   @default("{}")         // JSON execution state
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  completedAt     DateTime?
 
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, agentId])
+  @@index([agentId, createdAt])
   @@index([userId, createdAt])
-  @@map("episodic_memories")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Memory Access Log
-// Tracks which memories (Knowledge or EpisodicMemory) are retrieved and used,
-// enabling retrieval score decay/growth, relevance feedback, and analytics.
-// ─────────────────────────────────────────────────────────────────────────────
-model MemoryAccessLog {
-  id          String   @id @default(cuid())
-  memoryId    String   // Reference to Knowledge or EpisodicMemory
-  memoryType  String   // "knowledge" or "episodic"
-  userId      String
-  query       String   // The search query that triggered this access
-  score       Float    // Relevance score at retrieval time
-  createdAt   DateTime @default(now())
-
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([memoryId])
-  @@index([userId, createdAt])
-  @@map("memory_access_logs")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Embedding Vector Store
-// Persists vector embeddings for RAG (Retrieval-Augmented Generation).
-//
-// With PostgreSQL + pgvector: native cosine / L2 similarity search.
-// Requires: CREATE EXTENSION IF NOT EXISTS vector;
-// ─────────────────────────────────────────────────────────────────────────────
-model EmbeddingVector {
-  id          String   @id @default(cuid())
-  entityId    String   // ID of the entity this embedding represents (chunk, knowledge, etc.)
-  entityType  String   // "document_chunk" | "knowledge" | "episodic_memory"
-  vector      String   // JSON array of floats (SQLite compat; use pgvector for PostgreSQL)
-  dimension   Int      @default(384)
-  userId      String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([entityId, entityType])
-  @@map("embedding_vectors")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tool Permission System
-// Granular per-agent tool permissions with scope, actions, constraints,
-// and call limits for the capability-based security model.
-// ─────────────────────────────────────────────────────────────────────────────
-model ToolPermission {
-  id          String    @id @default(cuid())
-  agentId     String
-  toolName    String    // Which tool this permission applies to
-  actions     String    @default("[]") // JSON array: ["read", "write", "execute", "network"]
-  scope       String    @default("none") // "full" | "limited" | "none"
-  constraints String    @default("[]") // JSON array of constraint strings
-  maxCalls    Int       @default(-1) // -1 = unlimited
-  callCount   Int       @default(0)
-  expiresAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@unique([agentId, toolName])
-  @@map("tool_permissions")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Execution Policy
-// Defines rules and constraints for agent execution, including retries,
-// timeouts, and per-agent-type policy assignments.
-// ─────────────────────────────────────────────────────────────────────────────
-model ExecutionPolicy {
-  id          String   @id @default(cuid())
-  name        String
-  description String
-  rules       String   // JSON: execution policy rules
-  agentTypes  String   @default("[]") // JSON: which agent types this applies to
-  maxRetries  Int      @default(3)
-  timeout     Int      @default(30000)
-  userId      String
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("execution_policies")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WebSocket Session
-// Tracks active and historical WebSocket connections per user,
-// including connected agent IDs, status, and connection metadata.
-// ─────────────────────────────────────────────────────────────────────────────
-model WebSocketSession {
-  id          String    @id @default(cuid())
-  userId      String
-  agentIds    String    @default("[]") // JSON: connected agent IDs
-  status      String    @default("active") // active, closed, error
-  metadata    String    @default("{}") // JSON: connection metadata
-  createdAt   DateTime  @default(now())
-  lastPingAt  DateTime  @default(now())
-  closedAt    DateTime?
-
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, status])
-  @@map("websocket_sessions")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// User Session
-// Stores authenticated session tokens for API authorization.
-// Each session has a unique token (Bearer token), expires after a set time,
-// and is scoped to a single user. This prevents unauthorized cross-user access.
-// ─────────────────────────────────────────────────────────────────────────────
-model Session {
-  id        String    @id @default(cuid())
-  userId    String
-  token     String    @unique
-  expiresAt DateTime
-  createdAt DateTime  @default(now())
-
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([token])
-  @@index([userId])
-  @@map("sessions")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Password Reset
-// Stores 6-digit verification codes sent by email for password recovery.
-// Codes expire after 15 minutes. Max 3 attempts to enter the code.
-// ─────────────────────────────────────────────────────────────────────────────
-model PasswordReset {
-  id         String    @id @default(cuid())
-  email      String
-  code       String    // 6-digit verification code
-  attempts   Int       @default(0)
-  used       Boolean   @default(false)
-  expiresAt  DateTime
-  createdAt  DateTime  @default(now())
-
-  userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([email, code])
-  @@index([userId])
-  @@map("password_resets")
+  @@map("agent_executions")
 }

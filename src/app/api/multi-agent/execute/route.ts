@@ -6,15 +6,15 @@ import { validateBody, multiAgentExecuteSchema } from '@/lib/validation';
 
 export async function POST(request: NextRequest) {
   try {
-    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'aiExecute' });
-    if (error) return error;
+    const { auth, error } = await applySecurity(request, { requireAuth: true, rateLimit: { limit: 10, windowMs: 60000 } });
+    if (error || !auth) return error || NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
     const body = await request.json();
     const validation = validateBody(multiAgentExecuteSchema, body);
     if (!validation.success) return validation.error;
 
     const { objective, agentIds } = validation.data;
-    const userId = auth!.userId;
+    const userId = auth.userId;
     const engine = getAgentEngine();
 
     const agents = await db.agent.findMany({ where: { id: { in: agentIds }, userId, status: 'active' } });

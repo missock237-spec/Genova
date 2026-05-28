@@ -1,68 +1,61 @@
-// Centralized API fetch utility for Genova
-// All API calls should use this instead of raw fetch() to ensure:
-// 1. httpOnly session cookies are always sent (credentials: 'include')
-// 2. Consistent error handling
-// 3. No token management needed client-side
-
-const API_BASE = '';
-
 interface ApiFetchOptions extends RequestInit {
-  /** JSON body — automatically stringified */
-  json?: unknown;
+  params?: Record<string, string>;
 }
 
-/**
- * Typed fetch wrapper for Genova API routes.
- * Automatically includes credentials (httpOnly cookies) and handles JSON bodies.
- *
- * Usage:
- * ```ts
- * // Simple GET
- * const data = await apiFetch<User>('/api/auth/me');
- *
- * // POST with JSON body
- * const result = await apiFetch<Agent>('/api/agents', {
- *   method: 'POST',
- *   json: { name: 'My Agent', type: 'assistant' },
- * });
- *
- * // With error handling
- * const res = await apiFetch('/api/agents', { method: 'DELETE' });
- * if (!res.ok) { ... }
- * ```
- */
 export async function apiFetch<T = unknown>(
   path: string,
   options: ApiFetchOptions = {}
-): Promise<Response & { json(): Promise<T> }> {
-  const { json, headers: customHeaders, ...rest } = options;
+): Promise<T> {
+  const { params, ...fetchOptions } = options;
 
-  const headers = new Headers(customHeaders as HeadersInit);
-  if (json !== undefined && !headers.has('Content-Type')) {
+  let url = path;
+  if (params) {
+    const searchParams = new URLSearchParams(params);
+    url += `?${searchParams.toString()}`;
+  }
+
+  const headers = new Headers(fetchOptions.headers);
+  if (!headers.has('Content-Type') && fetchOptions.body && typeof fetchOptions.body === 'string') {
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...rest,
-    credentials: 'include', // Always send httpOnly cookies
+  const response = await fetch(url, {
+    ...fetchOptions,
     headers,
-    body: json !== undefined ? JSON.stringify(json) : rest.body,
+    credentials: 'include',
   });
 
-  return response as Response & { json(): Promise<T> };
+  if (response.status === 401) {
+    // Clear auth state and redirect to login
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('agentos_user');
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+    }
+    throw new ApiError('Authentication required', 401);
+  }
+
+  if (!response.ok) {
+    let errorData: unknown;
+    try {
+      errorData = await response.json();
+    } catch {
+      errorData = { error: 'Request failed' };
+    }
+    throw new ApiError(
+      (errorData as { error?: string })?.error || 'Request failed',
+      response.status
+    );
+  }
+
+  return response.json() as Promise<T>;
 }
 
-/**
- * Convenience: apiFetch that throws on non-ok responses
- */
-export async function apiFetchJson<T = unknown>(
-  path: string,
-  options: ApiFetchOptions = {}
-): Promise<T> {
-  const res = await apiFetch<T>(path, options);
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Erreur réseau' }));
-    throw new Error(error.error || `Erreur ${res.status}`);
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
   }
-  return res.json();
 }

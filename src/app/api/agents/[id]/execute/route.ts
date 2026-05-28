@@ -1,103 +1,165 @@
-import { NextRequest } from 'next/server';
-import { getAgentEngine } from '@/lib/agent-engine';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { applySecurity, verifyOwnership } from '@/lib/security';
-import { validateBody, executeAgentSchema } from '@/lib/validation';
-import type { ExecutionContext } from '@/lib/agent-engine';
+import { applySecurity, secureResponse } from '@/lib/security';
+
+export async function OPTIONS(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error } = await applySecurity(request);
+  if (error) return error;
+  return new NextResponse(null, { status: 204 });
+}
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'aiExecute' });
-    if (error) return error;
+  const { auth, error: secError } = await applySecurity(request, {
+    requireAuth: true,
+  });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
+  try {
     const { id } = await params;
     const body = await request.json();
-    const validation = validateBody(executeAgentSchema, body);
-    if (!validation.success) {
-      return new Response(JSON.stringify(validation.error), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    const { task, parameters } = body;
+
+    if (!task) {
+      const res = NextResponse.json(
+        { error: 'Task description is required' },
+        { status: 400 }
+      );
+      return secureResponse(res, request);
     }
 
-    const { task, context: inputContext } = validation.data;
-    const maxSteps = body.maxSteps || 10;
-    const conversationId = body.conversationId;
-
-    const agent = await db.agent.findUnique({ where: { id } });
-    if (!agent) {
-      return new Response(JSON.stringify({ error: 'Agent non trouvé' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    // Input length validation
+    if (task.length > 1000) {
+      const res = NextResponse.json(
+        { error: 'Task description must be at most 1000 characters' },
+        { status: 400 }
+      );
+      return secureResponse(res, request);
     }
 
-    const ownershipError = verifyOwnership(auth!.userId, agent.userId, 'Agent');
-    if (ownershipError) return ownershipError;
+    const agent = await db.agent.findUnique({
+      where: { id },
+      include: { permissions: true },
+    });
 
-    const engine = getAgentEngine();
-
-    // Validate prompt
-    const promptValidation = engine.promptValidator.validatePrompt(task);
-    if (!promptValidation.safe && promptValidation.threatLevel === 'critical') {
-      return new Response(JSON.stringify({ error: 'Tâche rejetée pour des raisons de sécurité', risks: promptValidation.risks }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    if (!agent || agent.userId !== auth.userId) {
+      const res = NextResponse.json(
+        { error: 'Agent not found' },
+        { status: 404 }
+      );
+      return secureResponse(res, request);
     }
 
-    let agentConfig: Record<string, unknown> = {};
-    try { agentConfig = JSON.parse(agent.config); } catch { agentConfig = {}; }
+    // Validate and determine required permission
+    const VALID_PERMISSIONS = [
+      'browse_web',
+      'social_post',
+      'whatsapp_message',
+      'whatsapp_call',
+      'use_api',
+      'use_cpu',
+      'use_mvp',
+    ];
 
-    const allTools = engine.toolRegistry.getToolNames();
-    const toolMapping: Record<string, string[]> = {
-      sales: ['web_search', 'database_query', 'calculator'],
-      support: ['database_query', 'web_search'],
-      marketing: ['web_search', 'calculator', 'database_query'],
-      research: ['web_search', 'database_query', 'filesystem'],
-      rh: ['database_query', 'calculator'],
-      accounting: ['calculator', 'database_query'],
-      custom: allTools,
-    };
+    // If a specific permission is requested, validate and enforce it
+    if (body.permission) {
+      if (!VALID_PERMISSIONS.includes(body.permission)) {
+        const res = NextResponse.json(
+          { error: `Invalid permission. Allowed: ${VALID_PERMISSIONS.join(', ')}` },
+          { status: 400 }
+        );
+        return secureResponse(res, request);
+      }
+    }
 
-    const context: ExecutionContext = {
-      agentId: agent.id,
-      agentName: agent.name,
-      agentType: agent.type,
-      agentConfig,
-      task,
-      conversationId,
-      userId: auth!.userId,
-      maxSteps,
-      maxRetries: 3,
-      steps: [],
-      status: 'running',
-      memory: { shortTerm: [], longTermContext: '' },
-      tools: toolMapping[agent.type] || allTools,
-      guardrailsActive: true,
-      startedAt: new Date().toISOString(),
-      lastUpdatedAt: new Date().toISOString(),
-      totalTokensUsed: 0,
-      totalCost: 0,
-    };
+    const requiredPermission = body.permission || null;
 
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'start', agentId: agent.id, agentName: agent.name, task })}\n\n`));
-        try {
-          const steps = await engine.agentManager.delegateTask(agent.id, task, '', auth!.userId,
-            (step) => { controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'step', step })}\n\n`)); }
-          );
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'complete', steps, totalSteps: steps.length })}\n\n`));
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-        } catch (err) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err instanceof Error ? err.message : 'Erreur inconnue' })}\n\n`));
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-        } finally { controller.close(); }
+    // Check permission if determined
+    if (requiredPermission) {
+      const perm = agent.permissions.find((p) => p.permission === requiredPermission);
+      if (!perm || !perm.granted) {
+        const res = NextResponse.json(
+          { error: `Agent does not have permission: ${requiredPermission}` },
+          { status: 403 }
+        );
+        return secureResponse(res, request);
+      }
+
+      // Check if approval is needed
+      if (perm.requiresApproval) {
+        const approval = await db.approvalRequest.create({
+          data: {
+            agentId: id,
+            action: `execute_task`,
+            details: JSON.stringify({
+              task,
+              parameters: parameters || {},
+              requiredPermission,
+            }),
+            userId: auth.userId,
+            status: 'pending',
+          },
+        });
+
+        const res = NextResponse.json({
+          requiresApproval: true,
+          approvalId: approval.id,
+          message: 'Task requires approval before execution',
+        });
+        return secureResponse(res, request);
+      }
+    }
+
+    // Create task record
+    const taskRecord = await db.task.create({
+      data: {
+        title: task,
+        description: parameters ? JSON.stringify(parameters) : null,
+        status: 'running',
+        priority: 'medium',
+        agentId: id,
+        userId: auth.userId,
       },
     });
 
-    return new Response(stream, {
-      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+    // Log the action
+    await db.agentActionLog.create({
+      data: {
+        agentId: id,
+        action: 'execute_task',
+        details: JSON.stringify({ task, parameters: parameters || {}, taskId: taskRecord.id }),
+        userId: auth.userId,
+        status: 'running',
+        result: JSON.stringify({ taskId: taskRecord.id, status: 'running' }),
+      },
     });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err instanceof Error ? err.message : 'Erreur serveur' }), {
-      status: 500, headers: { 'Content-Type': 'application/json' },
+
+    await db.activityLog.create({
+      data: {
+        action: 'Agent Task Executed',
+        details: JSON.stringify({ agentId: id, agentName: agent.name, task, taskId: taskRecord.id }),
+        category: 'agent',
+        userId: auth.userId,
+      },
     });
+
+    const res = NextResponse.json({
+      requiresApproval: false,
+      taskId: taskRecord.id,
+      status: taskRecord.status,
+      message: 'Task created and executing',
+    });
+    return secureResponse(res, request);
+  } catch {
+    const res = NextResponse.json(
+      { error: 'Failed to execute task' },
+      { status: 500 }
+    );
+    return secureResponse(res, request);
   }
 }

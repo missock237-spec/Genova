@@ -2,36 +2,39 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { applySecurity, secureResponse } from '@/lib/security';
 
 export async function GET(request: NextRequest) {
+  const { auth, error: secError } = await applySecurity(request, { requireAuth: true });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
+
   try {
-    const userId = request.nextUrl.searchParams.get('userId');
-    if (!userId) {
-      return NextResponse.json({ error: 'userId requis' }, { status: 400 });
-    }
+    const userId = auth.userId;
 
     const [
       totalKnowledge,
-      totalEpisodes,
-      totalDocuments,
-      totalEmbeddingVectors,
-      knowledgeByCategory,
-      recentKnowledge,
-      memoryAccessCount,
+      totalAgentMemories,
       totalConversations,
       totalMessages,
+      knowledgeByCategory,
+      recentKnowledge,
+      recentAgentMemories,
     ] = await Promise.all([
       // Total knowledge entries
       db.knowledge.count({ where: { userId } }),
 
-      // Total episodic memories
-      db.episodicMemory.count({ where: { userId } }),
+      // Total agent memories (across all agents)
+      db.agentMemory.count({ where: { userId } }),
 
-      // Total documents
-      db.document.count({ where: { userId } }),
+      // Total conversations
+      db.conversation.count({ where: { userId } }),
 
-      // Total embedding vectors
-      db.embeddingVector.count({ where: { userId } }),
+      // Total messages
+      db.message.count({
+        where: {
+          conversation: { userId },
+        },
+      }),
 
       // Knowledge breakdown by category
       db.knowledge.groupBy({
@@ -55,16 +58,19 @@ export async function GET(request: NextRequest) {
         },
       }),
 
-      // Memory access log count
-      db.memoryAccessLog.count({ where: { userId } }),
-
-      // Total conversations
-      db.conversation.count({ where: { userId } }),
-
-      // Total messages
-      db.message.count({
-        where: {
-          conversation: { userId },
+      // Recent agent memories (last 5)
+      db.agentMemory.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          content: true,
+          category: true,
+          source: true,
+          relevance: true,
+          agentId: true,
+          createdAt: true,
         },
       }),
     ]);
@@ -77,23 +83,20 @@ export async function GET(request: NextRequest) {
       _min: { relevance: true },
     });
 
-    // Calculate memory usage estimate (rough estimate based on content length)
+    // Agent memory stats
+    const agentMemoryStats = await db.agentMemory.aggregate({
+      where: { userId },
+      _avg: { relevance: true },
+      _sum: { accessCount: true },
+    });
+
+    // Calculate memory usage estimate
     const knowledgeContent = await db.knowledge.findMany({
       where: { userId },
       select: { content: true },
     });
 
-    const episodicContent = await db.episodicMemory.findMany({
-      where: { userId },
-      select: { episode: true, context: true, outcome: true, learnedLesson: true },
-    });
-
-    const totalBytes = [
-      ...knowledgeContent.map(k => k.content.length),
-      ...episodicContent.flatMap(e => [e.episode.length, e.context.length, e.outcome.length, e.learnedLesson.length]),
-    ].reduce((sum, len) => sum + len, 0);
-
-    // Estimate memory in KB (chars * ~2 bytes for UTF-8)
+    const totalBytes = knowledgeContent.reduce((sum, k) => sum + k.content.length, 0);
     const memoryUsageKB = Math.round(totalBytes * 2 / 1024);
 
     // Format category breakdown
@@ -102,23 +105,22 @@ export async function GET(request: NextRequest) {
       categoryBreakdown[item.category] = item._count.category;
     }
 
-    return NextResponse.json({
+    return secureResponse(NextResponse.json({
       totalKnowledge,
-      totalEpisodes,
-      totalDocuments,
-      totalEmbeddingVectors,
+      totalAgentMemories,
       totalConversations,
       totalMessages,
       memoryUsageKB,
-      memoryAccessCount,
+      totalAccessCount: agentMemoryStats._sum.accessCount || 0,
       averageRelevance: knowledgeStats._avg.relevance,
       maxRelevance: knowledgeStats._max.relevance,
       minRelevance: knowledgeStats._min.relevance,
       categoryBreakdown,
       recentKnowledge,
-    });
-  } catch (error) {
-    console.error('Memory stats error:', error);
+      recentAgentMemories,
+    }), request);
+  } catch (err) {
+    console.error('Memory stats error:', err);
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
 }

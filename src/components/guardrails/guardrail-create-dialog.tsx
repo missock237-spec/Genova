@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useAuthStore } from '@/lib/store';
+import { apiFetch } from '@/lib/api';
 
 interface GuardrailCreateDialogProps {
   open: boolean;
@@ -52,7 +52,6 @@ const severities = [
 ];
 
 export function GuardrailCreateDialog({ open, onOpenChange, onSuccess, editGuardrail }: GuardrailCreateDialogProps) {
-  const { user } = useAuthStore();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
 
@@ -91,22 +90,12 @@ export function GuardrailCreateDialog({ open, onOpenChange, onSuccess, editGuard
     try {
       const url = editGuardrail ? `/api/guardrails/${editGuardrail.id}` : '/api/guardrails';
       const method = editGuardrail ? 'PUT' : 'POST';
-      const body = editGuardrail
-        ? { name: form.name, type: form.type, description: form.description, severity: form.severity, rules }
-        : { name: form.name, type: form.type, description: form.description, severity: form.severity, rules };
+      const body = { name: form.name, type: form.type, description: form.description, severity: form.severity, rules };
 
-      const res = await fetch(url, {
+      await apiFetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(body),
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        toast({ title: 'Erreur', description: data.error, variant: 'destructive' });
-        return;
-      }
 
       toast({
         title: editGuardrail ? 'Garde-fou modifié' : 'Garde-fou créé',

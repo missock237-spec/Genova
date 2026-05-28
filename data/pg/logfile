@@ -1,0 +1,64 @@
+2026-05-28 17:35:21.161 UTC [2307] FATAL:  data directory "/home/z/my-project/data/pg" has invalid permissions
+2026-05-28 17:35:21.161 UTC [2307] DETAIL:  Permissions should be u=rwx (0700) or u=rwx,g=rx (0750).
+2026-05-28 17:46:23.340 UTC [4505] FATAL:  could not open directory "pg_notify": No such file or directory
+2026-05-28 17:46:23.341 UTC [4505] LOG:  database system is shut down
+2026-05-28 17:46:36.267 UTC [4543] LOG:  starting PostgreSQL 17.2 on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 7.5.0-3ubuntu1~18.04) 7.5.0, 64-bit
+2026-05-28 17:46:36.267 UTC [4543] LOG:  listening on IPv6 address "::1", port 5432
+2026-05-28 17:46:36.267 UTC [4543] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2026-05-28 17:46:36.268 UTC [4543] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2026-05-28 17:46:36.268 UTC [4543] LOG:  could not open directory "pg_tblspc": No such file or directory
+2026-05-28 17:46:36.269 UTC [4546] LOG:  database system was interrupted; last known up at 2026-05-27 18:10:10 UTC
+2026-05-28 17:46:36.269 UTC [4546] LOG:  creating missing WAL directory "pg_wal/archive_status"
+2026-05-28 17:46:36.269 UTC [4546] LOG:  creating missing WAL directory "pg_wal/summaries"
+2026-05-28 17:46:36.281 UTC [4546] LOG:  could not open directory "pg_tblspc": No such file or directory
+2026-05-28 17:46:36.281 UTC [4546] LOG:  database system was not properly shut down; automatic recovery in progress
+2026-05-28 17:46:36.281 UTC [4546] LOG:  could not open directory "pg_tblspc": No such file or directory
+2026-05-28 17:46:36.281 UTC [4546] FATAL:  could not open directory "pg_replslot": No such file or directory
+2026-05-28 17:46:36.282 UTC [4543] LOG:  startup process (PID 4546) exited with exit code 1
+2026-05-28 17:46:36.282 UTC [4543] LOG:  aborting startup due to startup process failure
+2026-05-28 17:46:36.283 UTC [4543] LOG:  database system is shut down
+2026-05-28 17:46:48.922 UTC [4591] LOG:  starting PostgreSQL 17.2 on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 7.5.0-3ubuntu1~18.04) 7.5.0, 64-bit
+2026-05-28 17:46:48.922 UTC [4591] LOG:  listening on IPv6 address "::1", port 5432
+2026-05-28 17:46:48.922 UTC [4591] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2026-05-28 17:46:48.923 UTC [4591] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2026-05-28 17:46:48.924 UTC [4594] LOG:  database system was interrupted; last known up at 2026-05-27 18:10:10 UTC
+2026-05-28 17:46:48.941 UTC [4594] LOG:  database system was not properly shut down; automatic recovery in progress
+2026-05-28 17:46:48.941 UTC [4594] FATAL:  could not open directory "pg_twophase": No such file or directory
+2026-05-28 17:46:48.942 UTC [4591] LOG:  startup process (PID 4594) exited with exit code 1
+2026-05-28 17:46:48.942 UTC [4591] LOG:  aborting startup due to startup process failure
+2026-05-28 17:46:48.943 UTC [4591] LOG:  database system is shut down
+2026-05-28 17:47:01.327 UTC [4633] LOG:  starting PostgreSQL 17.2 on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 7.5.0-3ubuntu1~18.04) 7.5.0, 64-bit
+2026-05-28 17:47:01.328 UTC [4633] LOG:  listening on IPv6 address "::1", port 5432
+2026-05-28 17:47:01.328 UTC [4633] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2026-05-28 17:47:01.328 UTC [4633] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2026-05-28 17:47:01.329 UTC [4636] LOG:  database system was interrupted; last known up at 2026-05-27 18:10:10 UTC
+2026-05-28 17:47:01.341 UTC [4636] LOG:  database system was not properly shut down; automatic recovery in progress
+2026-05-28 17:47:01.342 UTC [4636] LOG:  redo starts at 0/19CFD58
+2026-05-28 17:47:01.342 UTC [4636] LOG:  invalid record length at 0/19CFE98: expected at least 24, got 0
+2026-05-28 17:47:01.342 UTC [4636] LOG:  redo done at 0/19CFE60 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s
+2026-05-28 17:47:01.343 UTC [4634] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-05-28 17:47:01.343 UTC [4634] ERROR:  could not open directory "pg_logical/mappings": No such file or directory
+2026-05-28 17:47:01.343 UTC [4636] FATAL:  checkpoint request failed
+2026-05-28 17:47:01.343 UTC [4636] HINT:  Consult recent messages in the server log for details.
+2026-05-28 17:47:01.343 UTC [4633] LOG:  startup process (PID 4636) exited with exit code 1
+2026-05-28 17:47:01.343 UTC [4633] LOG:  terminating any other active server processes
+2026-05-28 17:47:01.344 UTC [4633] LOG:  shutting down due to startup process failure
+2026-05-28 17:47:01.345 UTC [4633] LOG:  database system is shut down
+2026-05-28 17:47:11.622 UTC [4675] LOG:  starting PostgreSQL 17.2 on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 7.5.0-3ubuntu1~18.04) 7.5.0, 64-bit
+2026-05-28 17:47:11.622 UTC [4675] LOG:  listening on IPv6 address "::1", port 5432
+2026-05-28 17:47:11.622 UTC [4675] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2026-05-28 17:47:11.623 UTC [4675] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2026-05-28 17:47:11.624 UTC [4678] LOG:  database system shutdown was interrupted; last known up at 2026-05-28 17:47:01 UTC
+2026-05-28 17:47:11.635 UTC [4678] LOG:  database system was not properly shut down; automatic recovery in progress
+2026-05-28 17:47:11.635 UTC [4678] LOG:  redo starts at 0/19CFD58
+2026-05-28 17:47:11.635 UTC [4678] LOG:  invalid record length at 0/19CFE98: expected at least 24, got 0
+2026-05-28 17:47:11.635 UTC [4678] LOG:  redo done at 0/19CFE60 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s
+2026-05-28 17:47:11.636 UTC [4676] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-05-28 17:47:11.637 UTC [4676] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.001 s, sync=0.001 s, total=0.001 s; sync files=2, longest=0.001 s, average=0.001 s; distance=0 kB, estimate=0 kB; lsn=0/19CFE98, redo lsn=0/19CFE98
+2026-05-28 17:47:11.638 UTC [4675] LOG:  database system is ready to accept connections
+2026-05-28 17:52:11.726 UTC [4676] LOG:  checkpoint starting: time
+2026-05-28 17:52:18.442 UTC [4676] LOG:  checkpoint complete: wrote 68 buffers (0.4%); 0 WAL file(s) added, 0 removed, 0 recycled; write=6.716 s, sync=0.001 s, total=6.716 s; sync files=71, longest=0.001 s, average=0.001 s; distance=418 kB, estimate=418 kB; lsn=0/1A389D8, redo lsn=0/1A38980
+2026-05-28 17:57:11.491 UTC [4676] LOG:  checkpoint starting: time
+2026-05-28 17:57:15.802 UTC [4676] LOG:  checkpoint complete: wrote 44 buffers (0.3%); 0 WAL file(s) added, 0 removed, 0 recycled; write=4.311 s, sync=0.001 s, total=4.312 s; sync files=35, longest=0.001 s, average=0.001 s; distance=190 kB, estimate=395 kB; lsn=0/1A68580, redo lsn=0/1A68528
+2026-05-28 18:07:11.937 UTC [4676] LOG:  checkpoint starting: time
+2026-05-28 18:07:16.448 UTC [4676] LOG:  checkpoint complete: wrote 46 buffers (0.3%); 0 WAL file(s) added, 0 removed, 0 recycled; write=4.511 s, sync=0.001 s, total=4.512 s; sync files=43, longest=0.001 s, average=0.001 s; distance=234 kB, estimate=379 kB; lsn=0/1AA30D8, redo lsn=0/1AA3080

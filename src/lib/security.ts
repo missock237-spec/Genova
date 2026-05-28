@@ -1,293 +1,176 @@
-// CORS + Rate Limiting Middleware for Genova API Routes
-// Prevents: CSRF (Cross-Site Request Forgery), DoS (Denial of Service)
-
 import { NextRequest, NextResponse } from 'next/server';
-
-// ============================================================
-// CORS — Cross-Origin Resource Sharing
-// FIX: No CORS was configured → any website could make requests to our API (CSRF)
-// Now only allows same-origin requests by default, configurable allowlist
-// ============================================================
-
-const ALLOWED_ORIGINS = new Set([
-  process.env.APP_URL || 'http://localhost:3000',
-  // Add production domains here
-]);
-
-const CORS_ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'];
-const CORS_ALLOWED_HEADERS = ['Content-Type', 'Authorization', 'X-Request-ID'];
-const CORS_MAX_AGE = 86400; // 24 hours
-
-/**
- * Apply CORS headers to a response
- * For same-origin: no Access-Control-Allow-Origin header needed (browser blocks cross-origin by default)
- * For allowed origins: reflects the requesting origin
- * For unknown origins: blocks the request
- */
-export function applyCorsHeaders(request: NextRequest, response: NextResponse): NextResponse {
-  const origin = request.headers.get('origin');
-
-  // No origin = same-origin request (curl, server-to-server) → allow
-  if (!origin) return response;
-
-  // Check if origin is allowed
-  if (ALLOWED_ORIGINS.has(origin)) {
-    response.headers.set('Access-Control-Allow-Origin', origin);
-    response.headers.set('Access-Control-Allow-Credentials', 'true');
-  }
-  // If origin not in allowlist → no Access-Control-Allow-Origin header → browser blocks
-
-  response.headers.set('Access-Control-Allow-Methods', CORS_ALLOWED_METHODS.join(', '));
-  response.headers.set('Access-Control-Allow-Headers', CORS_ALLOWED_HEADERS.join(', '));
-  response.headers.set('Access-Control-Max-Age', CORS_MAX_AGE.toString());
-  response.headers.set('Vary', 'Origin'); // Important for caching with multiple origins
-
-  return response;
-}
-
-/**
- * Handle CORS preflight (OPTIONS) requests
- * Returns 204 with CORS headers or 403 if origin not allowed
- */
-export function handleCorsPreflightRequest(request: NextRequest): NextResponse | null {
-  if (request.method !== 'OPTIONS') return null;
-
-  const origin = request.headers.get('origin');
-  if (!origin || !ALLOWED_ORIGINS.has(origin)) {
-    return new NextResponse(null, { status: 403 });
-  }
-
-  const response = new NextResponse(null, { status: 204 });
-  response.headers.set('Access-Control-Allow-Origin', origin);
-  response.headers.set('Access-Control-Allow-Methods', CORS_ALLOWED_METHODS.join(', '));
-  response.headers.set('Access-Control-Allow-Headers', CORS_ALLOWED_HEADERS.join(', '));
-  response.headers.set('Access-Control-Max-Age', CORS_MAX_AGE.toString());
-  response.headers.set('Vary', 'Origin');
-  return response;
-}
-
-// ============================================================
-// RATE LIMITING — Prevent DoS and API abuse
-// FIX: No rate limiting existed → any client could spam requests
-// Uses in-memory sliding window counter per IP + userId
-// ============================================================
+import { getAuthenticatedUser } from '@/lib/session';
 
 interface RateLimitEntry {
-  count: number;
-  windowStart: number;
-  blocked: boolean;
-  blockedUntil: number;
+  timestamps: number[];
 }
 
 const rateLimitStore = new Map<string, RateLimitEntry>();
 
-// Rate limit configurations per endpoint type
-export interface RateLimitConfig {
-  windowMs: number;   // Time window in milliseconds
-  maxRequests: number; // Max requests per window
-  blockDurationMs: number; // How long to block after exceeding
-}
-
-export const RATE_LIMITS: Record<string, RateLimitConfig> = {
-  // Auth endpoints — strict limits
-  auth: { windowMs: 60_000, maxRequests: 10, blockDurationMs: 300_000 },        // 10/min
-  login: { windowMs: 15_000, maxRequests: 5, blockDurationMs: 600_000 },        // 5/15s (brute force protection)
-
-  // AI endpoints — moderate limits (API costs money)
-  ai: { windowMs: 60_000, maxRequests: 20, blockDurationMs: 120_000 },          // 20/min
-  aiExecute: { windowMs: 60_000, maxRequests: 10, blockDurationMs: 300_000 },   // 10/min
-
-  // CRUD endpoints — generous limits
-  read: { windowMs: 60_000, maxRequests: 100, blockDurationMs: 60_000 },        // 100/min
-  write: { windowMs: 60_000, maxRequests: 30, blockDurationMs: 120_000 },       // 30/min
-  delete: { windowMs: 60_000, maxRequests: 10, blockDurationMs: 300_000 },      // 10/min
-
-  // Upload — strict limits
-  upload: { windowMs: 60_000, maxRequests: 5, blockDurationMs: 300_000 },       // 5/min
-
-  // Default
-  default: { windowMs: 60_000, maxRequests: 60, blockDurationMs: 120_000 },     // 60/min
-};
-
-// Cleanup old entries every 5 minutes
-const CLEANUP_INTERVAL = 5 * 60_000;
-let lastCleanup = Date.now();
-
-function cleanupRateLimitStore(): void {
+// Clean up old entries every 5 minutes
+setInterval(() => {
   const now = Date.now();
-  if (now - lastCleanup < CLEANUP_INTERVAL) return;
-  lastCleanup = now;
-
   for (const [key, entry] of rateLimitStore.entries()) {
-    // Remove entries older than window + block duration
-    const maxAge = entry.windowStart + entry.blockedUntil - entry.windowStart + 600_000;
-    if (now - entry.windowStart > maxAge) {
+    entry.timestamps = entry.timestamps.filter((t) => now - t < 60000);
+    if (entry.timestamps.length === 0) {
       rateLimitStore.delete(key);
     }
   }
+}, 5 * 60 * 1000);
+
+export function applyCorsHeaders(
+  response: NextResponse,
+  origin?: string
+): void {
+  const allowedOrigins = getAllowedOrigins(origin);
+  if (allowedOrigins) {
+    response.headers.set('Access-Control-Allow-Origin', allowedOrigins);
+  }
+  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  response.headers.set('Access-Control-Allow-Credentials', 'true');
+  response.headers.set('Access-Control-Max-Age', '86400');
 }
 
-/**
- * Check rate limit for a request
- * Returns null if allowed, or a NextResponse with 429 if rate limited
- */
+const ALLOWED_ORIGINS: string[] = [
+  // Production origins
+  ...(process.env.CORS_ALLOWED_ORIGINS?.split(',').filter(Boolean) || []),
+  // Development origins
+  ...(process.env.NODE_ENV === 'development' ? ['http://localhost:3000'] : []),
+];
+
+export function getAllowedOrigins(origin?: string): string | null {
+  if (!origin) return null;
+  // Strict origin validation: only allow explicitly whitelisted origins
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    return origin;
+  }
+  // Same-origin requests (origin matches the server's own host)
+  const serverHost = process.env.NEXT_PUBLIC_APP_URL || '';
+  if (serverHost && origin === serverHost) {
+    return origin;
+  }
+  // Deny all other origins
+  return null;
+}
+
 export function checkRateLimit(
-  request: NextRequest,
-  userId?: string,
-  config: RateLimitConfig = RATE_LIMITS.default
-): NextResponse | null {
-  cleanupRateLimitStore();
-
-  // Build rate limit key from IP + userId (if available)
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    || request.headers.get('x-real-ip')
-    || 'unknown';
-  const key = userId ? `${ip}:${userId}` : ip;
-
+  identifier: string,
+  limit: number = 100,
+  windowMs: number = 60000
+): { allowed: boolean; remaining: number; resetAt: number } {
   const now = Date.now();
-  const entry = rateLimitStore.get(key);
+  const windowStart = now - windowMs;
 
-  // If blocked and block hasn't expired
-  if (entry?.blocked && now < entry.blockedUntil) {
-    const retryAfter = Math.ceil((entry.blockedUntil - now) / 1000);
-    return NextResponse.json(
-      { error: 'Trop de requêtes. Réessayez plus tard.', retryAfter },
-      {
-        status: 429,
-        headers: {
-          'Retry-After': retryAfter.toString(),
-          'X-RateLimit-Limit': config.maxRequests.toString(),
-          'X-RateLimit-Remaining': '0',
-          'X-RateLimit-Reset': new Date(entry.blockedUntil).toISOString(),
-        },
-      }
-    );
+  let entry = rateLimitStore.get(identifier);
+  if (!entry) {
+    entry = { timestamps: [] };
+    rateLimitStore.set(identifier, entry);
   }
 
-  // Reset window if expired
-  if (!entry || now - entry.windowStart > config.windowMs) {
-    rateLimitStore.set(key, {
-      count: 1,
-      windowStart: now,
-      blocked: false,
-      blockedUntil: 0,
-    });
-    return null; // Allowed
+  // Remove timestamps outside the window
+  entry.timestamps = entry.timestamps.filter((t) => t > windowStart);
+
+  const remaining = Math.max(0, limit - entry.timestamps.length);
+  const resetAt = entry.timestamps.length > 0
+    ? entry.timestamps[0] + windowMs
+    : now + windowMs;
+
+  if (entry.timestamps.length >= limit) {
+    return { allowed: false, remaining: 0, resetAt };
   }
 
-  // Increment count
-  entry.count++;
-
-  if (entry.count > config.maxRequests) {
-    // Rate limit exceeded — block
-    entry.blocked = true;
-    entry.blockedUntil = now + config.blockDurationMs;
-
-    const retryAfter = Math.ceil(config.blockDurationMs / 1000);
-    return NextResponse.json(
-      { error: 'Trop de requêtes. Réessayez plus tard.', retryAfter },
-      {
-        status: 429,
-        headers: {
-          'Retry-After': retryAfter.toString(),
-          'X-RateLimit-Limit': config.maxRequests.toString(),
-          'X-RateLimit-Remaining': '0',
-          'X-RateLimit-Reset': new Date(entry.blockedUntil).toISOString(),
-        },
-      }
-    );
-  }
-
-  return null; // Allowed
+  entry.timestamps.push(now);
+  return { allowed: true, remaining: remaining - 1, resetAt };
 }
 
-// ============================================================
-// COMBINED MIDDLEWARE — Apply all security layers at once
-// ============================================================
-
-export interface SecurityOptions {
-  requireAuth?: boolean;       // Require Bearer token (default: true)
-  rateLimit?: RateLimitConfig; // Rate limit config (default: RATE_LIMITS.default)
-  rateLimitCategory?: keyof typeof RATE_LIMITS; // Or use named category
+interface SecurityOptions {
+  requireAuth?: boolean;
+  rateLimit?: {
+    limit: number;
+    windowMs: number;
+  };
 }
 
-/**
- * Apply all security middleware to an API route handler.
- * Usage:
- * ```ts
- * export async function GET(request: NextRequest) {
- *   const security = await applySecurity(request, { rateLimitCategory: 'read' });
- *   if (security.error) return security.error;
- *   const { auth } = security;
- *   // auth.userId is verified
- * }
- * ```
- */
+interface SecurityResult {
+  auth: { userId: string } | null;
+  error: NextResponse | null;
+}
+
 export async function applySecurity(
   request: NextRequest,
   options: SecurityOptions = {}
-): Promise<{
-  auth: { userId: string } | null;
-  error: NextResponse | null;
-}> {
-  const {
-    requireAuth = true,
-    rateLimit,
-    rateLimitCategory,
-  } = options;
-
-  // 1. CORS preflight
-  const corsResponse = handleCorsPreflightRequest(request);
-  if (corsResponse) {
-    return { auth: null, error: corsResponse };
+): Promise<SecurityResult> {
+  // Handle CORS preflight
+  if (request.method === 'OPTIONS') {
+    const response = new NextResponse(null, { status: 204 });
+    applyCorsHeaders(response, request.headers.get('origin') || undefined);
+    return { auth: null, error: response };
   }
 
-  // 2. Authentication
-  let auth: { userId: string } | null = null;
-  if (requireAuth) {
-    const { getAuthenticatedUser } = await import('@/lib/session');
-    auth = await getAuthenticatedUser(request);
-    if (!auth) {
-      return {
-        auth: null,
-        error: NextResponse.json(
-          { error: 'Non autorisé — token invalide ou manquant' },
-          { status: 401 }
-        ),
-      };
+  // Rate limiting
+  if (options.rateLimit) {
+    const identifier =
+      request.headers.get('x-forwarded-for') ||
+      request.headers.get('x-real-ip') ||
+      'unknown';
+
+    const rateLimitResult = checkRateLimit(
+      identifier,
+      options.rateLimit.limit,
+      options.rateLimit.windowMs
+    );
+
+    if (!rateLimitResult.allowed) {
+      const response = NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429 }
+      );
+      response.headers.set('Retry-After', String(Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000)));
+      applyCorsHeaders(response, request.headers.get('origin') || undefined);
+      return { auth: null, error: response };
     }
   }
 
-  // 3. Rate limiting
-  const rateLimitConfig = rateLimit || (rateLimitCategory ? RATE_LIMITS[rateLimitCategory] : RATE_LIMITS.default);
-  const rateLimitError = checkRateLimit(request, auth?.userId, rateLimitConfig);
-  if (rateLimitError) {
-    return { auth, error: rateLimitError };
+  // Auth check
+  if (options.requireAuth) {
+    const auth = await getAuthenticatedUser(request);
+    if (!auth) {
+      const response = NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+      applyCorsHeaders(response, request.headers.get('origin') || undefined);
+      return { auth: null, error: response };
+    }
+    return { auth, error: null };
   }
 
-  return { auth, error: null };
+  return { auth: null, error: null };
+}
+
+export function secureResponse(
+  response: NextResponse,
+  request: NextRequest
+): NextResponse {
+  applyCorsHeaders(response, request.headers.get('origin') || undefined);
+  return response;
 }
 
 /**
- * Wrap a response with CORS headers
- */
-export function secureResponse(request: NextRequest, response: NextResponse): NextResponse {
-  return applyCorsHeaders(request, response);
-}
-
-/**
- * Verify resource ownership — returns 403 if authenticated user doesn't own the resource
+ * Verify that the authenticated user owns the resource.
+ * Returns a 403 NextResponse if ownership check fails, or null if OK.
  */
 export function verifyOwnership(
-  authenticatedUserId: string,
+  authUserId: string,
   resourceUserId: string,
-  resourceName: string = 'Ressource'
+  resourceName: string = 'Resource'
 ): NextResponse | null {
-  if (authenticatedUserId !== resourceUserId) {
+  if (authUserId !== resourceUserId) {
     return NextResponse.json(
-      { error: `Accès refusé — vous ne possédez pas cette ${resourceName.toLowerCase()}` },
+      { error: `You do not have permission to access this ${resourceName}` },
       { status: 403 }
     );
   }
-  return null; // Ownership verified
+  return null;
 }

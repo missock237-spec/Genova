@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useAuthStore } from '@/lib/store';
+import { apiFetch } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -66,7 +66,6 @@ interface WorkflowData {
 }
 
 export function CoordinationView() {
-  const { user } = useAuthStore();
   const { toast } = useToast();
   const [workflows, setWorkflows] = useState<WorkflowData[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -84,32 +83,24 @@ export function CoordinationView() {
   });
 
   const loadWorkflows = useCallback(async () => {
-    if (!user?.id) return;
     try {
-      const res = await fetch('/api/workflows', { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setWorkflows(data);
-      }
+      const data = await apiFetch<WorkflowData[]>('/api/workflows');
+      setWorkflows(data);
     } catch (error) {
       console.error('Failed to load workflows:', error);
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, []);
 
   const loadAgents = useCallback(async () => {
-    if (!user?.id) return;
     try {
-      const res = await fetch('/api/agents', { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setAgents(data);
-      }
+      const data = await apiFetch<Agent[]>('/api/agents');
+      setAgents(data);
     } catch (error) {
       console.error('Failed to load agents:', error);
     }
-  }, [user?.id]);
+  }, []);
 
   useEffect(() => {
     loadWorkflows();
@@ -145,10 +136,8 @@ export function CoordinationView() {
     }
 
     try {
-      const res = await fetch('/api/workflows', {
+      await apiFetch('/api/workflows', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({
           name: form.name,
           description: form.description,
@@ -156,12 +145,6 @@ export function CoordinationView() {
           trigger: { type: 'manual' },
         }),
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        toast({ title: 'Erreur', description: data.error, variant: 'destructive' });
-        return;
-      }
 
       toast({ title: 'Workflow créé', description: `${form.name} a été créé avec succès` });
       setCreateOpen(false);
@@ -174,11 +157,9 @@ export function CoordinationView() {
 
   const handleExecute = async (id: string) => {
     try {
-      const res = await fetch(`/api/workflows/${id}/execute`, { method: 'POST', credentials: 'include' });
-      if (res.ok) {
-        toast({ title: 'Workflow exécuté', description: 'Les tâches ont été créées' });
-        loadWorkflows();
-      }
+      await apiFetch(`/api/workflows/${id}/execute`, { method: 'POST' });
+      toast({ title: 'Workflow exécuté', description: 'Les tâches ont été créées' });
+      loadWorkflows();
     } catch {
       toast({ title: 'Erreur', description: 'Erreur lors de l\'exécution', variant: 'destructive' });
     }
@@ -187,11 +168,9 @@ export function CoordinationView() {
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
-      const res = await fetch(`/api/workflows/${deleteId}`, { method: 'DELETE', credentials: 'include' });
-      if (res.ok) {
-        setWorkflows((prev) => prev.filter((w) => w.id !== deleteId));
-        toast({ title: 'Workflow supprimé' });
-      }
+      await apiFetch(`/api/workflows/${deleteId}`, { method: 'DELETE' });
+      setWorkflows((prev) => prev.filter((w) => w.id !== deleteId));
+      toast({ title: 'Workflow supprimé' });
     } catch {
       toast({ title: 'Erreur', description: 'Erreur lors de la suppression', variant: 'destructive' });
     } finally {
@@ -201,11 +180,8 @@ export function CoordinationView() {
 
   const handleView = async (workflow: WorkflowData) => {
     try {
-      const res = await fetch(`/api/workflows/${workflow.id}`, { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setViewWorkflow(data);
-      }
+      const data = await apiFetch<WorkflowData>(`/api/workflows/${workflow.id}`);
+      setViewWorkflow(data);
     } catch {
       toast({ title: 'Erreur', description: 'Erreur lors du chargement', variant: 'destructive' });
     }
@@ -260,7 +236,7 @@ export function CoordinationView() {
             </TabsContent>
             <TabsContent value="builder" className="mt-4">
               <WorkflowBuilder
-                steps={JSON.parse(viewWorkflow.steps || '[]')}
+                steps={(() => { try { return JSON.parse(viewWorkflow.steps || '[]'); } catch { return []; } })()}
                 workflowName={viewWorkflow.name}
                 workflowStatus={viewWorkflow.status}
               />
