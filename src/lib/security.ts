@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/session';
+import { hasRole, isValidRole, UserRole } from '@/lib/auth';
 
 interface RateLimitEntry {
   timestamps: number[];
@@ -86,6 +87,7 @@ export function checkRateLimit(
 
 interface SecurityOptions {
   requireAuth?: boolean;
+  requireRole?: UserRole;
   rateLimit?: {
     limit: number;
     windowMs: number;
@@ -93,7 +95,7 @@ interface SecurityOptions {
 }
 
 interface SecurityResult {
-  auth: { userId: string } | null;
+  auth: { userId: string; role?: string } | null;
   error: NextResponse | null;
 }
 
@@ -143,6 +145,20 @@ export async function applySecurity(
       applyCorsHeaders(response, request.headers.get('origin') || undefined);
       return { auth: null, error: response };
     }
+
+    // RBAC: Check role if required
+    if (options.requireRole) {
+      const userRole = auth.role || 'user';
+      if (!hasRole(userRole, options.requireRole)) {
+        const response = NextResponse.json(
+          { error: 'Insufficient permissions' },
+          { status: 403 }
+        );
+        applyCorsHeaders(response, request.headers.get('origin') || undefined);
+        return { auth, error: response };
+      }
+    }
+
     return { auth, error: null };
   }
 

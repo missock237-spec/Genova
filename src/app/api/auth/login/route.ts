@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verifyPassword, needsMigration, hashPassword } from '@/lib/auth';
+import { verifyPassword, needsMigration, hashPassword, createAuditLog } from '@/lib/auth';
 import { createSession, setSessionCookie, setRefreshCookie } from '@/lib/session';
 import { applySecurity, secureResponse } from '@/lib/security';
 
@@ -103,10 +103,22 @@ export async function POST(request: NextRequest) {
       name: user.name,
       plan: user.plan,
       avatar: user.avatar,
+      role: user.role || 'user',
       emailVerified: !!user.emailVerified,
     });
     setSessionCookie(res, token);
     setRefreshCookie(res, refreshToken);
+
+    // Audit log for successful login
+    await createAuditLog({
+      userId: user.id,
+      action: 'login',
+      resource: 'session',
+      ipAddress,
+      userAgent,
+      severity: 'info',
+    });
+
     return secureResponse(res, request);
   } catch {
     const res = NextResponse.json(

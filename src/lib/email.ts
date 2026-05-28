@@ -1,15 +1,19 @@
 /**
- * Email Service — PRIORITÉ 3
+ * Email Service — Resend Only
  *
  * Stratégie de livraison :
- * 1. Resend SDK (production) — utilise l'API Resend nativement
- * 2. Resend REST fallback — si le SDK échoue, appel REST direct
- * 3. SMTP (Nodemailer) — si Resend indisponible
- * 4. Console log — développement uniquement
+ * 1. Resend SDK (méthode principale)
+ * 2. Resend REST API (fallback si SDK échoue)
+ * 3. Console log — développement uniquement
+ *
+ * Nodemailer a été retiré pour éliminer la double architecture
+ * et simplifier la maintenance. Resend est le seul provider en production.
  */
 
 import { Resend } from 'resend';
-import nodemailer from 'nodemailer';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('email');
 
 interface EmailResult {
   success: boolean;
@@ -59,12 +63,15 @@ async function sendViaResendSDK(options: EmailOptions): Promise<EmailResult> {
     });
 
     if (error) {
+      log.warn('Resend SDK error', { error: error.message, to: options.to });
       return { success: false, method: 'resend-sdk', error: error.message };
     }
 
+    log.info('Email sent via Resend SDK', { messageId: data?.id, to: options.to });
     return { success: true, method: 'resend-sdk', messageId: data?.id };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Resend SDK error';
+    log.warn('Resend SDK exception', { error: message, to: options.to });
     return { success: false, method: 'resend-sdk', error: message };
   }
 }
@@ -96,56 +103,22 @@ async function sendViaResendREST(options: EmailOptions): Promise<EmailResult> {
 
     if (response.ok) {
       const data = await response.json().catch(() => ({}));
+      log.info('Email sent via Resend REST', { messageId: data.id, to: options.to });
       return { success: true, method: 'resend-rest', messageId: data.id };
     }
 
     const body = await response.text().catch(() => '');
+    log.warn('Resend REST error', { status: response.status, to: options.to });
     return { success: false, method: 'resend-rest', error: `HTTP ${response.status}: ${body.slice(0, 200)}` };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Resend REST error';
+    log.warn('Resend REST exception', { error: message, to: options.to });
     return { success: false, method: 'resend-rest', error: message };
   }
 }
 
 // ---------------------------------------------------------------------------
-// 3. SMTP via Nodemailer (tertiary)
-// ---------------------------------------------------------------------------
-
-async function sendViaSMTP(options: EmailOptions): Promise<EmailResult> {
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-
-  if (!smtpHost || !smtpUser || !smtpPass) {
-    return { success: false, method: 'smtp', error: 'SMTP not configured' };
-  }
-
-  try {
-    const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      auth: { user: smtpUser, pass: smtpPass },
-    });
-
-    const result = await transporter.sendMail({
-      from: `"Genova AgentOS" <${smtpUser}>`,
-      to: options.to,
-      subject: options.subject,
-      html: options.html,
-      replyTo: options.replyTo,
-    });
-
-    return { success: true, method: 'smtp', messageId: result.messageId };
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'SMTP error';
-    return { success: false, method: 'smtp', error: message };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 4. Console fallback (développement uniquement)
+// 3. Console fallback (développement uniquement)
 // ---------------------------------------------------------------------------
 
 function sendViaConsole(options: EmailOptions): EmailResult {
@@ -153,9 +126,7 @@ function sendViaConsole(options: EmailOptions): EmailResult {
     return { success: false, method: 'none', error: 'No email provider configured in production' };
   }
 
-  console.log(
-    `[EMAIL] to=${options.to} subject="${options.subject}" body_preview="${options.html.substring(0, 200)}..."`
-  );
+  log.debug('Email (dev console)', { to: options.to, subject: options.subject });
   return { success: true, method: 'console' };
 }
 
@@ -165,7 +136,7 @@ function sendViaConsole(options: EmailOptions): EmailResult {
 
 /**
  * Envoie un email transactionnel en essayant successivement :
- * Resend SDK → Resend REST → SMTP → Console
+ * Resend SDK → Resend REST → Console (dev only)
  *
  * Chaque méthode est tentée uniquement si la précédente échoue,
  * garantissant une livraison fiable avec le maximum de méthodes disponibles.
@@ -188,13 +159,7 @@ export async function sendEmail(
     if (restResult.success) return restResult;
   }
 
-  // 3. SMTP
-  if (process.env.SMTP_HOST) {
-    const smtpResult = await sendViaSMTP(emailOptions);
-    if (smtpResult.success) return smtpResult;
-  }
-
-  // 4. Console (développement)
+  // 3. Console (développement)
   return sendViaConsole(emailOptions);
 }
 

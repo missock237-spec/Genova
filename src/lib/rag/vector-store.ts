@@ -10,6 +10,9 @@ import {
   simpleTokenize,
   type EmbeddingResult,
 } from '@/lib/memory/embeddings';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('vector-store');
 
 // ============================================================
 // INTERFACES
@@ -99,7 +102,7 @@ export class SQLiteVectorAdapter implements VectorStoreAdapter {
       // for chunks; this adapter focuses on the vector index.
     } catch (error) {
       // Non-fatal: in-memory store is always available
-      console.warn(`[SQLiteVectorAdapter] Failed to persist vector metadata for ${doc.id}:`, error);
+      log.warn('Failed to persist vector metadata', { docId: doc.id, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -165,7 +168,7 @@ export class SQLiteVectorAdapter implements VectorStoreAdapter {
       void _clearAll; // suppress unused warning
       void getVectorStoreSize;
     } catch (error) {
-      console.warn(`[SQLiteVectorAdapter] Failed to delete vector ${id}:`, error);
+      log.warn('Failed to delete vector', { id, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -645,7 +648,7 @@ export function getVectorStore(): VectorStoreAdapter {
     case 'qdrant': {
       const qdrantUrl = process.env.QDRANT_URL;
       if (!qdrantUrl) {
-        console.warn('[VectorStore] QDRANT_URL not set, falling back to SQLite adapter');
+        log.warn('QDRANT_URL not set, falling back to SQLite adapter');
         vectorStoreInstance = new SQLiteVectorAdapter();
         return vectorStoreInstance;
       }
@@ -655,9 +658,9 @@ export function getVectorStore(): VectorStoreAdapter {
           url: qdrantUrl,
           apiKey: process.env.QDRANT_API_KEY,
         });
-        console.info(`[VectorStore] Using Qdrant adapter at ${qdrantUrl}`);
+        log.info('Using Qdrant adapter', { url: qdrantUrl });
       } catch (error) {
-        console.warn(`[VectorStore] Failed to initialize Qdrant adapter, falling back to SQLite:`, error);
+        log.warn('Failed to initialize Qdrant adapter, falling back to SQLite', { error: error instanceof Error ? error.message : String(error) });
         vectorStoreInstance = new SQLiteVectorAdapter();
       }
       break;
@@ -666,7 +669,7 @@ export function getVectorStore(): VectorStoreAdapter {
     case 'sqlite':
     default:
       vectorStoreInstance = new SQLiteVectorAdapter();
-      console.info('[VectorStore] Using SQLite adapter (in-memory + DB persistence)');
+      log.info('Using SQLite adapter (in-memory + DB persistence)');
       break;
   }
 

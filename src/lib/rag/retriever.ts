@@ -16,6 +16,9 @@ import {
   type VectorStoreAdapter,
   type HybridRetrieverResult,
 } from './vector-store';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('rag-retriever');
 
 export class RAGRetriever {
   private vectorStore: VectorStoreAdapter;
@@ -192,7 +195,7 @@ export class RAGRetriever {
           return results;
         }
       } catch (error) {
-        console.warn('[RAGRetriever] Hybrid retrieval failed, falling back to legacy search:', error);
+        log.warn('Hybrid retrieval failed, falling back to legacy search', { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -332,7 +335,7 @@ Instructions:
       try {
         await this.vectorStore.delete(chunk.id);
       } catch (error) {
-        console.warn(`[RAGRetriever] Failed to delete vector ${chunk.id}:`, error);
+        log.warn('Failed to delete vector', { chunkId: chunk.id, error: error instanceof Error ? error.message : String(error) });
       }
     }
 

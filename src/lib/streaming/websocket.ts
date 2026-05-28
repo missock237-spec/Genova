@@ -3,6 +3,9 @@
 // Architecture: WSManager → Connection Pool → Event Router → Message Handlers
 
 import type { Server } from 'http';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('websocket');
 
 // ============================================================
 // INTERFACES
@@ -253,7 +256,7 @@ export class WebSocketManager {
       if (connection.buffer.length < this.maxBufferSize) {
         connection.buffer.push(message);
       }
-      console.error(`[WebSocket] Error sending to connection ${connectionId}:`, error instanceof Error ? error.message : error);
+      log.error('Error sending to connection', { connectionId, error: error instanceof Error ? error.message : String(error) });
       return false;
     }
   }
@@ -504,7 +507,7 @@ export class WebSocketManager {
       }
     } catch (error) {
       // Invalid message format — log for debugging instead of silently swallowing
-      console.warn(`[WebSocket] Invalid message from connection ${connectionId}:`, error instanceof Error ? error.message : error);
+      log.warn('Invalid message from connection', { connectionId, error: error instanceof Error ? error.message : String(error) });
     }
   }
 

@@ -14,6 +14,7 @@ model User {
   password       String
   avatar         String?
   plan           String   @default("free")
+  role           String   @default("user")      // user, admin, super_admin
   emailVerified  DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -42,6 +43,10 @@ model User {
   knowledgeEntries  Knowledge[]
   documents         Document[]
   documentChunks    DocumentChunk[]
+  auditLogs         AuditLog[]
+
+  @@index([role])
+  @@map("users")
 }
 
 model Session {
@@ -603,4 +608,28 @@ model AgentExecution {
   @@index([agentId, createdAt])
   @@index([userId, createdAt])
   @@map("agent_executions")
+}
+
+// ============================================================
+// Audit Log — Security audit trail for auth & admin actions
+// ============================================================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String                          // login, logout, session_create, session_revoke, password_change, role_change, admin_action, etc.
+  resource    String   @default("")           // Target resource type (user, agent, session, etc.)
+  resourceId  String   @default("")           // Target resource ID
+  details     String   @default("{}")         // JSON details of the action
+  ipAddress   String?                         // Client IP at the time of action
+  userAgent   String?                         // Client User-Agent
+  severity    String   @default("info")       // info, warning, critical
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@index([severity, createdAt])
+  @@map("audit_logs")
 }
