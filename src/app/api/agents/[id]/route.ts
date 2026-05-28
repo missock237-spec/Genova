@@ -1,32 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { applySecurity, verifyOwnership, secureResponse } from '@/lib/security';
-import { validateBody, updateAgentSchema } from '@/lib/validation';
+import { applySecurity, secureResponse } from '@/lib/security';
+
+export async function OPTIONS(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error } = await applySecurity(request);
+  if (error) return error;
+  return new NextResponse(null, { status: 204 });
+}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'read' });
-    if (error) return error;
+  const { auth, error: secError } = await applySecurity(request, {
+    requireAuth: true,
+  });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
+  try {
     const { id } = await params;
     const agent = await db.agent.findUnique({
       where: { id },
-      include: { tasks: { orderBy: { createdAt: 'desc' }, take: 10 } },
+      include: {
+        tasks: { orderBy: { createdAt: 'desc' }, take: 10 },
+        permissions: true,
+      },
     });
 
-    if (!agent) {
-      return NextResponse.json({ error: 'Agent non trouvé' }, { status: 404 });
+    if (!agent || agent.userId !== auth.userId) {
+      const res = NextResponse.json(
+        { error: 'Agent not found' },
+        { status: 404 }
+      );
+      return secureResponse(res, request);
     }
 
-    const ownershipError = verifyOwnership(auth!.userId, agent.userId, 'Agent');
-    if (ownershipError) return ownershipError;
-
-    return secureResponse(request, NextResponse.json(agent));
-  } catch (error) {
-    return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
+    const res = NextResponse.json(agent);
+    return secureResponse(res, request);
+  } catch {
+    const res = NextResponse.json(
+      { error: 'Failed to fetch agent' },
+      { status: 500 }
+    );
+    return secureResponse(res, request);
   }
 }
 
@@ -34,38 +53,70 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'write' });
-    if (error) return error;
+  const { auth, error: secError } = await applySecurity(request, {
+    requireAuth: true,
+  });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
+  try {
     const { id } = await params;
+    const body = await request.json();
+
     const agent = await db.agent.findUnique({ where: { id } });
-    if (!agent) {
-      return NextResponse.json({ error: 'Agent non trouvé' }, { status: 404 });
+    if (!agent || agent.userId !== auth.userId) {
+      const res = NextResponse.json(
+        { error: 'Agent not found' },
+        { status: 404 }
+      );
+      return secureResponse(res, request);
     }
 
-    const ownershipError = verifyOwnership(auth!.userId, agent.userId, 'Agent');
-    if (ownershipError) return ownershipError;
+    // Validate status field if provided
+    if (body.status && !['active', 'inactive'].includes(body.status)) {
+      const res = NextResponse.json(
+        { error: 'Invalid status. Allowed values: active, inactive' },
+        { status: 400 }
+      );
+      return secureResponse(res, request);
+    }
 
-    const body = await request.json();
-    const validation = validateBody(updateAgentSchema, body);
-    if (!validation.success) return validation.error;
+    // Input length validation
+    if (body.name && body.name.length > 100) {
+      const res = NextResponse.json(
+        { error: 'Name must be at most 100 characters' },
+        { status: 400 }
+      );
+      return secureResponse(res, request);
+    }
+
+    if (body.description && body.description.length > 1000) {
+      const res = NextResponse.json(
+        { error: 'Description must be at most 1000 characters' },
+        { status: 400 }
+      );
+      return secureResponse(res, request);
+    }
 
     const updated = await db.agent.update({
       where: { id },
       data: {
-        ...(validation.data.name && { name: validation.data.name }),
-        ...(validation.data.type && { type: validation.data.type }),
-        ...(validation.data.description !== undefined && { description: validation.data.description }),
-        ...(validation.data.config && { config: JSON.stringify(validation.data.config) }),
-        ...(validation.data.avatar !== undefined && { avatar: validation.data.avatar }),
-        ...(validation.data.status && { status: validation.data.status }),
+        ...(body.name && { name: body.name }),
+        ...(body.type && { type: body.type }),
+        ...(body.description !== undefined && { description: body.description }),
+        ...(body.config && { config: JSON.stringify(body.config) }),
+        ...(body.avatar !== undefined && { avatar: body.avatar }),
+        ...(body.status && { status: body.status }),
       },
     });
 
-    return secureResponse(request, NextResponse.json(updated));
-  } catch (error) {
-    return NextResponse.json({ error: 'Erreur lors de la mise à jour' }, { status: 500 });
+    const res = NextResponse.json(updated);
+    return secureResponse(res, request);
+  } catch {
+    const res = NextResponse.json(
+      { error: 'Failed to update agent' },
+      { status: 500 }
+    );
+    return secureResponse(res, request);
   }
 }
 
@@ -73,32 +124,41 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'delete' });
-    if (error) return error;
+  const { auth, error: secError } = await applySecurity(request, {
+    requireAuth: true,
+  });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
+  try {
     const { id } = await params;
     const agent = await db.agent.findUnique({ where: { id } });
-    if (!agent) {
-      return NextResponse.json({ error: 'Agent non trouvé' }, { status: 404 });
-    }
 
-    const ownershipError = verifyOwnership(auth!.userId, agent.userId, 'Agent');
-    if (ownershipError) return ownershipError;
+    if (!agent || agent.userId !== auth.userId) {
+      const res = NextResponse.json(
+        { error: 'Agent not found' },
+        { status: 404 }
+      );
+      return secureResponse(res, request);
+    }
 
     await db.agent.delete({ where: { id } });
 
     await db.activityLog.create({
       data: {
-        action: 'Agent supprimé',
+        action: 'Agent Deleted',
         details: JSON.stringify({ agentName: agent.name }),
         category: 'agent',
-        userId: auth!.userId,
+        userId: auth.userId,
       },
     });
 
-    return secureResponse(request, NextResponse.json({ success: true }));
-  } catch (error) {
-    return NextResponse.json({ error: 'Erreur lors de la suppression' }, { status: 500 });
+    const res = NextResponse.json({ success: true });
+    return secureResponse(res, request);
+  } catch {
+    const res = NextResponse.json(
+      { error: 'Failed to delete agent' },
+      { status: 500 }
+    );
+    return secureResponse(res, request);
   }
 }

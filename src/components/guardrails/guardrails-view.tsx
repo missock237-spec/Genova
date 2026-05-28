@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useAuthStore } from '@/lib/store';
+import { apiFetch } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { GuardrailCard } from './guardrail-card';
 import { GuardrailCreateDialog } from './guardrail-create-dialog';
@@ -30,7 +30,6 @@ interface Guardrail {
 }
 
 export function GuardrailsView() {
-  const { user } = useAuthStore();
   const { toast } = useToast();
   const [guardrails, setGuardrails] = useState<Guardrail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,19 +38,15 @@ export function GuardrailsView() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const loadGuardrails = useCallback(async () => {
-    if (!user?.id) return;
     try {
-      const res = await fetch('/api/guardrails', { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setGuardrails(data);
-      }
+      const data = await apiFetch<Guardrail[]>('/api/guardrails');
+      setGuardrails(data);
     } catch (error) {
       console.error('Failed to load guardrails:', error);
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, []);
 
   useEffect(() => {
     loadGuardrails();
@@ -59,14 +54,11 @@ export function GuardrailsView() {
 
   const handleToggle = async (id: string) => {
     try {
-      const res = await fetch(`/api/guardrails/${id}/toggle`, { method: 'POST', credentials: 'include' });
-      if (res.ok) {
-        const updated = await res.json();
-        setGuardrails((prev) => prev.map((g) => (g.id === id ? { ...g, isActive: updated.isActive } : g)));
-        toast({
-          title: updated.isActive ? 'Garde-fou activé' : 'Garde-fou désactivé',
-        });
-      }
+      const updated = await apiFetch<{ isActive: boolean }>(`/api/guardrails/${id}/toggle`, { method: 'POST' });
+      setGuardrails((prev) => prev.map((g) => (g.id === id ? { ...g, isActive: updated.isActive } : g)));
+      toast({
+        title: updated.isActive ? 'Garde-fou activé' : 'Garde-fou désactivé',
+      });
     } catch {
       toast({ title: 'Erreur', description: 'Erreur lors du changement de statut', variant: 'destructive' });
     }
@@ -75,11 +67,9 @@ export function GuardrailsView() {
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
-      const res = await fetch(`/api/guardrails/${deleteId}`, { method: 'DELETE', credentials: 'include' });
-      if (res.ok) {
-        setGuardrails((prev) => prev.filter((g) => g.id !== deleteId));
-        toast({ title: 'Garde-fou supprimé' });
-      }
+      await apiFetch(`/api/guardrails/${deleteId}`, { method: 'DELETE' });
+      setGuardrails((prev) => prev.filter((g) => g.id !== deleteId));
+      toast({ title: 'Garde-fou supprimé' });
     } catch {
       toast({ title: 'Erreur', description: 'Erreur lors de la suppression', variant: 'destructive' });
     } finally {

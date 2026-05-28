@@ -2,46 +2,28 @@
 
 import { useAppStore, useAuthStore } from '@/lib/store';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Menu, Bell, Moon, Sun, Search, Zap, Clock } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Menu, Bell, Moon, Sun, Search, CheckCircle2 } from 'lucide-react';
 import { useTheme } from 'next-themes';
-import { useSyncExternalStore, useState, useEffect, useCallback } from 'react';
+import { useSyncExternalStore, useState, useRef, useEffect } from 'react';
 
 const viewTitles: Record<string, string> = {
   dashboard: 'Tableau de bord',
   agents: 'Agents IA',
   automation: 'Automatisation',
-  knowledge: 'Base de connaissances',
   guardrails: 'Garde-fous',
   coordination: 'Coordination',
   settings: 'Paramètres',
+  approvals: 'Approbations',
 };
 
-/* ===== Live Clock Component ===== */
-function LiveClock() {
-  const [time, setTime] = useState(() => new Date());
-
-  useEffect(() => {
-    const interval = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  if (!time) return null;
-
-  return (
-    <div className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
-      <Clock className="h-3 w-3" />
-      <span>{time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-    </div>
-  );
-}
-
 export function AppHeader() {
-  const { currentView, setSidebarOpen, setCurrentView } = useAppStore();
+  const { currentView, setSidebarOpen, pendingApprovalCount, setCurrentView } = useAppStore();
   const { user } = useAuthStore();
   const { theme, setTheme } = useTheme();
-  const [searchFocused, setSearchFocused] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   const mounted = useSyncExternalStore(
     (callback) => {
       window.addEventListener('resize', callback);
@@ -51,19 +33,16 @@ export function AppHeader() {
     () => false,
   );
 
-  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && searchQuery.trim()) {
-      // Navigate based on search query
-      const q = searchQuery.toLowerCase().trim();
-      if (q.includes('agent')) setCurrentView('agents');
-      else if (q.includes('workflow') || q.includes('automat')) setCurrentView('automation');
-      else if (q.includes('connaiss') || q.includes('knowledge') || q.includes('rag')) setCurrentView('knowledge');
-      else if (q.includes('garde') || q.includes('guard')) setCurrentView('guardrails');
-      else if (q.includes('coord')) setCurrentView('coordination');
-      else if (q.includes('param') || q.includes('setting')) setCurrentView('settings');
-      setSearchQuery('');
-    }
-  }, [searchQuery, setCurrentView]);
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setNotificationsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <header className="sticky top-0 z-30 flex items-center justify-between h-14 px-4 sm:px-6 border-b border-border/50 bg-background/80 backdrop-blur-md">
@@ -77,48 +56,82 @@ export function AppHeader() {
           <Menu className="h-5 w-5" />
         </Button>
         <div>
-          <h1 className="text-sm sm:text-base font-semibold">{viewTitles[currentView] || 'Genova'}</h1>
+          <h1 className="text-sm sm:text-base font-semibold">{viewTitles[currentView] || 'AgentOS'}</h1>
         </div>
       </div>
 
       <div className="flex items-center gap-2">
-        {/* Live Clock */}
-        <LiveClock />
+        <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:flex">
+          <Search className="h-4 w-4" />
+        </Button>
 
-        {/* Animated Search Bar */}
-        <div className="hidden sm:flex items-center relative">
-          <Search className={`absolute left-2.5 h-3.5 w-3.5 transition-colors duration-200 ${searchFocused ? 'text-primary' : 'text-muted-foreground'}`} />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => setSearchFocused(true)}
-            onBlur={() => setSearchFocused(false)}
-            onKeyDown={handleSearchKeyDown}
-            placeholder="Rechercher..."
-            className={`h-8 text-xs pl-8 pr-3 rounded-full border-border/50 bg-muted/30 focus:bg-background search-input-animated transition-all ${
-              searchFocused ? 'border-primary/30' : ''
-            }`}
-          />
+        {/* Notifications Bell */}
+        <div className="relative" ref={dropdownRef}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 relative"
+            onClick={() => setNotificationsOpen(!notificationsOpen)}
+          >
+            <Bell className="h-4 w-4" />
+            {pendingApprovalCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 h-4 min-w-[16px] rounded-full bg-amber-500 text-[10px] text-white flex items-center justify-center font-bold">
+                {pendingApprovalCount > 9 ? '9+' : pendingApprovalCount}
+              </span>
+            )}
+          </Button>
+
+          {/* Notifications Dropdown */}
+          {notificationsOpen && (
+            <div className="absolute right-0 top-full mt-2 w-72 bg-popover border border-border/50 rounded-xl shadow-lg overflow-hidden z-50">
+              <div className="p-3 border-b border-border/50">
+                <h3 className="text-sm font-semibold">Notifications</h3>
+              </div>
+              <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                {pendingApprovalCount > 0 ? (
+                  <button
+                    className="w-full p-3 text-left hover:bg-muted/50 transition-colors flex items-start gap-3"
+                    onClick={() => {
+                      setCurrentView('approvals');
+                      setNotificationsOpen(false);
+                    }}
+                  >
+                    <div className="p-1.5 rounded-md bg-amber-500/10 mt-0.5">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-amber-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Approbations en attente</p>
+                      <p className="text-xs text-muted-foreground">
+                        {pendingApprovalCount} demande{pendingApprovalCount > 1 ? 's' : ''} d&apos;approbation en attente
+                      </p>
+                    </div>
+                  </button>
+                ) : (
+                  <div className="p-6 text-center text-muted-foreground">
+                    <Bell className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-xs">Aucune notification</p>
+                  </div>
+                )}
+              </div>
+              {pendingApprovalCount > 0 && (
+                <div className="p-2 border-t border-border/50">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full text-xs justify-center"
+                    onClick={() => {
+                      setCurrentView('approvals');
+                      setNotificationsOpen(false);
+                    }}
+                  >
+                    Voir toutes les approbations
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Quick Action Button */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 float-action quick-action-pulse text-primary"
-          onClick={() => setCurrentView('agents')}
-          title="Action rapide — Créer un agent"
-        >
-          <Zap className="h-4 w-4" />
-        </Button>
-
-        {/* Notification Bell */}
-        <Button variant="ghost" size="icon" className="h-8 w-8 relative">
-          <Bell className="h-4 w-4" />
-          <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-emerald-500 status-dot-pulse" />
-        </Button>
-
-        {/* Theme Toggle */}
         {mounted && (
           <Button
             variant="ghost"
@@ -129,10 +142,8 @@ export function AppHeader() {
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
         )}
-
-        {/* User Avatar */}
-        <div className="h-8 w-8 rounded-full bg-emerald-500/10 flex items-center justify-center ml-1 ring-2 ring-emerald-500/20 ring-offset-1 ring-offset-background transition-all hover:ring-emerald-500/40 cursor-default">
-          <span className="text-xs font-bold text-emerald-500">
+        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center ml-1">
+          <span className="text-xs font-bold text-primary">
             {user?.name?.charAt(0)?.toUpperCase() || 'U'}
           </span>
         </div>

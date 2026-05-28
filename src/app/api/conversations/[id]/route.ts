@@ -7,24 +7,24 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'read' });
-    if (error) return error;
+    const { auth, error } = await applySecurity(request, { requireAuth: true });
+    if (error || !auth) return error || NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
     const { id } = await params;
     const conversation = await db.conversation.findUnique({
       where: { id },
-      include: { messages: { orderBy: { createdAt: 'asc' } }, agent: { select: { name: true, type: true } } },
+      include: { messages: { orderBy: { createdAt: 'asc' } } },
     });
 
     if (!conversation) {
-      return NextResponse.json({ error: 'Conversation non trouvée' }, { status: 404 });
+      return secureResponse(NextResponse.json({ error: 'Conversation non trouvée' }, { status: 404 }), request);
     }
 
-    const ownershipError = verifyOwnership(auth!.userId, conversation.userId, 'Conversation');
+    const ownershipError = verifyOwnership(auth.userId, conversation.userId, 'Conversation');
     if (ownershipError) return ownershipError;
 
-    return secureResponse(request, NextResponse.json(conversation));
-  } catch (error) {
+    return secureResponse(NextResponse.json(conversation), request);
+  } catch {
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
 }

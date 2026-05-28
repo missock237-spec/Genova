@@ -1,77 +1,106 @@
-import { NextRequest } from 'next/server';
-import { streamChat } from '@/lib/ai-router';
-import { db } from '@/lib/db';
-import { applySecurity } from '@/lib/security';
-import { validateBody, aiChatSchema } from '@/lib/validation';
+import { NextRequest, NextResponse } from 'next/server';
+import { createAIRouter } from '@/lib/ai-router';
+import { applySecurity, secureResponse } from '@/lib/security';
+
+const MAX_HISTORY_LENGTH = 50;
+const MAX_MESSAGE_LENGTH = 5000;
+const MAX_TOTAL_HISTORY_SIZE = 20000;
+
+export async function OPTIONS(request: NextRequest) {
+  const { error } = await applySecurity(request);
+  if (error) return error;
+  return new NextResponse(null, { status: 204 });
+}
 
 export async function POST(request: NextRequest) {
+  const { auth, error: secError } = await applySecurity(request, {
+    requireAuth: true,
+    rateLimit: { limit: 20, windowMs: 60000 },
+  });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
+
   try {
-    const { auth, error } = await applySecurity(request, { rateLimitCategory: 'ai' });
-    if (error) return error;
-
     const body = await request.json();
-    const validation = validateBody(aiChatSchema, body);
-    if (!validation.success) {
-      return new Response(JSON.stringify(validation.error), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    const { message, history } = body;
+
+    if (!message) {
+      const res = NextResponse.json({ error: 'Message requis' }, { status: 400 });
+      return secureResponse(res, request);
     }
 
-    const { messages } = validation.data;
-    const conversationId = body.conversationId as string | undefined;
-    const taskType = body.taskType || 'quick_chat';
+    if (typeof message !== 'string' || message.length > MAX_MESSAGE_LENGTH) {
+      const res = NextResponse.json({ error: `Message trop long (max ${MAX_MESSAGE_LENGTH} caractères)` }, { status: 400 });
+      return secureResponse(res, request);
+    }
 
-    let conversationMessages: Array<{ role: string; content: string }> = [];
-    if (conversationId) {
-      const conv = await db.conversation.findUnique({ where: { id: conversationId } });
-      if (conv && conv.userId !== auth!.userId) {
-        return new Response(JSON.stringify({ error: 'Accès refusé' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    // Validate history
+    const validatedHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+    if (history !== undefined && history !== null) {
+      if (!Array.isArray(history)) {
+        const res = NextResponse.json({ error: 'History doit être un tableau' }, { status: 400 });
+        return secureResponse(res, request);
       }
-      const history = await db.message.findMany({ where: { conversationId }, orderBy: { createdAt: 'asc' }, take: 20 });
-      conversationMessages = history.map(m => ({ role: m.role, content: m.content }));
+
+      if (history.length > MAX_HISTORY_LENGTH) {
+        const res = NextResponse.json({ error: `History trop longue (max ${MAX_HISTORY_LENGTH} messages)` }, { status: 400 });
+        return secureResponse(res, request);
+      }
+
+      let totalSize = 0;
+
+      for (const m of history) {
+        if (!m || typeof m.role !== 'string' || typeof m.content !== 'string') {
+          const res = NextResponse.json({ error: 'Format de message invalide dans history' }, { status: 400 });
+          return secureResponse(res, request);
+        }
+
+        if (!['user', 'assistant'].includes(m.role)) {
+          const res = NextResponse.json({ error: 'Rôle invalide dans history (user ou assistant uniquement)' }, { status: 400 });
+          return secureResponse(res, request);
+        }
+
+        const content = String(m.content).slice(0, MAX_MESSAGE_LENGTH);
+        totalSize += content.length;
+
+        if (totalSize > MAX_TOTAL_HISTORY_SIZE) {
+          const res = NextResponse.json({ error: 'History trop volumineuse' }, { status: 400 });
+          return secureResponse(res, request);
+        }
+
+        validatedHistory.push({
+          role: m.role as 'user' | 'assistant',
+          content,
+        });
+      }
     }
 
-    const allMessages = [...conversationMessages, ...messages];
+    const router = createAIRouter(auth.userId);
 
-    let convId = conversationId;
-    if (!convId) {
-      const conv = await db.conversation.create({
-        data: { title: messages[messages.length - 1]?.content?.substring(0, 50) || 'Nouvelle conversation', type: 'automation', userId: auth!.userId },
-      });
-      convId = conv.id;
-    }
-
-    const lastUserMsg = messages.filter((m: { role: string }) => m.role === 'user').pop();
-    if (lastUserMsg && convId) {
-      await db.message.create({ data: { role: 'user', content: lastUserMsg.content, conversationId: convId } });
-    }
-
-    const stream = await streamChat(allMessages, taskType);
-    let fullResponse = '';
-    const transformStream = new TransformStream({
-      async transform(chunk, controller) {
-        fullResponse += new TextDecoder().decode(chunk);
-        controller.enqueue(chunk);
+    const messages = [
+      {
+        role: 'system' as const,
+        content: `Tu es l'assistant AgentOS, un IA qui aide les utilisateurs à contrôler leur système d'agents IA. Tu parles en français. Tu aides à comprendre les commandes en langage naturel et à les transformer en actions. Tu es concis et professionnel. Réponds toujours en français.`,
       },
-      async flush() {
-        try {
-          const lines = fullResponse.split('\n');
-          let assistantContent = '';
-          for (const line of lines) {
-            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-              try { const json = JSON.parse(line.slice(6)); const delta = json.choices?.[0]?.delta?.content; if (delta) assistantContent += delta; } catch { /* skip */ }
-            }
-          }
-          if (convId && assistantContent) {
-            await db.message.create({ data: { role: 'assistant', content: assistantContent, model: 'auto-routed', provider: 'groq/openrouter', conversationId: convId } });
-          }
-        } catch { /* fail silently */ }
-      },
-    });
+      ...validatedHistory.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })),
+      { role: 'user' as const, content: message },
+    ];
 
-    return new Response(stream.pipeThrough(transformStream), {
-      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Conversation-Id': convId || '' },
+    const response = await router.chat(messages, { model: 'default' });
+
+    const res = NextResponse.json({
+      reply: response.content,
+      usage: response.usage,
+      provider: response.provider,
+      model: response.model,
+      costUsd: response.costUsd,
     });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Erreur serveur';
-    return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    return secureResponse(res, request);
+  } catch {
+    const res = NextResponse.json({ error: 'Erreur lors de la communication avec l\'IA' }, { status: 500 });
+    return secureResponse(res, request);
   }
 }

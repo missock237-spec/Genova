@@ -10,40 +10,54 @@ import { AgentsView } from '@/components/agents/agents-view';
 import { AutomationView } from '@/components/automation/automation-view';
 import { GuardrailsView } from '@/components/guardrails/guardrails-view';
 import { CoordinationView } from '@/components/coordination/coordination-view';
-import { KnowledgeView } from '@/components/knowledge/knowledge-view';
 import { SettingsView } from '@/components/settings/settings-view';
+import { AnalyticsView } from '@/components/analytics/analytics-view';
 import { ThemeProvider } from 'next-themes';
-import { motion, AnimatePresence } from 'framer-motion';
-
-const viewComponents = {
-  dashboard: DashboardView,
-  agents: AgentsView,
-  automation: AutomationView,
-  knowledge: KnowledgeView,
-  guardrails: GuardrailsView,
-  coordination: CoordinationView,
-  settings: SettingsView,
-};
+import { Loader2 } from 'lucide-react';
 
 function AppContent() {
-  const { isAuthenticated, validateSession } = useAuthStore();
+  const { isAuthenticated, user } = useAuthStore();
   const { currentView } = useAppStore();
   const hydrateRef = useRef(false);
+  const validateRef = useRef(false);
+  const validatedRef = useRef(false);
 
+  // Hydrate auth from localStorage only once on mount
   useEffect(() => {
     if (!hydrateRef.current) {
       hydrateRef.current = true;
       useAuthStore.getState().hydrate();
-      // Validate session with server on startup (httpOnly cookie)
-      validateSession();
     }
+  }, []);
+
+  // Validate session once when authenticated
+  useEffect(() => {
+    if (isAuthenticated && !validateRef.current) {
+      validateRef.current = true;
+      (async () => {
+        const valid = await useAuthStore.getState().validateSession();
+        if (valid) {
+          useAppStore.getState().fetchApprovalCount();
+        }
+        validatedRef.current = true;
+      })();
+    }
+  }, [isAuthenticated]);
+
+  // Listen for auth:unauthorized events
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      useAuthStore.getState().logout();
+      validateRef.current = false;
+      validatedRef.current = false;
+    };
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);
 
   if (!isAuthenticated) {
     return <AuthForm />;
   }
-
-  const ViewComponent = viewComponents[currentView];
 
   return (
     <div className="min-h-screen flex bg-background grid-pattern">
@@ -51,17 +65,14 @@ function AppContent() {
       <main className="flex-1 flex flex-col min-w-0">
         <AppHeader />
         <div className="flex-1 p-4 sm:p-6 overflow-auto">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={currentView}
-              initial={{ opacity: 0, y: 20, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: -20, filter: 'blur(4px)' }}
-              transition={{ duration: 0.3, ease: 'easeInOut' }}
-            >
-              <ViewComponent />
-            </motion.div>
-          </AnimatePresence>
+          {currentView === 'dashboard' && <DashboardView />}
+          {currentView === 'agents' && <AgentsView />}
+          {currentView === 'automation' && <AutomationView />}
+          {currentView === 'guardrails' && <GuardrailsView />}
+          {currentView === 'coordination' && <CoordinationView />}
+          {currentView === 'settings' && <SettingsView />}
+          {currentView === 'approvals' && <SettingsView initialTab="approvals" />}
+          {currentView === 'analytics' && <AnalyticsView />}
         </div>
       </main>
     </div>

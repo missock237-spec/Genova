@@ -101,10 +101,13 @@ async function thinkStep(
   try {
     const systemPrompt = buildThinkPrompt(context, toolRegistry);
 
-    const messages = [
-      { role: 'system' as const, content: systemPrompt },
-      ...context.memory.shortTerm.slice(-8),
-      { role: 'user' as const, content: 'Analyse la situation actuelle. Quelle est ta prochaine action ? Réponds en JSON.' },
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: systemPrompt },
+      ...context.memory.shortTerm.slice(-8).map((m: { role: string; content: string }) => ({
+        role: m.role as 'user' | 'assistant' | 'system',
+        content: m.content,
+      })),
+      { role: 'user', content: 'Analyse la situation actuelle. Quelle est ta prochaine action ? Réponds en JSON.' },
     ];
 
     const result = await chatCompletion(messages, 'reasoning');
@@ -966,18 +969,17 @@ export async function saveExecutionState(context: ExecutionContext): Promise<str
         task: context.task,
         steps: JSON.stringify(context.steps),
         status: context.status,
-        totalDuration: context.steps.reduce((sum, s) => sum + (s.duration || 0), 0),
+        totalDuration: context.steps.reduce((sum: number, s: { duration?: number }) => sum + (s.duration || 0), 0),
         totalTokens: context.totalTokensUsed,
         estimatedCost: context.totalCost,
         model: 'auto-routed',
         provider: 'groq/openrouter',
         userId: context.userId,
-        conversationId: context.conversationId,
       },
       update: {
         steps: JSON.stringify(context.steps),
         status: context.status,
-        totalDuration: context.steps.reduce((sum, s) => sum + (s.duration || 0), 0),
+        totalDuration: context.steps.reduce((sum: number, s: { duration?: number }) => sum + (s.duration || 0), 0),
         totalTokens: context.totalTokensUsed,
         estimatedCost: context.totalCost,
       },
@@ -1004,7 +1006,6 @@ export async function loadExecutionState(executionId: string): Promise<Execution
       agentConfig: {},
       task: execution.task,
       userId: execution.userId,
-      conversationId: execution.conversationId || undefined,
       maxSteps: 10,
       maxRetries: 3,
       steps: JSON.parse(execution.steps || '[]'),
@@ -1043,7 +1044,6 @@ async function saveExecution(context: ExecutionContext): Promise<void> {
         model: 'auto-routed',
         provider: 'groq/openrouter',
         userId: context.userId,
-        conversationId: context.conversationId,
       },
     });
 

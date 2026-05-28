@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { apiFetch } from '@/lib/api';
 
 interface User {
   id: string;
@@ -14,26 +15,23 @@ interface AuthState {
   login: (user: User) => void;
   logout: () => void;
   hydrate: () => void;
-  /**
-   * Re-validate the current session with the server.
-   * Called on app startup to check if the httpOnly cookie is still valid.
-   */
   validateSession: () => Promise<boolean>;
 }
 
 interface AppState {
-  currentView: 'dashboard' | 'agents' | 'automation' | 'guardrails' | 'coordination' | 'knowledge' | 'settings';
+  currentView: 'dashboard' | 'agents' | 'automation' | 'guardrails' | 'coordination' | 'settings' | 'approvals' | 'analytics';
   setCurrentView: (view: AppState['currentView']) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
-  currentConversationId: string | null;
-  setCurrentConversationId: (id: string | null) => void;
+  pendingApprovalCount: number;
+  setPendingApprovalCount: (count: number) => void;
+  fetchApprovalCount: () => Promise<void>;
 }
 
 function getStoredUser(): User | null {
   if (typeof window === 'undefined') return null;
   try {
-    const saved = localStorage.getItem('genova_user');
+    const saved = localStorage.getItem('agentos_user');
     return saved ? JSON.parse(saved) : null;
   } catch {
     return null;
@@ -45,13 +43,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   login: (user) => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('genova_user', JSON.stringify(user));
+      localStorage.setItem('agentos_user', JSON.stringify(user));
     }
     set({ user, isAuthenticated: true });
   },
   logout: () => {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('genova_user');
+      localStorage.removeItem('agentos_user');
     }
     set({ user: null, isAuthenticated: false });
   },
@@ -63,25 +61,27 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   validateSession: async () => {
     try {
-      const res = await fetch('/api/auth/me', { credentials: 'include' });
-      if (res.ok) {
-        const user = await res.json();
+      const data = await apiFetch<User>('/api/auth/me');
+      if (data && data.id) {
         if (typeof window !== 'undefined') {
-          localStorage.setItem('genova_user', JSON.stringify(user));
+          localStorage.setItem('agentos_user', JSON.stringify(data));
         }
-        set({ user, isAuthenticated: true });
+        set({ user: data, isAuthenticated: true });
         return true;
-      } else {
-        // Session expired or invalid — clear local state
+      }
+    } catch (error: unknown) {
+      // Only clear auth state on 401 (unauthorized), not on network failures
+      const isUnauthorized =
+        typeof error === 'object' && error !== null &&
+        'status' in error && (error as { status: number }).status === 401;
+      if (isUnauthorized) {
         if (typeof window !== 'undefined') {
-          localStorage.removeItem('genova_user');
+          localStorage.removeItem('agentos_user');
         }
         set({ user: null, isAuthenticated: false });
-        return false;
       }
-    } catch {
-      return false;
     }
+    return false;
   },
 }));
 
@@ -90,6 +90,14 @@ export const useAppStore = create<AppState>((set) => ({
   setCurrentView: (currentView) => set({ currentView }),
   sidebarOpen: false,
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
-  currentConversationId: null,
-  setCurrentConversationId: (currentConversationId) => set({ currentConversationId }),
+  pendingApprovalCount: 0,
+  setPendingApprovalCount: (pendingApprovalCount) => set({ pendingApprovalCount }),
+  fetchApprovalCount: async () => {
+    try {
+      const approvals = await apiFetch<Array<{ status: string }>>('/api/approvals?status=pending');
+      set({ pendingApprovalCount: approvals.length });
+    } catch {
+      // Silently fail
+    }
+  },
 }));

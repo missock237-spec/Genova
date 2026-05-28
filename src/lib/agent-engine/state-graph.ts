@@ -330,7 +330,6 @@ export class StatePersistence {
           model: state.metadata.modelUsed || 'auto-routed',
           provider: state.metadata.providerUsed || 'state-graph',
           userId: state.userId,
-          conversationId: state.conversationId,
         },
         update: {
           steps: JSON.stringify(persisted),
@@ -980,7 +979,10 @@ async function thinkNode(state: AgentState, toolRegistry: ToolRegistry): Promise
 
     const messages = [
       { role: 'system' as const, content: systemPrompt },
-      ...state.memory.shortTerm.slice(-8),
+      ...state.memory.shortTerm.slice(-8).map((m: { role: string; content: string }) => ({
+        role: m.role as 'user' | 'assistant' | 'system',
+        content: m.content,
+      })),
       { role: 'user' as const, content: 'Analyse la situation actuelle. Quelle est ta prochaine action ? Réponds en JSON.' },
     ];
 
@@ -1706,7 +1708,6 @@ async function completeNode(state: AgentState, _toolRegistry: ToolRegistry): Pro
         model: state.metadata.modelUsed || 'auto-routed',
         provider: state.metadata.providerUsed || 'state-graph',
         userId: state.userId,
-        conversationId: state.conversationId,
       },
     });
   } catch {
