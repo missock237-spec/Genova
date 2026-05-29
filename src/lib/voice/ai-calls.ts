@@ -124,10 +124,10 @@ async function initiateWhatsAppCall(
   // WhatsApp doesn't natively support voice calls via API
   // We use WhatsApp Business API for voice messages as a workaround
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  const accessToken = process.env.WHATSAPP_API_TOKEN;
 
   if (!phoneNumberId || !accessToken) {
-    throw new Error('WhatsApp credentials not configured');
+    throw new Error('WhatsApp credentials not configured (WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_API_TOKEN)');
   }
 
   // Create a call record — actual call handling is via WhatsApp voice messages

@@ -91,7 +91,7 @@ export function getVoiceSystemStatus(): VoiceSystemStatus {
   if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
     callProviders.push('twilio');
   }
-  if (process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN) {
+  if (process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_API_TOKEN) {
     callProviders.push('whatsapp');
   }
 
