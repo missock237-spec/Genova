@@ -1,9 +1,8 @@
 /**
- * Purchase System — Free and paid listings, credit-based purchases
+ * Purchase System — Free marketplace listings
  *
  * Features:
- * - Free and paid listing purchases
- * - Credit-based purchases
+ * - All listings are free
  * - License management, download tracking
  * - Purchase verification and history
  */
@@ -48,7 +47,7 @@ function safeParse<T>(json: string, fallback: T): T {
 }
 
 // ---------------------------------------------------------------------------
-// Core: Purchase Listing
+// Core: Purchase Listing (Free)
 // ---------------------------------------------------------------------------
 
 export async function purchaseListing(options: PurchaseOptions): Promise<PurchaseResult> {
@@ -87,67 +86,15 @@ export async function purchaseListing(options: PurchaseOptions): Promise<Purchas
     };
   }
 
-  const amount = listing.price;
-
-  // For free listings, complete purchase immediately
-  if (amount === 0) {
-    const purchase = await db.marketplacePurchase.create({
-      data: {
-        listingId,
-        userId,
-        amount: 0,
-        currency: listing.currency,
-        status: 'completed',
-        metadata: JSON.stringify({ type: 'free', license: 'standard' }),
-      },
-    });
-
-    // Increment download count
-    await db.marketplaceListing.update({
-      where: { id: listingId },
-      data: { downloads: { increment: 1 } },
-    });
-
-    return {
-      id: purchase.id,
-      listingId: purchase.listingId,
-      userId: purchase.userId,
-      amount: purchase.amount,
-      currency: purchase.currency,
-      status: purchase.status,
-      metadata: safeParse<Record<string, unknown>>(purchase.metadata, {}),
-      purchasedAt: purchase.purchasedAt,
-      listing: {
-        name: listing.name,
-        type: listing.type,
-        config: safeParse<Record<string, unknown>>(listing.config, {}),
-      },
-    };
-  }
-
-  // For paid listings, check user credits
-  const creditBalance = await getUserCreditBalance(userId);
-
-  if (creditBalance < amount) {
-    throw new Error('Insufficient credits to complete purchase');
-  }
-
-  // Deduct credits
-  await deductCredits(userId, amount, listingId, `Purchase: ${listing.name}`);
-
-  // Create purchase record
+  // Everything is free — complete purchase immediately
   const purchase = await db.marketplacePurchase.create({
     data: {
       listingId,
       userId,
-      amount,
+      amount: 0,
       currency: listing.currency,
       status: 'completed',
-      metadata: JSON.stringify({
-        type: 'credit_purchase',
-        license: 'standard',
-        creditsUsed: amount,
-      }),
+      metadata: JSON.stringify({ type: 'free', license: 'standard' }),
     },
   });
 
@@ -242,43 +189,4 @@ export async function getPurchaseHistory(
     page,
     totalPages: Math.ceil(total / limit),
   };
-}
-
-// ---------------------------------------------------------------------------
-// Credit helpers
-// ---------------------------------------------------------------------------
-
-async function getUserCreditBalance(userId: string): Promise<number> {
-  const latestTx = await db.creditTransaction.findFirst({
-    where: { userId },
-    orderBy: { createdAt: 'desc' },
-    select: { balance: true },
-  });
-  return latestTx?.balance || 0;
-}
-
-async function deductCredits(
-  userId: string,
-  amount: number,
-  resourceId: string,
-  description: string
-): Promise<void> {
-  const currentBalance = await getUserCreditBalance(userId);
-
-  if (currentBalance < amount) {
-    throw new Error('Insufficient credits');
-  }
-
-  await db.creditTransaction.create({
-    data: {
-      userId,
-      amount: -amount,
-      balance: currentBalance - amount,
-      type: 'usage',
-      resourceType: 'marketplace_purchase',
-      resourceId,
-      description,
-      metadata: JSON.stringify({ marketplacePurchase: true }),
-    },
-  });
 }

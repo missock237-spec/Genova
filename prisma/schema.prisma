@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -51,9 +51,6 @@ model User {
   voiceCalls        VoiceCall[]
   scheduledTasks    ScheduledTask[]
   agentAutomations  AgentAutomation[]
-  subscriptions     Subscription[]
-  creditTransactions CreditTransaction[]
-  invoices          Invoice[]
   workspaceMemberships WorkspaceMember[]
   marketplaceListings MarketplaceListing[]
   marketplaceReviews MarketplaceReview[]
@@ -859,88 +856,6 @@ model AgentAutomation {
 }
 
 // ============================================================
-// Subscription — User subscriptions
-// ============================================================
-
-model Subscription {
-  id                  String   @id @default(cuid())
-  userId              String
-  plan                String   @default("free")          // free, starter, pro, enterprise
-  stripeCustomerId    String?
-  stripeSubscriptionId String?
-  stripePriceId       String?
-  status              String   @default("active")        // active, past_due, canceled, incomplete, trialing
-  currentPeriodStart  DateTime?
-  currentPeriodEnd    DateTime?
-  cancelAtPeriodEnd   Boolean  @default(false)
-  trialStart          DateTime?
-  trialEnd            DateTime?
-  metadata            String   @default("{}")            // JSON: extra subscription data
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([stripeCustomerId])
-  @@index([userId, status])
-  @@index([stripeSubscriptionId])
-  @@index([userId, createdAt])
-  @@map("subscriptions")
-}
-
-// ============================================================
-// Credit Transaction — Credit usage tracking
-// ============================================================
-
-model CreditTransaction {
-  id           String   @id @default(cuid())
-  userId       String
-  amount       Int                                  // Positive = credit, Negative = debit
-  balance      Int      @default(0)                  // Balance after transaction
-  type         String                                // purchase, usage, refund, bonus, adjustment
-  resourceType String                                // agent_run, image_gen, video_gen, voice, token, etc.
-  resourceId   String?                               // ID of the related resource
-  description  String   @default("")                 // Human-readable description
-  metadata     String   @default("{}")               // JSON: extra transaction data
-  createdAt    DateTime @default(now())
-
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, type])
-  @@index([userId, resourceType])
-  @@index([userId, createdAt])
-  @@map("credit_transactions")
-}
-
-// ============================================================
-// Invoice — Billing invoices
-// ============================================================
-
-model Invoice {
-  id               String   @id @default(cuid())
-  userId           String
-  stripeInvoiceId  String?  @unique
-  subscriptionId   String?
-  amount           Float    @default(0)
-  currency         String   @default("usd")
-  status           String   @default("draft")          // draft, open, paid, void, uncollectible
-  pdfUrl           String?
-  hostedUrl        String?
-  dueDate          DateTime?
-  paidAt           DateTime?
-  metadata         String   @default("{}")             // JSON: line items, tax, discounts
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, status])
-  @@index([userId, createdAt])
-  @@index([stripeInvoiceId])
-  @@map("invoices")
-}
-
-// ============================================================
 // Workspace — Team workspaces
 // ============================================================
 
@@ -1082,8 +997,6 @@ model MarketplacePurchase {
   amount       Float    @default(0)
   currency     String   @default("usd")
   status       String   @default("completed")     // completed, refunded, disputed
-  stripeSessionId String?                        // Stripe Checkout Session ID
-  stripePaymentIntentId String?                  // Stripe Payment Intent ID
   metadata     String   @default("{}")            // JSON: receipt, license info
   purchasedAt  DateTime @default(now())
   refundedAt   DateTime?

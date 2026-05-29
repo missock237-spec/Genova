@@ -20,7 +20,6 @@ import {
   Film,
   Mic,
   Clock,
-  CreditCard,
   Store,
   Users,
   UserCircle,
@@ -44,7 +43,6 @@ const navItems = [
   { id: 'coordination' as const, label: 'Coordination', icon: GitBranch },
   { id: 'approvals' as const, label: 'Approbations', icon: CheckCircle2 },
   { id: 'analytics' as const, label: 'Analytics', icon: BarChart3 },
-  { id: 'billing' as const, label: 'Facturation', icon: CreditCard },
   { id: 'settings' as const, label: 'Paramètres', icon: Settings },
 ];
 
@@ -132,7 +130,7 @@ export function AppSidebar() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium truncate">{user?.name || 'Utilisateur'}</p>
-              <p className="text-[10px] text-muted-foreground truncate">{user?.plan || 'free'}</p>
+              <p className="text-[10px] text-muted-foreground truncate">Gratuit</p>
             </div>
             <Button
               variant="ghost"

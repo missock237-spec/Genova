@@ -55,13 +55,9 @@ export async function POST(
 
       const concurrentCheck = await checkConcurrentAgents(auth.userId, plan, isMultiAgent);
       if (!concurrentCheck.allowed) {
-        const upgradeMessage = plan === 'free'
-          ? ' Upgrade to Pro for up to 5 concurrent agents.'
-          : ' You have reached the maximum concurrent agents for your plan.';
-
         const res = NextResponse.json(
           {
-            error: `Concurrent agent limit reached (${concurrentCheck.current}/${concurrentCheck.limit}).${upgradeMessage}`,
+            error: `Concurrent agent limit reached (${concurrentCheck.current}/${concurrentCheck.limit}).`,
             code: 'CONCURRENT_LIMIT_REACHED',
             current: concurrentCheck.current,
             limit: concurrentCheck.limit,

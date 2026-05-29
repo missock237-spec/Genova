@@ -1,4 +1,5 @@
-// Usage Limits Engine — Plan-based limits for concurrent agents, total agents, and daily tokens
+// Usage Limits Engine — Unlimited limits (free system)
+// All limits are set to unlimited since the system is completely free.
 import { db } from '@/lib/db';
 
 export interface PlanLimits {
@@ -7,25 +8,19 @@ export interface PlanLimits {
   maxTokensPerDay: number;
 }
 
-const PLAN_LIMITS: Record<string, PlanLimits> = {
-  free: {
-    maxAgents: 3,
-    maxConcurrent: 1,
-    maxTokensPerDay: 50000,
-  },
-  pro: {
-    maxAgents: 20,
-    maxConcurrent: 5,
-    maxTokensPerDay: 500000,
-  },
+// Unlimited limits for all users
+const UNLIMITED_LIMITS: PlanLimits = {
+  maxAgents: -1,        // Unlimited
+  maxConcurrent: -1,    // Unlimited
+  maxTokensPerDay: -1,  // Unlimited
 };
 
 /**
  * Get limits for a given plan.
- * Falls back to free plan limits if plan is unknown.
+ * All users get unlimited access since the system is free.
  */
-export function getPlanLimits(plan: string): PlanLimits {
-  return PLAN_LIMITS[plan] || PLAN_LIMITS.free;
+export function getPlanLimits(_plan: string): PlanLimits {
+  return UNLIMITED_LIMITS;
 }
 
 /**
@@ -66,57 +61,50 @@ export async function getDailyTokenUsage(userId: string): Promise<number> {
 
 /**
  * Check if a user can activate another concurrent agent.
- * Multi-agent system is exempt when `isMultiAgent` is true.
+ * Always allowed in free system.
  */
 export async function checkConcurrentAgents(
   userId: string,
-  plan: string,
-  isMultiAgent: boolean = false
+  _plan: string,
+  _isMultiAgent: boolean = false
 ): Promise<{ allowed: boolean; current: number; limit: number }> {
-  const limits = getPlanLimits(plan);
-
-  // Multi-agent system is exempt from concurrent limits
-  if (isMultiAgent) {
-    return { allowed: true, current: 0, limit: -1 };
-  }
-
   const current = await getActiveAgentCount(userId);
   return {
-    allowed: current < limits.maxConcurrent,
+    allowed: true,
     current,
-    limit: limits.maxConcurrent,
+    limit: -1,
   };
 }
 
 /**
  * Check if a user has reached their total agent limit.
+ * Always allowed in free system.
  */
 export async function checkAgentLimit(
   userId: string,
-  plan: string
+  _plan: string
 ): Promise<{ allowed: boolean; current: number; limit: number }> {
-  const limits = getPlanLimits(plan);
   const current = await getTotalAgentCount(userId);
   return {
-    allowed: current < limits.maxAgents,
+    allowed: true,
     current,
-    limit: limits.maxAgents,
+    limit: -1,
   };
 }
 
 /**
  * Check if a user has reached their daily token limit.
+ * Always allowed in free system.
  */
 export async function checkTokenLimit(
   userId: string,
-  plan: string
+  _plan: string
 ): Promise<{ allowed: boolean; current: number; limit: number }> {
-  const limits = getPlanLimits(plan);
   const current = await getDailyTokenUsage(userId);
   return {
-    allowed: current < limits.maxTokensPerDay,
+    allowed: true,
     current,
-    limit: limits.maxTokensPerDay,
+    limit: -1,
   };
 }
 
@@ -125,68 +113,17 @@ export type AgentAction = 'activate' | 'create' | 'chat';
 export interface AgentActionValidation {
   allowed: boolean;
   reason?: string;
-  upgradeMessage?: string;
 }
 
 /**
- * General validation for agent actions based on plan limits.
+ * General validation for agent actions.
+ * Always allowed in free system — no restrictions.
  */
 export async function validateAgentAction(
   userId: string,
-  plan: string,
-  action: AgentAction,
-  isMultiAgent: boolean = false
+  _plan: string,
+  _action: AgentAction,
+  _isMultiAgent: boolean = false
 ): Promise<AgentActionValidation> {
-  const limits = getPlanLimits(plan);
-  const planLabel = plan === 'pro' ? 'Pro' : 'Free';
-
-  switch (action) {
-    case 'activate': {
-      const check = await checkConcurrentAgents(userId, plan, isMultiAgent);
-      if (!check.allowed) {
-        return {
-          allowed: false,
-          reason: `Concurrent agent limit reached (${check.current}/${check.limit}). ${planLabel} plan allows a maximum of ${check.limit} concurrent active agent${check.limit > 1 ? 's' : ''}.`,
-          upgradeMessage:
-            plan === 'free'
-              ? 'Upgrade to Pro for up to 5 concurrent agents.'
-              : 'You have reached the maximum concurrent agents for your plan.',
-        };
-      }
-      return { allowed: true };
-    }
-
-    case 'create': {
-      const check = await checkAgentLimit(userId, plan);
-      if (!check.allowed) {
-        return {
-          allowed: false,
-          reason: `Agent limit reached (${check.current}/${check.limit}). ${planLabel} plan allows a maximum of ${check.limit} agent${check.limit > 1 ? 's' : ''}.`,
-          upgradeMessage:
-            plan === 'free'
-              ? 'Upgrade to Pro for up to 20 agents.'
-              : 'You have reached the maximum agents for your plan.',
-        };
-      }
-      return { allowed: true };
-    }
-
-    case 'chat': {
-      const check = await checkTokenLimit(userId, plan);
-      if (!check.allowed) {
-        return {
-          allowed: false,
-          reason: `Daily token limit reached (${check.current.toLocaleString()}/${check.limit.toLocaleString()}). ${planLabel} plan allows ${check.limit.toLocaleString()} tokens per day.`,
-          upgradeMessage:
-            plan === 'free'
-              ? 'Upgrade to Pro for 500,000 tokens per day.'
-              : 'You have reached your daily token limit. Limit resets at midnight.',
-        };
-      }
-      return { allowed: true };
-    }
-
-    default:
-      return { allowed: true };
-  }
+  return { allowed: true };
 }

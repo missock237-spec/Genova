@@ -78,12 +78,8 @@ export async function POST(
     const tokenCheck = await checkTokenLimit(auth.userId, plan);
 
     if (!tokenCheck.allowed) {
-      const upgradeMessage = plan === 'free'
-        ? ' Upgrade to Pro for 500,000 tokens per day.'
-        : ' Your daily token limit resets at midnight.';
-
       return new Response(JSON.stringify({
-        error: `Daily token limit reached (${tokenCheck.current.toLocaleString()}/${tokenCheck.limit.toLocaleString()}).${upgradeMessage}`,
+        error: `Daily token limit reached (${tokenCheck.current.toLocaleString()}/${tokenCheck.limit.toLocaleString()}).`,
         code: 'TOKEN_LIMIT_REACHED',
         current: tokenCheck.current,
         limit: tokenCheck.limit,

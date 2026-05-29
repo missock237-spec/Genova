@@ -25,8 +25,8 @@ async function verifyAdmin(userId: string): Promise<boolean> {
     where: { id: userId },
     select: { plan: true },
   });
-  // Admin = users with 'admin' or 'enterprise' plan
-  return user?.plan === 'admin' || user?.plan === 'enterprise';
+  // Admin = users with 'admin' role
+  return user?.plan === 'admin';
 }
 
 // ============================================================

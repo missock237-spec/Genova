@@ -248,7 +248,7 @@ function ProfileTab({ user }: { user: { id?: string; name?: string; email?: stri
             <div>
               <h3 className="font-semibold">{user?.name || 'Utilisateur'}</h3>
               <p className="text-sm text-muted-foreground">{user?.email}</p>
-              <Badge variant="secondary" className="mt-1 capitalize">{user?.plan || 'free'}</Badge>
+              <Badge variant="secondary" className="mt-1">Gratuit</Badge>
             </div>
           </div>
 

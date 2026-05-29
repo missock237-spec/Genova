@@ -119,13 +119,9 @@ export async function POST(request: NextRequest) {
     const agentLimitCheck = await checkAgentLimit(auth.userId, plan);
 
     if (!agentLimitCheck.allowed) {
-      const upgradeMessage = plan === 'free'
-        ? ' Upgrade to Pro for up to 20 agents.'
-        : ' You have reached the maximum agents for your plan.';
-
       const res = NextResponse.json(
         {
-          error: `Agent limit reached (${agentLimitCheck.current}/${agentLimitCheck.limit}).${upgradeMessage}`,
+          error: `Agent limit reached (${agentLimitCheck.current}/${agentLimitCheck.limit}).`,
           code: 'AGENT_LIMIT_REACHED',
           current: agentLimitCheck.current,
           limit: agentLimitCheck.limit,
