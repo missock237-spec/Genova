@@ -32,10 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
-
 
 # typescript
 *.tsbuildinfo
@@ -48,7 +48,21 @@ dev.log
 dev.out.log
 test
 prompt
-
 server.log
+
 # Skills directory
 /skills/
+
+# ── Local-only directories (not for deployment) ──
+/services/
+/upload/
+/data/
+/lib-symlinks/
+/mini-services/
+/examples/
+/agent-ctx/
+/download/
+/Caddyfile
+/generate_audit_pdf.py
+/worklog.md
+/db/
