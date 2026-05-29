@@ -23,10 +23,10 @@ export async function OPTIONS(request: NextRequest) {
 async function verifyAdmin(userId: string): Promise<boolean> {
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: { plan: true },
+    select: { role: true },
   });
-  // Admin = users with 'admin' role
-  return user?.plan === 'admin';
+  // Admin = users with 'admin' or 'super_admin' role
+  return user?.role === 'admin' || user?.role === 'super_admin';
 }
 
 // ============================================================

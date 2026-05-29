@@ -319,7 +319,7 @@ export async function generateVideo(
       prompt: sanitizedPrompt,
       mode: options.mode || 't2v',
       model,
-      provider: 'z-ai-sdk',
+      provider: 'pending',
       status: 'pending',
       width: options.width,
       height: options.height,

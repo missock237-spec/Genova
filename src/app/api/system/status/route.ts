@@ -4,9 +4,14 @@
  * Returns a comprehensive status of all configured API providers,
  * database connectivity, and system health. Used by the dashboard
  * to display which integrations are active.
+ *
+ * Requires authentication. The `keyPresent` field is intentionally
+ * omitted from the response to avoid leaking which environment
+ * variables are set on the server.
  */
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { applySecurity, secureResponse } from '@/lib/security';
 import { db } from '@/lib/db';
 
 // ── Types ─────────────────────────────────────────────────────
@@ -14,7 +19,6 @@ import { db } from '@/lib/db';
 interface ProviderStatus {
   name: string;
   configured: boolean;
-  keyPresent: boolean;
   status: 'active' | 'not_configured' | 'error';
   message: string;
   category: string;
@@ -27,7 +31,6 @@ function checkAIProviders(): ProviderStatus[] {
     {
       name: 'Groq',
       configured: !!process.env.GROQ_API_KEY,
-      keyPresent: !!process.env.GROQ_API_KEY,
       status: process.env.GROQ_API_KEY ? 'active' : 'not_configured',
       message: process.env.GROQ_API_KEY
         ? 'Groq API configuré — LLM rapide + STT Whisper'
@@ -37,7 +40,6 @@ function checkAIProviders(): ProviderStatus[] {
     {
       name: 'OpenRouter',
       configured: !!process.env.OPENROUTER_API_KEY,
-      keyPresent: !!process.env.OPENROUTER_API_KEY,
       status: process.env.OPENROUTER_API_KEY ? 'active' : 'not_configured',
       message: process.env.OPENROUTER_API_KEY
         ? 'OpenRouter configuré — LLM + Génération d\'images'
@@ -47,7 +49,6 @@ function checkAIProviders(): ProviderStatus[] {
     {
       name: 'OpenAI',
       configured: !!process.env.OPENAI_API_KEY,
-      keyPresent: !!process.env.OPENAI_API_KEY,
       status: process.env.OPENAI_API_KEY ? 'active' : 'not_configured',
       message: process.env.OPENAI_API_KEY
         ? 'OpenAI configuré — TTS, STT, Embeddings'
@@ -57,7 +58,6 @@ function checkAIProviders(): ProviderStatus[] {
     {
       name: 'z-ai-sdk (Fallback)',
       configured: true,
-      keyPresent: true,
       status: 'active',
       message: 'SDK universel toujours disponible — Chat, Streaming, Images',
       category: 'AI / Fallback',
@@ -70,7 +70,6 @@ function checkVoiceProviders(): ProviderStatus[] {
     {
       name: 'WhatsApp (Baileys)',
       configured: !!process.env.BAILEYS_API_URL,
-      keyPresent: !!process.env.BAILEYS_API_URL,
       status: process.env.BAILEYS_API_URL ? 'active' : 'not_configured',
       message: process.env.BAILEYS_API_URL
         ? 'Baileys WhatsApp Web API configuré'
@@ -80,7 +79,6 @@ function checkVoiceProviders(): ProviderStatus[] {
     {
       name: 'WhatsApp Business API',
       configured: !!(process.env.WHATSAPP_API_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
-      keyPresent: !!process.env.WHATSAPP_API_TOKEN,
       status: process.env.WHATSAPP_API_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID
         ? 'active' : 'not_configured',
       message: process.env.WHATSAPP_API_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID
@@ -91,7 +89,6 @@ function checkVoiceProviders(): ProviderStatus[] {
     {
       name: 'SpeechBrain (STT)',
       configured: !!process.env.SPEECHBRAIN_API_URL,
-      keyPresent: !!process.env.SPEECHBRAIN_API_URL,
       status: process.env.SPEECHBRAIN_API_URL ? 'active' : 'not_configured',
       message: process.env.SPEECHBRAIN_API_URL
         ? 'SpeechBrain ASR configuré — Reconnaissance vocale avancée'
@@ -101,7 +98,6 @@ function checkVoiceProviders(): ProviderStatus[] {
     {
       name: 'Twilio',
       configured: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
-      keyPresent: !!process.env.TWILIO_ACCOUNT_SID,
       status: process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
         ? 'active' : 'not_configured',
       message: process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
@@ -117,7 +113,6 @@ function checkMediaProviders(): ProviderStatus[] {
     {
       name: 'ComfyUI (Images)',
       configured: !!process.env.COMFYUI_URL,
-      keyPresent: !!process.env.COMFYUI_URL,
       status: process.env.COMFYUI_URL ? 'active' : 'not_configured',
       message: process.env.COMFYUI_URL
         ? 'ComfyUI configuré — Génération d\'images locale (Stable Diffusion, Flux)'
@@ -127,7 +122,6 @@ function checkMediaProviders(): ProviderStatus[] {
     {
       name: 'Génération d\'images (OpenRouter)',
       configured: !!process.env.OPENROUTER_API_KEY,
-      keyPresent: !!process.env.OPENROUTER_API_KEY,
       status: process.env.OPENROUTER_API_KEY ? 'active' : 'not_configured',
       message: process.env.OPENROUTER_API_KEY
         ? 'OpenRouter configuré — Flux, Stable Diffusion (fallback)'
@@ -137,17 +131,15 @@ function checkMediaProviders(): ProviderStatus[] {
     {
       name: 'Génération de vidéos (Local)',
       configured: !!process.env.VIDEO_API_URL,
-      keyPresent: !!process.env.VIDEO_API_URL,
       status: process.env.VIDEO_API_URL ? 'active' : 'not_configured',
       message: process.env.VIDEO_API_URL
-        ? `API vidéo locale configurée sur ${process.env.VIDEO_API_URL}`
+        ? 'API vidéo locale configurée'
         : 'Non configuré',
       category: 'Media',
     },
     {
       name: 'Génération de vidéos (Cloud)',
       configured: !!process.env.REPLICATE_API_TOKEN,
-      keyPresent: !!process.env.REPLICATE_API_TOKEN,
       status: process.env.REPLICATE_API_TOKEN ? 'active' : 'not_configured',
       message: process.env.REPLICATE_API_TOKEN
         ? 'Replicate configuré — CogVideoX'
@@ -162,7 +154,6 @@ function checkServiceProviders(): ProviderStatus[] {
     {
       name: 'Email (Resend)',
       configured: !!process.env.RESEND_API_KEY,
-      keyPresent: !!process.env.RESEND_API_KEY,
       status: process.env.RESEND_API_KEY ? 'active' : 'not_configured',
       message: process.env.RESEND_API_KEY
         ? 'Resend configuré — Emails transactionnels'
@@ -172,7 +163,6 @@ function checkServiceProviders(): ProviderStatus[] {
     {
       name: 'Embeddings (OpenAI)',
       configured: !!process.env.OPENAI_API_KEY,
-      keyPresent: !!process.env.OPENAI_API_KEY,
       status: process.env.OPENAI_API_KEY ? 'active' : 'not_configured',
       message: process.env.OPENAI_API_KEY
         ? 'Embeddings sémantiques OpenAI configurés'
@@ -182,7 +172,6 @@ function checkServiceProviders(): ProviderStatus[] {
     {
       name: 'Sandbox (E2B)',
       configured: !!process.env.E2B_API_KEY,
-      keyPresent: !!process.env.E2B_API_KEY,
       status: process.env.E2B_API_KEY ? 'active' : 'not_configured',
       message: process.env.E2B_API_KEY
         ? 'E2B cloud sandbox configuré'
@@ -192,7 +181,6 @@ function checkServiceProviders(): ProviderStatus[] {
     {
       name: 'Vector Store (Qdrant)',
       configured: !!(process.env.VECTOR_STORE_TYPE === 'qdrant' && process.env.QDRANT_URL),
-      keyPresent: !!process.env.QDRANT_URL,
       status: process.env.VECTOR_STORE_TYPE === 'qdrant' && process.env.QDRANT_URL
         ? 'active' : 'not_configured',
       message: process.env.VECTOR_STORE_TYPE === 'qdrant'
@@ -203,20 +191,18 @@ function checkServiceProviders(): ProviderStatus[] {
     {
       name: 'n8n (Workflows)',
       configured: !!process.env.N8N_API_URL,
-      keyPresent: !!process.env.N8N_API_URL,
       status: process.env.N8N_API_URL ? 'active' : 'not_configured',
       message: process.env.N8N_API_URL
-        ? `n8n configuré sur ${process.env.N8N_API_URL} — Automatisation de workflows`
+        ? 'n8n configuré — Automatisation de workflows'
         : 'Non configuré. Définissez N8N_API_URL',
       category: 'Integrations',
     },
     {
       name: 'PocketBase',
       configured: !!process.env.POCKETBASE_URL,
-      keyPresent: !!process.env.POCKETBASE_URL,
       status: process.env.POCKETBASE_URL ? 'active' : 'not_configured',
       message: process.env.POCKETBASE_URL
-        ? `PocketBase configuré sur ${process.env.POCKETBASE_URL} — Données agent & mémoire`
+        ? 'PocketBase configuré — Données agent & mémoire'
         : 'Non configuré. Définissez POCKETBASE_URL',
       category: 'Integrations',
     },
@@ -225,7 +211,10 @@ function checkServiceProviders(): ProviderStatus[] {
 
 // ── Main Handler ──────────────────────────────────────────────
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const { auth, error: secError } = await applySecurity(request, { requireAuth: true });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
+
   try {
     // Check database connectivity
     let dbStatus: 'active' | 'error' = 'active';
@@ -255,29 +244,35 @@ export async function GET() {
     if (!process.env.AUTH_SALT) criticalIssues.push('AUTH_SALT manquant — La vérification des mots de passe échouera');
     if (dbStatus === 'error') criticalIssues.push('Base de données inaccessible');
 
-    return NextResponse.json({
-      status: criticalIssues.length > 0 ? 'degraded' : 'healthy',
-      timestamp: new Date().toISOString(),
-      database: {
-        status: dbStatus,
-        message: dbMessage,
-        provider: 'sqlite',
-      },
-      providers: {
-        configured,
-        total,
-        details: providers,
-      },
-      criticalIssues: criticalIssues.length > 0 ? criticalIssues : undefined,
-      fallbackInfo: {
-        message: 'Fallback chains: ComfyUI → OpenRouter → z-ai-sdk (images) | SpeechBrain → Groq → OpenAI → z-ai-sdk (STT) | Baileys → Cloud API (WhatsApp)',
-        alwaysAvailable: ['z-ai-sdk Chat', 'z-ai-sdk Streaming', 'z-ai-sdk Image Gen', 'z-ai-sdk ASR', 'Déterministic Embeddings', 'Subprocess Sandbox', 'SQLite Vector Store'],
-      },
-    });
+    return secureResponse(
+      NextResponse.json({
+        status: criticalIssues.length > 0 ? 'degraded' : 'healthy',
+        timestamp: new Date().toISOString(),
+        database: {
+          status: dbStatus,
+          message: dbMessage,
+          provider: 'postgresql',
+        },
+        providers: {
+          configured,
+          total,
+          details: providers,
+        },
+        criticalIssues: criticalIssues.length > 0 ? criticalIssues : undefined,
+        fallbackInfo: {
+          message: 'Fallback chains: ComfyUI → OpenRouter → z-ai-sdk (images) | SpeechBrain → Groq → OpenAI → z-ai-sdk (STT) | Baileys → Cloud API (WhatsApp)',
+          alwaysAvailable: ['z-ai-sdk Chat', 'z-ai-sdk Streaming', 'z-ai-sdk Image Gen', 'z-ai-sdk ASR', 'Déterministic Embeddings', 'Subprocess Sandbox', 'SQLite Vector Store'],
+        },
+      }),
+      request
+    );
   } catch (error) {
-    return NextResponse.json(
-      { status: 'error', message: 'Failed to check system status' },
-      { status: 500 }
+    return secureResponse(
+      NextResponse.json(
+        { status: 'error', message: 'Failed to check system status' },
+        { status: 500 }
+      ),
+      request
     );
   }
 }

@@ -98,6 +98,10 @@ async function n8nRequest<T>(
     headers['X-N8N-API-KEY'] = N8N_API_KEY;
   }
 
+  if (!N8N_API_KEY) {
+    log.warn('N8N_API_KEY is not set — requests will be unauthenticated');
+  }
+
   const response = await fetch(url, {
     ...options,
     headers,

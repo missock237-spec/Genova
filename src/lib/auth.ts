@@ -133,8 +133,11 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   }
 
   // Original format: simple SHA-256 + hardcoded salt (most legacy)
+  // Use AUTH_LEGACY_SALT env var if set, otherwise fall back to hardcoded value
+  // This allows rotating the legacy salt without code changes
+  const legacySalt = process.env.AUTH_LEGACY_SALT || 'agentos-salt-2024';
   const encoder = new TextEncoder();
-  const data = encoder.encode(password + 'agentos-salt-2024');
+  const data = encoder.encode(password + legacySalt);
   const computed = await crypto.subtle.digest('SHA-256', data);
   const computedHex = Array.from(new Uint8Array(computed))
     .map((b) => b.toString(16).padStart(2, '0'))

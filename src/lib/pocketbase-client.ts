@@ -69,6 +69,14 @@ export interface AgentLearningRecord extends PBRecord {
   lastUsedAt: string;
 }
 
+/**
+ * Escape a value for use in PocketBase filter strings.
+ * Prevents filter string injection by doubling single quotes.
+ */
+function escapePbFilter(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
 const POCKETBASE_URL = process.env.POCKETBASE_URL || 'http://localhost:8090';
 let authToken: string | null = null;
 
@@ -252,9 +260,9 @@ export async function getAgentMemories(
     minRelevance?: number;
   } = {},
 ): Promise<AgentMemoryRecord[]> {
-  let filter = `userId='${userId}' && agentId='${agentId}'`;
+  let filter = `userId='${escapePbFilter(userId)}' && agentId='${escapePbFilter(agentId)}'`;
   if (options.memoryType) {
-    filter += ` && memoryType='${options.memoryType}'`;
+    filter += ` && memoryType='${escapePbFilter(options.memoryType)}'`;
   }
   if (options.minRelevance) {
     filter += ` && relevanceScore>=${options.minRelevance}`;
@@ -278,7 +286,7 @@ export async function searchAgentMemories(
   query: string,
   limit?: number,
 ): Promise<AgentMemoryRecord[]> {
-  const filter = `userId='${userId}' && agentId='${agentId}' && content~'${query}'`;
+  const filter = `userId='${escapePbFilter(userId)}' && agentId='${escapePbFilter(agentId)}' && content~'${escapePbFilter(query)}'`;
   const result = await listRecords<AgentMemoryRecord>('agent_memories', {
     filter,
     sort: '-relevanceScore',
@@ -305,9 +313,9 @@ export async function getAgentLearnings(
   agentId: string,
   category?: string,
 ): Promise<AgentLearningRecord[]> {
-  let filter = `userId='${userId}' && agentId='${agentId}'`;
+  let filter = `userId='${escapePbFilter(userId)}' && agentId='${escapePbFilter(agentId)}'`;
   if (category) {
-    filter += ` && category='${category}'`;
+    filter += ` && category='${escapePbFilter(category)}'`;
   }
 
   const result = await listRecords<AgentLearningRecord>('agent_learnings', {

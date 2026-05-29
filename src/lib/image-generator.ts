@@ -269,7 +269,8 @@ async function generateWithSDK(
 
     let imageUrl: string | null = null;
     if (result.data && Array.isArray(result.data) && result.data.length > 0) {
-      imageUrl = result.data[0].base64 || null;
+      const base64Data = result.data[0].base64;
+      imageUrl = base64Data ? `data:image/png;base64,${base64Data}` : null;
     }
 
     return {

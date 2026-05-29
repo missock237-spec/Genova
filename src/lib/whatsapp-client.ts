@@ -231,11 +231,14 @@ export class WhatsAppClient {
    * GET https://graph.facebook.com/v21.0/me?access_token=...
    */
   async verifyToken(): Promise<WhatsAppVerifyResponse> {
-    const url = `${WHATSAPP_API_BASE}/${this.apiVersion}/me?access_token=${this.apiToken}`;
+    const url = `${WHATSAPP_API_BASE}/${this.apiVersion}/me`;
 
     try {
       const result = await this.fetchWithTimeout(url, {
         method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.apiToken}`,
+        },
       });
 
       if (!result.ok) {

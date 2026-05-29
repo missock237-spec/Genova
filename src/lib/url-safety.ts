@@ -190,7 +190,17 @@ function detectPatternThreats(url: string, domain: string): { threats: string[];
       hostname === '127.0.0.1' ||
       hostname === '0.0.0.0' ||
       hostname.startsWith('10.') ||
-      hostname.startsWith('172.') ||
+      // Check 172.16.0.0/12 (172.16.x.x through 172.31.x.x only — RFC 1918)
+      (() => {
+        const octets = hostname.split('.');
+        if (octets.length === 4 && octets[0] === '172') {
+          const secondOctet = parseInt(octets[1], 10);
+          if (secondOctet >= 16 && secondOctet <= 31) {
+            return true; // private
+          }
+        }
+        return false;
+      })() ||
       hostname.startsWith('192.168.') ||
       hostname === '::1' ||
       hostname.startsWith('::ffff:') ||

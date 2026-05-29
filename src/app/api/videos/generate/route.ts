@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { applySecurity, getAllowedOrigins } from '@/lib/security';
+import { applySecurity, secureResponse, getAllowedOrigins } from '@/lib/security';
 import { generateVideo, getUserVideos, AVAILABLE_MODELS, DEFAULT_MODEL } from '@/lib/video-generator';
 
 export async function OPTIONS(request: NextRequest) {
@@ -25,11 +25,11 @@ export async function POST(request: NextRequest) {
     const { prompt, model, mode, width, height, fps, numFrames, numInferenceSteps, guidanceScale, seed } = body;
 
     if (!prompt || typeof prompt !== 'string') {
-      return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
+      return secureResponse(NextResponse.json({ error: 'Prompt is required' }, { status: 400 }), request);
     }
 
     if (model && !AVAILABLE_MODELS[model]) {
-      return NextResponse.json({ error: `Invalid model. Available: ${Object.keys(AVAILABLE_MODELS).join(', ')}` }, { status: 400 });
+      return secureResponse(NextResponse.json({ error: `Invalid model. Available: ${Object.keys(AVAILABLE_MODELS).join(', ')}` }, { status: 400 }), request);
     }
 
     const result = await generateVideo(auth.userId, prompt, {
@@ -44,11 +44,11 @@ export async function POST(request: NextRequest) {
       seed: seed ? parseInt(seed) : undefined,
     });
 
-    return NextResponse.json(result, { status: 201 });
+    return secureResponse(NextResponse.json(result, { status: 201 }), request);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to generate video';
     const status = message.includes('Rate limit') ? 429 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return secureResponse(NextResponse.json({ error: message }, { status }), request);
   }
 }
 
@@ -64,12 +64,12 @@ export async function GET(request: NextRequest) {
 
     const validStatuses = ['pending', 'processing', 'completed', 'failed'];
     if (status && !validStatuses.includes(status)) {
-      return NextResponse.json({ error: 'Invalid status filter' }, { status: 400 });
+      return secureResponse(NextResponse.json({ error: 'Invalid status filter' }, { status: 400 }), request);
     }
 
     const result = await getUserVideos(auth.userId, { limit, offset, status });
-    return NextResponse.json(result);
+    return secureResponse(NextResponse.json(result), request);
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to list videos' }, { status: 500 });
+    return secureResponse(NextResponse.json({ error: 'Failed to list videos' }, { status: 500 }), request);
   }
 }

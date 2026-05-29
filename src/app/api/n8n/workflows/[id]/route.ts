@@ -8,19 +8,35 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { applySecurity, secureResponse } from '@/lib/security';
 import { getWorkflow, updateWorkflow, deleteWorkflow, activateWorkflow, deactivateWorkflow } from '@/lib/n8n-client';
 
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Max-Age': '86400',
+    },
+  });
+}
+
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { auth, error: secError } = await applySecurity(request, { requireAuth: true });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
+
   try {
     const { id } = await params;
     const workflow = await getWorkflow(id);
-    return NextResponse.json(workflow);
+    return secureResponse(NextResponse.json(workflow), request);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to get workflow';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return secureResponse(NextResponse.json({ error: message }, { status: 500 }), request);
   }
 }
 
@@ -28,28 +44,34 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { auth, error: secError } = await applySecurity(request, { requireAuth: true });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
+
   try {
     const { id } = await params;
     const body = await request.json();
     const workflow = await updateWorkflow(id, body);
-    return NextResponse.json(workflow);
+    return secureResponse(NextResponse.json(workflow), request);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update workflow';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return secureResponse(NextResponse.json({ error: message }, { status: 500 }), request);
   }
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { auth, error: secError } = await applySecurity(request, { requireAuth: true });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
+
   try {
     const { id } = await params;
     await deleteWorkflow(id);
-    return NextResponse.json({ success: true });
+    return secureResponse(NextResponse.json({ success: true }), request);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to delete workflow';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return secureResponse(NextResponse.json({ error: message }, { status: 500 }), request);
   }
 }
 
@@ -57,6 +79,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { auth, error: secError } = await applySecurity(request, { requireAuth: true });
+  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
+
   try {
     const { id } = await params;
     const body = await request.json();
@@ -65,9 +90,9 @@ export async function POST(
       ? await deactivateWorkflow(id)
       : await activateWorkflow(id);
 
-    return NextResponse.json(workflow);
+    return secureResponse(NextResponse.json(workflow), request);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to toggle workflow';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return secureResponse(NextResponse.json({ error: message }, { status: 500 }), request);
   }
 }
