@@ -13,6 +13,14 @@ import { CoordinationView } from '@/components/coordination/coordination-view';
 import { SettingsView } from '@/components/settings/settings-view';
 import { AnalyticsView } from '@/components/analytics/analytics-view';
 import { MediaView } from '@/components/media/media-view';
+import { VoiceView } from '@/components/voice/voice-view';
+import { SchedulerView } from '@/components/scheduler/scheduler-view';
+import { BillingView } from '@/components/billing/billing-view';
+import { MarketplaceView } from '@/components/marketplace/marketplace-view';
+import { AvatarView } from '@/components/avatars/avatar-view';
+import { BrowserView } from '@/components/browser/browser-view';
+import { MultimodalView } from '@/components/multimodal/multimodal-view';
+import { CollaborationView } from '@/components/collaboration/collaboration-view';
 import { ThemeProvider } from 'next-themes';
 import { Loader2 } from 'lucide-react';
 
@@ -75,6 +83,14 @@ function AppContent() {
           {currentView === 'approvals' && <SettingsView initialTab="approvals" />}
           {currentView === 'analytics' && <AnalyticsView />}
           {currentView === 'media' && <MediaView />}
+          {currentView === 'voice' && <VoiceView />}
+          {currentView === 'scheduler' && <SchedulerView />}
+          {currentView === 'billing' && <BillingView />}
+          {currentView === 'marketplace' && <MarketplaceView />}
+          {currentView === 'collaboration' && <CollaborationView />}
+          {currentView === 'avatars' && <AvatarView />}
+          {currentView === 'browser' && <BrowserView />}
+          {currentView === 'multimodal' && <MultimodalView />}
         </div>
       </main>
     </div>

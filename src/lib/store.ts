@@ -19,7 +19,7 @@ interface AuthState {
 }
 
 interface AppState {
-  currentView: 'dashboard' | 'agents' | 'automation' | 'guardrails' | 'coordination' | 'settings' | 'approvals' | 'analytics' | 'media';
+  currentView: 'dashboard' | 'agents' | 'automation' | 'guardrails' | 'coordination' | 'settings' | 'approvals' | 'analytics' | 'media' | 'voice' | 'scheduler' | 'billing' | 'marketplace' | 'collaboration' | 'avatars' | 'browser' | 'multimodal';
   setCurrentView: (view: AppState['currentView']) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;

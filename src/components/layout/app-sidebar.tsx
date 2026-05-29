@@ -18,17 +18,33 @@ import {
   CheckCircle2,
   BarChart3,
   Film,
+  Mic,
+  Clock,
+  CreditCard,
+  Store,
+  Users,
+  UserCircle,
+  Globe,
+  Eye,
 } from 'lucide-react';
 
 const navItems = [
   { id: 'dashboard' as const, label: 'Tableau de bord', icon: LayoutDashboard },
   { id: 'agents' as const, label: 'Agents IA', icon: Bot },
+  { id: 'avatars' as const, label: 'AI Avatars', icon: UserCircle },
   { id: 'media' as const, label: 'Médias IA', icon: Film },
+  { id: 'voice' as const, label: 'Voice AI', icon: Mic },
+  { id: 'multimodal' as const, label: 'Multimodal', icon: Eye },
+  { id: 'browser' as const, label: 'Web Actions', icon: Globe },
+  { id: 'marketplace' as const, label: 'Marketplace', icon: Store },
+  { id: 'collaboration' as const, label: 'Collaboration', icon: Users },
   { id: 'automation' as const, label: 'Automatisation', icon: Wand2 },
+  { id: 'scheduler' as const, label: 'Planificateur', icon: Clock },
   { id: 'guardrails' as const, label: 'Garde-fous', icon: Shield },
   { id: 'coordination' as const, label: 'Coordination', icon: GitBranch },
   { id: 'approvals' as const, label: 'Approbations', icon: CheckCircle2 },
   { id: 'analytics' as const, label: 'Analytics', icon: BarChart3 },
+  { id: 'billing' as const, label: 'Facturation', icon: CreditCard },
   { id: 'settings' as const, label: 'Paramètres', icon: Settings },
 ];
 

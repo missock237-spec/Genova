@@ -45,6 +45,27 @@ model User {
   documents         Document[]
   documentChunks    DocumentChunk[]
   auditLogs         AuditLog[]
+  voiceProfiles     VoiceProfile[]
+  voiceSessions     VoiceSession[]
+  voiceMemories     VoiceMemory[]
+  voiceCalls        VoiceCall[]
+  scheduledTasks    ScheduledTask[]
+  agentAutomations  AgentAutomation[]
+  subscriptions     Subscription[]
+  creditTransactions CreditTransaction[]
+  invoices          Invoice[]
+  workspaceMemberships WorkspaceMember[]
+  marketplaceListings MarketplaceListing[]
+  marketplaceReviews MarketplaceReview[]
+  marketplacePurchases MarketplacePurchase[]
+  browserAutomations BrowserAutomation[]
+  avatarConfigs     AvatarConfig[]
+  avatarSessions    AvatarSession[]
+  multimodalSessions MultimodalSession[]
+  memoryNodes       MemoryNode[]
+  memoryEdgesFrom   MemoryEdge[]
+  workspaceActivities WorkspaceActivity[]
+  personalization   UserPersonalization?
 
   @@index([role])
   @@map("users")
@@ -663,4 +684,638 @@ model VideoGeneration {
   @@index([provider, createdAt])
   @@index([status, createdAt])
   @@map("video_generations")
+}
+
+// ============================================================
+// Voice Profile — User voice preferences
+// ============================================================
+
+model VoiceProfile {
+  id          String   @id @default(cuid())
+  userId      String
+  language    String   @default("en-US")
+  voiceModel  String   @default("alloy")
+  speed       Float    @default(1.0)
+  pitch       Float    @default(1.0)
+  volume      Float    @default(1.0)
+  provider    String   @default("openai")     // openai, elevenlabs, azure, etc.
+  isActive    Boolean  @default(true)
+  metadata    String   @default("{}")          // JSON: extra voice config
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@index([provider])
+  @@map("voice_profiles")
+}
+
+// ============================================================
+// Voice Session — Active voice conversations (STT/TTS)
+// ============================================================
+
+model VoiceSession {
+  id              String   @id @default(cuid())
+  userId          String
+  agentId         String?
+  type            String   @default("stt")           // stt, tts, bidirectional
+  status          String   @default("active")        // active, paused, ended, error
+  language        String   @default("en-US")
+  sttProvider     String   @default("openai")        // openai, deepgram, azure
+  ttsProvider     String   @default("openai")        // openai, elevenlabs, azure
+  transcription   String   @default("")              // Accumulated transcription text
+  durationSeconds Int      @default(0)
+  metadata        String   @default("{}")            // JSON: session config & stats
+  startedAt       DateTime @default(now())
+  endedAt         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@map("voice_sessions")
+}
+
+// ============================================================
+// Voice Memory — Voice-based memories (audio embeddings, transcriptions)
+// ============================================================
+
+model VoiceMemory {
+  id            String   @id @default(cuid())
+  userId        String
+  voiceSessionId String?
+  category      String   @default("general")       // general, command, preference, context
+  content       String                              // Transcribed text content
+  embedding     String?                             // JSON: audio embedding vector
+  audioUrl      String?                             // URL to stored audio clip
+  durationMs    Int      @default(0)               // Duration of the audio clip in ms
+  language      String   @default("en-US")
+  confidence    Float    @default(0.0)             // STT confidence score 0-1
+  tags          String   @default("[]")            // JSON array of tags
+  metadata      String   @default("{}")            // JSON: extra metadata
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, category])
+  @@index([userId, createdAt])
+  @@map("voice_memories")
+}
+
+// ============================================================
+// Voice Call — AI-powered phone calls
+// ============================================================
+
+model VoiceCall {
+  id                String   @id @default(cuid())
+  userId            String
+  agentId           String?
+  provider          String   @default("twilio")        // twilio, whatsapp
+  fromNumber        String
+  toNumber          String
+  status            String   @default("ringing")       // ringing, connected, ended, failed
+  language          String   @default("en-US")
+  maxDurationMinutes Int     @default(30)
+  recordingEnabled  Boolean  @default(false)
+  recordingUrl      String?
+  transcript        String   @default("[]")            // JSON: [{ role, content, timestamp }]
+  durationSeconds   Int      @default(0)
+  callSid           String?                             // Provider call SID
+  metadata          String   @default("{}")            // JSON: extra call data
+  startedAt         DateTime @default(now())
+  endedAt           DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([callSid])
+  @@map("voice_calls")
+}
+
+// ============================================================
+// Scheduled Task — Cron-based agent tasks
+// ============================================================
+
+model ScheduledTask {
+  id          String    @id @default(cuid())
+  userId      String
+  agentId     String?
+  name        String
+  description String    @default("")
+  schedule    String                                // Cron expression (e.g. "0 9 * * 1-5")
+  timezone    String    @default("UTC")
+  status      String    @default("active")         // active, paused, disabled, error
+  lastRun     DateTime?
+  nextRun     DateTime?
+  runCount    Int       @default(0)
+  failureCount Int      @default(0)
+  payload     String    @default("{}")             // JSON: task input payload
+  result      String?                               // JSON: last run result
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([status, nextRun])
+  @@index([userId, createdAt])
+  @@map("scheduled_tasks")
+}
+
+// ============================================================
+// Agent Automation — Automation rules for agents
+// ============================================================
+
+model AgentAutomation {
+  id          String   @id @default(cuid())
+  userId      String
+  agentId     String?
+  name        String
+  description String   @default("")
+  trigger     String                             // event, schedule, webhook, condition
+  conditions  String   @default("[]")            // JSON array of condition objects
+  actions     String   @default("[]")            // JSON array of action objects
+  isActive    Boolean  @default(true)
+  runCount    Int      @default(0)
+  lastTriggeredAt DateTime?
+  metadata    String   @default("{}")            // JSON: extra config
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+  @@index([userId, trigger])
+  @@index([userId, createdAt])
+  @@map("agent_automations")
+}
+
+// ============================================================
+// Subscription — User subscriptions
+// ============================================================
+
+model Subscription {
+  id                  String   @id @default(cuid())
+  userId              String
+  plan                String   @default("free")          // free, starter, pro, enterprise
+  stripeCustomerId    String?
+  stripeSubscriptionId String?
+  stripePriceId       String?
+  status              String   @default("active")        // active, past_due, canceled, incomplete, trialing
+  currentPeriodStart  DateTime?
+  currentPeriodEnd    DateTime?
+  cancelAtPeriodEnd   Boolean  @default(false)
+  trialStart          DateTime?
+  trialEnd            DateTime?
+  metadata            String   @default("{}")            // JSON: extra subscription data
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([stripeCustomerId])
+  @@index([userId, status])
+  @@index([stripeSubscriptionId])
+  @@index([userId, createdAt])
+  @@map("subscriptions")
+}
+
+// ============================================================
+// Credit Transaction — Credit usage tracking
+// ============================================================
+
+model CreditTransaction {
+  id           String   @id @default(cuid())
+  userId       String
+  amount       Int                                  // Positive = credit, Negative = debit
+  balance      Int      @default(0)                  // Balance after transaction
+  type         String                                // purchase, usage, refund, bonus, adjustment
+  resourceType String                                // agent_run, image_gen, video_gen, voice, token, etc.
+  resourceId   String?                               // ID of the related resource
+  description  String   @default("")                 // Human-readable description
+  metadata     String   @default("{}")               // JSON: extra transaction data
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@index([userId, resourceType])
+  @@index([userId, createdAt])
+  @@map("credit_transactions")
+}
+
+// ============================================================
+// Invoice — Billing invoices
+// ============================================================
+
+model Invoice {
+  id               String   @id @default(cuid())
+  userId           String
+  stripeInvoiceId  String?  @unique
+  subscriptionId   String?
+  amount           Float    @default(0)
+  currency         String   @default("usd")
+  status           String   @default("draft")          // draft, open, paid, void, uncollectible
+  pdfUrl           String?
+  hostedUrl        String?
+  dueDate          DateTime?
+  paidAt           DateTime?
+  metadata         String   @default("{}")             // JSON: line items, tax, discounts
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([stripeInvoiceId])
+  @@map("invoices")
+}
+
+// ============================================================
+// Workspace — Team workspaces
+// ============================================================
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String   @default("")
+  icon        String?
+  settings    String   @default("{}")             // JSON: workspace-level settings
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members     WorkspaceMember[]
+  sharedAgents SharedAgent[]
+  activities  WorkspaceActivity[]
+
+  @@index([slug])
+  @@map("workspaces")
+}
+
+// ============================================================
+// Workspace Member — Workspace membership
+// ============================================================
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String   @default("member")         // owner, admin, member, viewer
+  invitedBy   String?                              // User ID who sent the invite
+  status      String   @default("active")         // active, invited, suspended
+  joinedAt    DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@map("workspace_members")
+}
+
+// ============================================================
+// Shared Agent — Agents shared within workspaces
+// ============================================================
+
+model SharedAgent {
+  id          String   @id @default(cuid())
+  workspaceId String
+  agentId     String                              // Reference to Agent.id
+  sharedBy    String                              // User ID who shared the agent
+  permissions String   @default("[]")             // JSON: array of permission strings
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, agentId])
+  @@index([workspaceId])
+  @@index([agentId])
+  @@map("shared_agents")
+}
+
+// ============================================================
+// Marketplace Listing — Agent/workflow listings for sale/sharing
+// ============================================================
+
+model MarketplaceListing {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String                             // agent, workflow, template, plugin
+  name        String
+  slug        String   @unique
+  description String
+  category    String   @default("general")        // general, productivity, development, marketing, etc.
+  tags        String   @default("[]")             // JSON array of tag strings
+  price       Float    @default(0)                // 0 = free
+  currency    String   @default("usd")
+  config      String   @default("{}")             // JSON: agent/workflow configuration
+  previewUrl  String?                             // Screenshot/demo URL
+  downloads   Int      @default(0)
+  rating      Float    @default(0)                // Average rating 0-5
+  reviewCount Int      @default(0)
+  status      String   @default("draft")          // draft, published, archived, suspended
+  metadata    String   @default("{}")             // JSON: version, changelog, etc.
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviews     MarketplaceReview[]
+  purchases   MarketplacePurchase[]
+
+  @@index([userId, status])
+  @@index([type, status])
+  @@index([category, status])
+  @@index([slug])
+  @@map("marketplace_listings")
+}
+
+// ============================================================
+// Marketplace Review — Reviews for marketplace items
+// ============================================================
+
+model MarketplaceReview {
+  id         String   @id @default(cuid())
+  listingId  String
+  userId     String
+  rating     Int                                  // 1-5
+  title      String   @default("")
+  content    String   @default("")
+  status     String   @default("published")      // published, hidden, flagged
+  metadata   String   @default("{}")             // JSON: extra review data
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  listing    MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, userId])
+  @@index([listingId, createdAt])
+  @@index([userId, createdAt])
+  @@map("marketplace_reviews")
+}
+
+// ============================================================
+// Marketplace Purchase — Purchase records
+// ============================================================
+
+model MarketplacePurchase {
+  id           String   @id @default(cuid())
+  listingId    String
+  userId       String
+  amount       Float    @default(0)
+  currency     String   @default("usd")
+  status       String   @default("completed")     // completed, refunded, disputed
+  stripeSessionId String?                        // Stripe Checkout Session ID
+  stripePaymentIntentId String?                  // Stripe Payment Intent ID
+  metadata     String   @default("{}")            // JSON: receipt, license info
+  purchasedAt  DateTime @default(now())
+  refundedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  listing      MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, userId])
+  @@index([userId, createdAt])
+  @@index([listingId, createdAt])
+  @@map("marketplace_purchases")
+}
+
+// ============================================================
+// Browser Automation — Browser automation sessions
+// ============================================================
+
+model BrowserAutomation {
+  id           String   @id @default(cuid())
+  userId       String
+  agentId      String?
+  url          String                              // Starting URL
+  title        String?
+  actions      String   @default("[]")            // JSON array of automation actions
+  status       String   @default("idle")          // idle, running, paused, completed, error
+  screenshots  String   @default("[]")            // JSON array of screenshot URLs/data
+  result       String?                             // JSON: final result or output
+  error        String?
+  stepCount    Int      @default(0)
+  currentStep  Int      @default(0)
+  metadata     String   @default("{}")            // JSON: browser config, viewport, etc.
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@map("browser_automations")
+}
+
+// ============================================================
+// Avatar Config — Avatar configurations
+// ============================================================
+
+model AvatarConfig {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  model       String   @default("default")        // Avatar model identifier
+  style       String   @default("realistic")      // realistic, cartoon, anime, abstract
+  voiceId     String?                              // Associated voice model ID
+  expressions String   @default("[]")             // JSON: available expression configurations
+  animations  String   @default("[]")             // JSON: available animation configurations
+  customData  String   @default("{}")             // JSON: custom avatar properties
+  thumbnailUrl String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+  @@index([userId, createdAt])
+  @@map("avatar_configs")
+}
+
+// ============================================================
+// Avatar Session — Active avatar sessions (lip-sync, speech)
+// ============================================================
+
+model AvatarSession {
+  id            String   @id @default(cuid())
+  userId        String
+  avatarConfigId String?
+  agentId       String?
+  status        String   @default("active")        // active, speaking, idle, ended, error
+  lipSyncData   String   @default("{}")            // JSON: lip-sync animation data
+  speechText    String   @default("")              // Current speech text being rendered
+  audioUrl      String?                             // URL to current audio stream
+  videoUrl      String?                             // URL to video stream
+  durationMs    Int      @default(0)               // Session duration in milliseconds
+  metadata      String   @default("{}")            // JSON: session config & stats
+  startedAt     DateTime @default(now())
+  endedAt       DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@map("avatar_sessions")
+}
+
+// ============================================================
+// Multimodal Session — Real-time sessions (webcam, screen share, vision, audio)
+// ============================================================
+
+model MultimodalSession {
+  id            String   @id @default(cuid())
+  userId        String
+  agentId       String?
+  type          String   @default("vision")        // vision, webcam, screen_share, audio, multimodal
+  status        String   @default("active")        // active, paused, ended, error
+  inputModes    String   @default("[]")            // JSON: enabled input modes ["video", "audio", "screen"]
+  outputModes   String   @default("[]")            // JSON: enabled output modes ["text", "audio", "video"]
+  streamUrl     String?                             // URL to media stream
+  recordings    String   @default("[]")            // JSON: array of recording URLs
+  transcript    String   @default("")              // Session transcript text
+  durationMs    Int      @default(0)               // Session duration in milliseconds
+  frameCount    Int      @default(0)               // Number of processed frames
+  metadata      String   @default("{}")            // JSON: resolution, fps, codec, etc.
+  startedAt     DateTime @default(now())
+  endedAt       DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, type])
+  @@index([userId, createdAt])
+  @@map("multimodal_sessions")
+}
+
+// ============================================================
+// Memory Node — User personal knowledge graph nodes
+// ============================================================
+
+model MemoryNode {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String   @default("general")        // preference, project, habit, style, contact, topic, general
+  label       String                               // Short label for the node
+  content     String                               // Full content/data of this memory node
+  metadata    String   @default("{}")             // JSON: extra node data (importance, context, etc.)
+  weight      Float    @default(1.0)              // Weight/importance of this node
+  accessCount Int      @default(0)                // How often this node is accessed
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  expiresAt   DateTime?
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  edgesFrom   MemoryEdge[] @relation("SourceNodes")
+  edgesTo     MemoryEdge[] @relation("TargetNodes")
+
+  @@index([userId, type])
+  @@index([userId, createdAt])
+  @@index([userId, isActive])
+  @@map("memory_nodes")
+}
+
+// ============================================================
+// Memory Edge — Relationships between memory nodes
+// ============================================================
+
+model MemoryEdge {
+  id           String   @id @default(cuid())
+  userId       String
+  sourceNodeId String
+  targetNodeId String
+  relation     String                              // e.g., "prefers_for", "related_to", "part_of", "leads_to"
+  weight       Float    @default(1.0)             // Edge weight/strength
+  metadata     String   @default("{}")            // JSON: extra edge data
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceNode   MemoryNode @relation("SourceNodes", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNode   MemoryNode @relation("TargetNodes", fields: [targetNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceNodeId, targetNodeId, relation])
+  @@index([userId])
+  @@index([sourceNodeId])
+  @@index([targetNodeId])
+  @@map("memory_edges")
+}
+
+// ============================================================
+// Workspace Activity — Track workspace changes and events
+// ============================================================
+
+model WorkspaceActivity {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  action      String                              // e.g., "member_joined", "agent_shared", "role_updated", "comment_added"
+  details     String   @default("{}")             // JSON: activity-specific details
+  targetType  String?                             // e.g., "agent", "member", "workspace"
+  targetId    String?                             // ID of the target entity
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([userId, isRead])
+  @@index([workspaceId, action])
+  @@map("workspace_activities")
+}
+
+// ============================================================
+// User Personalization — AI personalization settings
+// ============================================================
+
+model UserPersonalization {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  communicationStyle    String   @default("balanced")    // concise, balanced, detailed, formal, casual
+  technicalLevel        String   @default("intermediate") // beginner, intermediate, advanced, expert
+  preferredFormat       String   @default("mixed")        // text, structured, mixed, code_first
+  responseLength        String   @default("medium")       // brief, medium, comprehensive
+  tonePreferences       String   @default("{}")           // JSON: tone settings (friendly, professional, etc.)
+  topicInterests        String   @default("[]")           // JSON: array of interest topics
+  languagePreference    String   @default("en")           // Preferred language code
+  customInstructions    String   @default("")             // Custom system prompt additions
+  interactionPatterns   String   @default("{}")           // JSON: learned interaction patterns
+  feedbackHistory       String   @default("[]")           // JSON: past feedback for adaptation
+  adaptationScore       Float    @default(0.0)           // How well the AI has adapted (0-1)
+  totalInteractions     Int      @default(0)             // Total interactions tracked
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_personalizations")
 }
