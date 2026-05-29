@@ -12,6 +12,7 @@ import { GuardrailsView } from '@/components/guardrails/guardrails-view';
 import { CoordinationView } from '@/components/coordination/coordination-view';
 import { SettingsView } from '@/components/settings/settings-view';
 import { AnalyticsView } from '@/components/analytics/analytics-view';
+import { MediaView } from '@/components/media/media-view';
 import { ThemeProvider } from 'next-themes';
 import { Loader2 } from 'lucide-react';
 
@@ -73,6 +74,7 @@ function AppContent() {
           {currentView === 'settings' && <SettingsView />}
           {currentView === 'approvals' && <SettingsView initialTab="approvals" />}
           {currentView === 'analytics' && <AnalyticsView />}
+          {currentView === 'media' && <MediaView />}
         </div>
       </main>
     </div>

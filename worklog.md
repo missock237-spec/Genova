@@ -155,3 +155,40 @@ Stage Summary:
 - Resend-only email (Nodemailer removed)
 - Real Groq pricing for accurate cost tracking
 - AbortController properly cancels timed-out requests
+
+---
+Task ID: 8
+Agent: Super Z (Main)
+Task: Intégrer CogVideo + VideoCrafter dans le SaaS, tester les bugs, améliorer le rendu
+
+Work Log:
+- Analysé CogVideo-main.zip: CogVideoX-2B/5B, T2V/I2V/V2V, Diffusers + Gradio, modèles HF auto-download
+- Analysé VideoCrafter-main.zip: VideoCrafter2, T2V/I2V, LVDM architecture, Gradio + Cog/Replicate
+- Installé PyTorch CPU + diffusers + transformers + fastapi + uvicorn + imageio + dependencies
+- Créé services/video-api/server.py: FastAPI unifié avec CogVideo + VideoCrafter, lazy loading, health check
+- Démarré Video API sur port 8189 — health check OK, models endpoint OK
+- Ajouté modèle VideoGeneration au prisma/schema.prisma (12 champs + indexes)
+- Ajouté relation videoGenerations au modèle User
+- Sync Prisma: 32 tables PostgreSQL (incluant video_generations)
+- Créé src/lib/video-generator.ts: fallback chain CogVideo → VideoCrafter → Cloud API (Replicate)
+- Créé src/app/api/videos/generate/route.ts: POST (generate) + GET (list)
+- Créé src/app/api/videos/[id]/route.ts: GET (single) + DELETE
+- Créé src/components/media/media-view.tsx: UI complète avec tabs Vidéos/Images, formulaires, galerie, stats
+- Modifié src/lib/store.ts: ajout 'media' au currentView union type
+- Modifié src/components/layout/app-sidebar.tsx: ajout Film icon + 'Médias IA' nav item
+- Modifié src/components/layout/app-header.tsx: ajout 'media' + 'analytics' aux viewTitles
+- Modifié src/app/page.tsx: ajout import MediaView + rendering condition
+- Ajouté VIDEO_API_URL au .env
+- Corrigé tsconfig.json: exclusion upload/ et services/ restaurée
+- Recréé base PostgreSQL après corruption: user genova + db genova + 32 tables
+- TypeScript: 0 erreurs (hors pdf-parse type declarations)
+- Créé services/start-all.sh avec Video API inclus
+
+Stage Summary:
+- 2 générateurs vidéo intégrés: CogVideoX-2B + VideoCrafter2
+- Video API FastAPI sur port 8189 (health OK, models OK)
+- 4 nouveaux fichiers créés (server.py, video-generator.ts, 2 API routes, media-view.tsx)
+- 4 fichiers modifiés (store.ts, sidebar, header, page.tsx)
+- 1 modèle Prisma ajouté (VideoGeneration, 12 champs)
+- 32 tables PostgreSQL synchronisées
+- UI Médias IA complète avec génération vidéo + image en tabs

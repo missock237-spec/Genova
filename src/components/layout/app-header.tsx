@@ -10,11 +10,13 @@ import { useSyncExternalStore, useState, useRef, useEffect } from 'react';
 const viewTitles: Record<string, string> = {
   dashboard: 'Tableau de bord',
   agents: 'Agents IA',
+  media: 'Médias IA',
   automation: 'Automatisation',
   guardrails: 'Garde-fous',
   coordination: 'Coordination',
   settings: 'Paramètres',
   approvals: 'Approbations',
+  analytics: 'Analytics',
 };
 
 export function AppHeader() {

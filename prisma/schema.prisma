@@ -38,6 +38,7 @@ model User {
   monitoringEvents MonitoringEvent[]
   emailVerifications EmailVerification[]
   imageGenerations  ImageGeneration[]
+  videoGenerations  VideoGeneration[]
   memories          AgentMemory[]
   conversations     Conversation[]
   knowledgeEntries  Knowledge[]
@@ -632,4 +633,34 @@ model AuditLog {
   @@index([action, createdAt])
   @@index([severity, createdAt])
   @@map("audit_logs")
+}
+
+// ============================================================
+// Video Generation — Track AI-generated videos
+// ============================================================
+
+model VideoGeneration {
+  id              String   @id @default(cuid())
+  userId          String
+  prompt          String                          // The text prompt used
+  mode            String   @default("t2v")        // t2v (text-to-video), i2v (image-to-video)
+  model           String                          // cogvideo, videocrafter
+  provider        String   @default("local")       // local, cloud, z-ai-sdk
+  videoUrl        String?                         // URL or path to generated video
+  status          String   @default("pending")    // pending, processing, completed, failed
+  costUsd         Float    @default(0)
+  durationSeconds Float    @default(0)            // Duration of the generated video
+  width           Int?
+  height          Int?
+  fps             Int      @default(8)
+  numFrames       Int?
+  metadata        String   @default("{}")         // JSON metadata (seed, steps, guidance_scale, etc.)
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([provider, createdAt])
+  @@index([status, createdAt])
+  @@map("video_generations")
 }
