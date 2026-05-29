@@ -96,7 +96,7 @@ export class AgentManager {
           plan.results[taskId] = { agentId: agentTask.agentId, result, success: true };
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : 'Erreur inconnue';
-          completedTasks.add(taskId);
+          // Don't add failed tasks to completedTasks — dependent tasks should not execute
           taskResults[taskId] = `Erreur: ${errorMsg}`;
           plan.results[taskId] = { agentId: agentTask.agentId, error: errorMsg, success: false };
         }

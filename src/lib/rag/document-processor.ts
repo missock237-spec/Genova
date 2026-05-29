@@ -76,7 +76,8 @@ export class DocumentProcessor {
    */
   async extractPdfText(buffer: Buffer): Promise<string> {
     try {
-      const pdfParse = (await import('pdf-parse')) as unknown as (buf: Buffer) => Promise<{ text: string }>;
+      // pdf-parse is optional — type it inline to avoid missing module errors
+      const pdfParse = (await import('pdf-parse' as string)) as unknown as (buf: Buffer) => Promise<{ text: string }>;
       const data = await pdfParse(buffer);
       return data.text || '';
     } catch {

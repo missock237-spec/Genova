@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       totalResources,
     ] = await Promise.all([
       db.agent.count({ where: { userId, status: 'active' } }),
-      db.task.count({ where: { userId, status: 'running' } }),
+      db.task.count({ where: { userId, status: 'in_progress' } }),
       db.validation.count({
         where: {
           task: { userId },

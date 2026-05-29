@@ -82,10 +82,9 @@ export interface ExecutionContext {
   totalCost: number;
 }
 
-let stepCounter = 0;
-
 function generateStepId(): string {
-  return `step_${Date.now()}_${++stepCounter}`;
+  // Use crypto.randomUUID for uniqueness — avoids race conditions with global counter
+  return `step_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
 // ============================================================
@@ -738,7 +737,7 @@ export async function executeAgentLoop(
   toolRegistry: ToolRegistry,
   onStep?: (step: ExecutionStep) => void
 ): Promise<ExecutionStep[]> {
-  stepCounter = 0;
+  // No global counter reset needed — generateStepId() uses timestamp + random
 
   // Set defaults
   context.maxRetries = context.maxRetries || 3;

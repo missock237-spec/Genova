@@ -272,11 +272,20 @@ export async function generateImage(
   });
 
   try {
-    // 6. Attempt generation with OpenRouter, fallback to SDK
+    // 6. Attempt generation with OpenRouter, fallback to SDK on error
     let result: { imageUrl: string | null; costUsd: number; metadata: Record<string, unknown> };
 
     if (process.env.OPENROUTER_API_KEY) {
-      result = await generateWithOpenRouter(sanitizedPrompt, model, width, height);
+      try {
+        result = await generateWithOpenRouter(sanitizedPrompt, model, width, height);
+      } catch (openRouterError) {
+        // OpenRouter failed — try SDK as fallback
+        try {
+          result = await generateWithSDK(sanitizedPrompt, model, width, height);
+        } catch (sdkError) {
+          throw openRouterError; // Throw original OpenRouter error
+        }
+      }
     } else {
       result = await generateWithSDK(sanitizedPrompt, model, width, height);
     }

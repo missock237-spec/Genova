@@ -592,11 +592,16 @@ export class WebSocketManager {
     const cutoff = Date.now() - maxAgeMs;
     let cleaned = 0;
 
+    // Collect stale IDs first to avoid modifying Map during iteration
+    const staleIds: string[] = [];
     for (const [id, conn] of this.connections.entries()) {
       if (new Date(conn.lastPingAt).getTime() < cutoff || !conn.healthy) {
-        this.unregisterConnection(id);
-        cleaned++;
+        staleIds.push(id);
       }
+    }
+    for (const id of staleIds) {
+      this.unregisterConnection(id);
+      cleaned++;
     }
 
     return cleaned;
@@ -607,7 +612,9 @@ export class WebSocketManager {
    */
   destroy(): void {
     this.stopHeartbeat();
-    for (const [id] of this.connections.entries()) {
+    // Collect IDs first to avoid modifying Map during iteration
+    const ids = Array.from(this.connections.keys());
+    for (const id of ids) {
       this.unregisterConnection(id);
     }
   }

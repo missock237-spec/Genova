@@ -100,8 +100,8 @@ Parle en français.`,
     };
   }
 
-  // Build the plan
-  const taskIds = planData.tasks.map(() => `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
+  // Build the plan — use index-based IDs for consistency with agent-manager.ts
+  const taskIds = planData.tasks.map((_, index) => `task_${index}`);
 
   const plan: MultiAgentPlan = {
     id: `plan_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -116,11 +116,6 @@ Parle en français.`,
     results: {},
     createdAt: new Date().toISOString(),
   };
-
-  // Map task IDs to agents
-  plan.agents.forEach((agent, i) => {
-    agent.dependencies = planData.tasks[i]?.dependencies?.map(depIdx => taskIds[depIdx]).filter(Boolean) || [];
-  });
 
   return plan;
 }

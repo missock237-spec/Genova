@@ -9,10 +9,12 @@ interface RateLimitEntry {
 const rateLimitStore = new Map<string, RateLimitEntry>();
 
 // Clean up old entries every 5 minutes
+// Use 1 hour (3600000ms) as the max window to preserve long-window rate limits
 setInterval(() => {
   const now = Date.now();
+  const maxWindow = 3600000; // 1 hour — covers all configured rate limit windows
   for (const [key, entry] of rateLimitStore.entries()) {
-    entry.timestamps = entry.timestamps.filter((t) => now - t < 60000);
+    entry.timestamps = entry.timestamps.filter((t) => now - t < maxWindow);
     if (entry.timestamps.length === 0) {
       rateLimitStore.delete(key);
     }

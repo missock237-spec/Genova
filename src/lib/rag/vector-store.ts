@@ -115,6 +115,8 @@ export class SQLiteVectorAdapter implements VectorStoreAdapter {
     const filter = options?.filter;
 
     const results: EmbeddingResult[] = searchSimilar(queryVector, topK * 2, (entry) => {
+      // Filter out deleted entries
+      if (entry.metadata._deleted) return false;
       // Apply metadata filter if provided
       if (filter) {
         for (const [key, value] of Object.entries(filter)) {

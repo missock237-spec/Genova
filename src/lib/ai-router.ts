@@ -459,6 +459,7 @@ async function* streamGroqDirect(
     yield { delta: '', done: true, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
   } finally {
     clearTimeout(timer);
+    if (!controller.signal.aborted) controller.abort();
   }
 }
 
@@ -529,6 +530,7 @@ async function* streamOpenRouterDirect(
     yield { delta: '', done: true, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
   } finally {
     clearTimeout(timer);
+    if (!controller.signal.aborted) controller.abort();
   }
 }
 

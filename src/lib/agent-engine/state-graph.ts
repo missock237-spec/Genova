@@ -577,7 +577,7 @@ export class GraphExecutor {
     initialState: AgentState,
     toolRegistry: ToolRegistry
   ): Promise<AgentState> {
-    let state = { ...initialState };
+    let state = structuredClone(initialState);
     let currentNode = this.compiled.entryPoint;
 
     const traceId = this.tracer.startTrace(state.agentId, state.task);

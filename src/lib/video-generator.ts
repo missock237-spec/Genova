@@ -216,6 +216,7 @@ async function generateWithCloudAPI(
       await new Promise((r) => setTimeout(r, 5000)); // 5s polling
       const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${predictionId}`, {
         headers: { 'Authorization': `Token ${apiKey}` },
+        signal: controller.signal, // Use abort signal so timeout actually works
       });
       result = await pollResponse.json();
       attempts++;
