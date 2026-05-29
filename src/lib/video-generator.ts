@@ -118,7 +118,8 @@ async function generateWithLocalAPI(
   const timeout = setTimeout(() => controller.abort(), 300_000); // 5 min timeout
 
   try {
-    const response = await fetch(`${VIDEO_API_URL}/generate`, {
+    // 1. Submit generation job
+    const submitResponse = await fetch(`${VIDEO_API_URL}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -136,31 +137,58 @@ async function generateWithLocalAPI(
       signal: controller.signal,
     });
 
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => 'Unknown error');
-      throw new Error(`Local Video API error (${response.status}): ${errorBody}`);
+    if (!submitResponse.ok) {
+      const errorBody = await submitResponse.text().catch(() => 'Unknown error');
+      throw new Error(`Local Video API submit error (${submitResponse.status}): ${errorBody}`);
     }
 
-    const data = await response.json();
+    const submitData = await submitResponse.json();
+    const jobId = submitData.job_id;
 
-    if (data.status !== 'completed') {
-      throw new Error(`Video generation failed: ${data.metadata?.error || 'Unknown error'}`);
+    if (!jobId) {
+      throw new Error('No job_id returned from Video API');
     }
 
-    // Build full video URL
-    const videoUrl = data.video_url
-      ? `${VIDEO_API_URL}${data.video_url}`
-      : null;
+    log.info('Video generation job submitted', { jobId });
 
-    return {
-      videoUrl,
-      provider: data.provider || modelInfo.provider,
-      durationSeconds: data.duration_seconds || 0,
-      metadata: {
-        model: data.model,
-        ...data.metadata,
-      },
-    };
+    // 2. Poll for completion
+    let attempts = 0;
+    const maxPollAttempts = 120; // 5 minutes at 2.5s intervals
+
+    while (attempts < maxPollAttempts) {
+      await new Promise(r => setTimeout(r, 2500)); // Poll every 2.5s
+
+      const statusResponse = await fetch(`${VIDEO_API_URL}/status/${jobId}`, {
+        signal: controller.signal,
+      });
+
+      if (!statusResponse.ok) {
+        throw new Error(`Video API status check failed: ${statusResponse.status}`);
+      }
+
+      const statusData = await statusResponse.json();
+
+      if (statusData.status === 'completed') {
+        const videoUrl = statusData.video_url
+          ? `${VIDEO_API_URL}${statusData.video_url}`
+          : null;
+
+        return {
+          videoUrl,
+          provider: statusData.metadata?.mock ? 'local-mock' : (statusData.metadata?.model || modelInfo.provider),
+          durationSeconds: statusData.duration_seconds || 0,
+          metadata: statusData.metadata || {},
+        };
+      }
+
+      if (statusData.status === 'failed') {
+        throw new Error(`Video generation failed: ${statusData.error || 'Unknown error'}`);
+      }
+
+      attempts++;
+    }
+
+    throw new Error('Video generation timed out (polling exceeded max attempts)');
   } finally {
     clearTimeout(timeout);
   }

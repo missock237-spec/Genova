@@ -25,6 +25,7 @@ import {
   UserCircle,
   Globe,
   Eye,
+  Zap,
 } from 'lucide-react';
 
 const navItems = [
@@ -43,6 +44,7 @@ const navItems = [
   { id: 'coordination' as const, label: 'Coordination', icon: GitBranch },
   { id: 'approvals' as const, label: 'Approbations', icon: CheckCircle2 },
   { id: 'analytics' as const, label: 'Analytics', icon: BarChart3 },
+  { id: 'integrations' as const, label: 'Intégrations', icon: Zap },
   { id: 'settings' as const, label: 'Paramètres', icon: Settings },
 ];
 

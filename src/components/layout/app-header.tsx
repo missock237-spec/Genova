@@ -17,6 +17,7 @@ const viewTitles: Record<string, string> = {
   settings: 'Paramètres',
   approvals: 'Approbations',
   analytics: 'Analytics',
+  integrations: 'Intégrations',
 };
 
 export function AppHeader() {

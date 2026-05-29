@@ -1,8 +1,13 @@
-// Image Generation Engine — Generate images via OpenRouter or z-ai-web-dev-sdk
-// Supports free models on OpenRouter with rate limiting, cost tracking, and validation.
+// Image Generation Engine — Generate images via ComfyUI, OpenRouter, or z-ai-web-dev-sdk
+// Fallback chain: ComfyUI (P1) → OpenRouter (P2) → z-ai-sdk (P3)
+// ComfyUI is the primary provider when available; others serve as fallbacks.
 
 import { db } from '@/lib/db';
 import { checkRateLimit } from '@/lib/security';
+import { checkComfyUIHealth, generateWithComfyUI, COMFYUI_URL } from '@/lib/comfyui-client';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('image-generator');
 
 // ============================================================
 // Types
@@ -35,8 +40,22 @@ const MAX_PROMPT_LENGTH = 2000;
 const MAX_IMAGES_PER_HOUR = 10;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
-// Free image models available on OpenRouter
+// Free image models available on OpenRouter + ComfyUI
 const FREE_IMAGE_MODELS: Record<string, { id: string; costUsd: number }> = {
+  // ComfyUI models (P1 — local, free)
+  'comfyui-sd': {
+    id: 'comfyui/stable-diffusion',
+    costUsd: 0,
+  },
+  'comfyui-sdxl': {
+    id: 'comfyui/stable-diffusion-xl',
+    costUsd: 0,
+  },
+  'comfyui-flux': {
+    id: 'comfyui/flux',
+    costUsd: 0,
+  },
+  // OpenRouter free models (P2)
   'flux-1-schnell-free': {
     id: 'black-forest-labs/flux-1-schnell:free',
     costUsd: 0,
@@ -47,7 +66,8 @@ const FREE_IMAGE_MODELS: Record<string, { id: string; costUsd: number }> = {
   },
 };
 
-const DEFAULT_MODEL = 'flux-1-schnell-free';
+// Default to ComfyUI if COMFYUI_URL is configured, otherwise OpenRouter
+const DEFAULT_MODEL = COMFYUI_URL ? 'comfyui-sd' : 'flux-1-schnell-free';
 
 const SUPPORTED_SIZES = [
   '1024x1024',
@@ -123,7 +143,54 @@ async function checkUserRateLimit(userId: string): Promise<{ allowed: boolean; r
 }
 
 // ============================================================
-// Image Generation — OpenRouter API
+// Image Generation — ComfyUI (P1 — Primary)
+// ============================================================
+
+function isComfyUIModel(model: string): boolean {
+  return model.startsWith('comfyui-');
+}
+
+const COMFYUI_MODEL_MAP: Record<string, string> = {
+  'comfyui-sd': 'v1-5-pruned-emaonly.safetensors',
+  'comfyui-sdxl': 'sd_xl_base_1.0.safetensors',
+  'comfyui-flux': 'flux1-dev.safetensors',
+};
+
+async function generateWithComfyUIAdapter(
+  prompt: string,
+  model: string,
+  width: number,
+  height: number
+): Promise<{ imageUrl: string | null; costUsd: number; metadata: Record<string, unknown> }> {
+  const checkpoint = COMFYUI_MODEL_MAP[model] || COMFYUI_MODEL_MAP['comfyui-sd'];
+
+  const result = await generateWithComfyUI({
+    prompt,
+    width,
+    height,
+    model: checkpoint,
+  });
+
+  // Convert the first image to a data URI for compatibility
+  let imageUrl: string | null = null;
+  if (result.images.length > 0) {
+    const img = result.images[0];
+    imageUrl = `data:image/png;base64,${img.data}`;
+  }
+
+  return {
+    imageUrl,
+    costUsd: 0,
+    metadata: {
+      ...result.metadata,
+      promptId: result.promptId,
+      durationMs: result.durationMs,
+    },
+  };
+}
+
+// ============================================================
+// Image Generation — OpenRouter API (P2)
 // ============================================================
 
 async function generateWithOpenRouter(
@@ -181,7 +248,7 @@ async function generateWithOpenRouter(
 }
 
 // ============================================================
-// Image Generation — z-ai-web-dev-sdk Fallback
+// Image Generation — z-ai-web-dev-sdk Fallback (P3)
 // ============================================================
 
 async function generateWithSDK(
@@ -216,6 +283,46 @@ async function generateWithSDK(
     };
   } catch (sdkError) {
     throw new Error(`SDK image generation failed: ${sdkError instanceof Error ? sdkError.message : 'Unknown error'}`);
+  }
+}
+
+// ============================================================
+// Helper — OpenRouter + SDK fallback chain (P2 → P3)
+// ============================================================
+
+async function attemptOpenRouterOrSDK(
+  prompt: string,
+  model: string,
+  width: number,
+  height: number
+): Promise<{ imageUrl: string | null; costUsd: number; metadata: Record<string, unknown> }> {
+  // For ComfyUI-specific models, remap to a compatible OpenRouter model
+  const openRouterModel = isComfyUIModel(model) ? 'flux-1-schnell-free' : model;
+
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      log.info('Attempting image generation with OpenRouter (P2)', { model: openRouterModel });
+      const result = await generateWithOpenRouter(prompt, openRouterModel, width, height);
+      result.metadata.provider = 'openrouter';
+      return result;
+    } catch (openRouterError) {
+      log.warn('OpenRouter generation failed, falling back to z-ai-sdk (P3)', {
+        error: openRouterError instanceof Error ? openRouterError.message : 'Unknown error',
+      });
+      // OpenRouter failed — try SDK as fallback
+      try {
+        const result = await generateWithSDK(prompt, openRouterModel, width, height);
+        result.metadata.provider = 'z-ai-sdk';
+        return result;
+      } catch (sdkError) {
+        throw openRouterError; // Throw original OpenRouter error
+      }
+    }
+  } else {
+    log.info('No OPENROUTER_API_KEY configured, using z-ai-sdk (P3)');
+    const result = await generateWithSDK(prompt, openRouterModel, width, height);
+    result.metadata.provider = 'z-ai-sdk';
+    return result;
   }
 }
 
@@ -262,7 +369,7 @@ export async function generateImage(
       userId,
       prompt: sanitizedPrompt,
       model,
-      provider: 'openrouter',
+      provider: isComfyUIModel(model) ? 'comfyui' : 'openrouter',
       status: 'pending',
       costUsd: 0,
       width,
@@ -272,22 +379,33 @@ export async function generateImage(
   });
 
   try {
-    // 6. Attempt generation with OpenRouter, fallback to SDK on error
+    // 6. Attempt generation with fallback chain: ComfyUI → OpenRouter → z-ai-sdk
     let result: { imageUrl: string | null; costUsd: number; metadata: Record<string, unknown> };
+    let usedProvider = 'openrouter'; // Default provider for DB tracking
 
-    if (process.env.OPENROUTER_API_KEY) {
+    // P1: Try ComfyUI first if COMFYUI_URL is set and ComfyUI is healthy
+    const comfyUIAvailable = COMFYUI_URL && await checkComfyUIHealth().catch(() => false);
+
+    if (comfyUIAvailable && (isComfyUIModel(model) || COMFYUI_URL)) {
       try {
-        result = await generateWithOpenRouter(sanitizedPrompt, model, width, height);
-      } catch (openRouterError) {
-        // OpenRouter failed — try SDK as fallback
-        try {
-          result = await generateWithSDK(sanitizedPrompt, model, width, height);
-        } catch (sdkError) {
-          throw openRouterError; // Throw original OpenRouter error
-        }
+        log.info('Attempting image generation with ComfyUI (P1)', { model });
+        result = await generateWithComfyUIAdapter(sanitizedPrompt, model, width, height);
+        usedProvider = 'comfyui';
+      } catch (comfyUIError) {
+        log.warn('ComfyUI generation failed, falling back to OpenRouter (P2)', {
+          error: comfyUIError instanceof Error ? comfyUIError.message : 'Unknown error',
+        });
+        // Fall through to OpenRouter
+        result = await attemptOpenRouterOrSDK(sanitizedPrompt, model, width, height);
+        usedProvider = result.metadata.provider as string || 'openrouter';
       }
     } else {
-      result = await generateWithSDK(sanitizedPrompt, model, width, height);
+      // ComfyUI not available — try OpenRouter / SDK
+      if (!comfyUIAvailable && COMFYUI_URL) {
+        log.warn('ComfyUI is configured but not healthy, skipping to OpenRouter (P2)');
+      }
+      result = await attemptOpenRouterOrSDK(sanitizedPrompt, model, width, height);
+      usedProvider = result.metadata.provider as string || 'openrouter';
     }
 
     // 7. Update DB record with completed status
@@ -297,6 +415,7 @@ export async function generateImage(
         imageUrl: result.imageUrl,
         status: 'completed',
         costUsd: result.costUsd,
+        provider: usedProvider,
         metadata: JSON.stringify(result.metadata),
       },
     });
@@ -305,7 +424,7 @@ export async function generateImage(
     await db.aICost.create({
       data: {
         userId,
-        provider: 'openrouter',
+        provider: usedProvider,
         model,
         costUsd: result.costUsd,
         requestId: generation.id,

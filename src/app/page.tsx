@@ -20,6 +20,7 @@ import { AvatarView } from '@/components/avatars/avatar-view';
 import { BrowserView } from '@/components/browser/browser-view';
 import { MultimodalView } from '@/components/multimodal/multimodal-view';
 import { CollaborationView } from '@/components/collaboration/collaboration-view';
+import { IntegrationsView } from '@/components/integrations/integrations-view';
 import { ThemeProvider } from 'next-themes';
 import { Loader2 } from 'lucide-react';
 
@@ -89,6 +90,7 @@ function AppContent() {
           {currentView === 'avatars' && <AvatarView />}
           {currentView === 'browser' && <BrowserView />}
           {currentView === 'multimodal' && <MultimodalView />}
+          {currentView === 'integrations' && <IntegrationsView />}
         </div>
       </main>
     </div>

@@ -192,3 +192,247 @@ Stage Summary:
 - 1 modèle Prisma ajouté (VideoGeneration, 12 champs)
 - 32 tables PostgreSQL synchronisées
 - UI Médias IA complète avec génération vidéo + image en tabs
+
+---
+Task ID: 5-baileys
+Agent: integration-developer
+Task: Baileys WhatsApp adapter integration
+
+Work Log:
+- Created /src/lib/baileys-client.ts — client communicating with Baileys micro-service
+- Types: BaileysConnectionState, BaileysSendMessageOptions, BaileysSendMediaOptions, BaileysMessageResponse, BaileysSessionInfo
+- Functions: checkBaileysHealth(), getSessionStatus(), getQRCode(), sendBaileysMessage(), sendBaileysMedia(), disconnectSession(), sendWhatsAppMessage()
+- sendWhatsAppMessage() implements fallback chain: Baileys (primary) → WhatsApp Cloud API (fallback)
+- Re-uses sanitizeMessage, validatePhoneNumber, MAX_MESSAGE_LENGTH from whatsapp-client.ts
+- Config: BAILEYS_API_URL env var (default: http://localhost:8186)
+- Created /src/app/api/whatsapp/baileys/route.ts — session management API
+- GET /api/whatsapp/baileys — session status with health check
+- POST /api/whatsapp/baileys — manage session (connect/disconnect/qr actions)
+- Auth-protected using applySecurity + secureResponse pattern
+
+Stage Summary:
+- Baileys WhatsApp adapter fully integrated
+- 2 new files created (baileys-client.ts, baileys route.ts)
+- Fallback to existing WhatsApp Cloud API when Baileys unavailable
+- TypeScript: 0 errors
+
+---
+Task ID: 7-speechbrain
+Agent: integration-developer
+Task: SpeechBrain STT provider integration
+
+Work Log:
+- Created /src/lib/speechbrain-client.ts — client for SpeechBrain ASR micro-service
+- Types: SpeechBrainTranscribeOptions, SpeechBrainTranscribeResult, SpeechBrainModelInfo
+- Functions: checkSpeechBrainHealth(), getAvailableModels(), transcribeWithSpeechBrain(), enhanceAudio()
+- Config: SPEECHBRAIN_API_URL env var (default: http://localhost:8187)
+- Updated /src/lib/voice/stt.ts — added SpeechBrain as P0 in fallback chain
+- Added transcribeSpeechBrain() wrapper adapting SpeechBrain result to STTResult interface
+- New STT fallback chain: SpeechBrain (P0) → Groq Whisper (P1) → OpenAI Whisper (P2) → z-ai-sdk (P3)
+- Fixed TypeScript: providers array now properly typed as Array<{ name: string; fn: () => Promise<STTResult> }>
+- Dynamic providers: SpeechBrain conditional on health check, Groq/OpenAI conditional on API keys
+
+Stage Summary:
+- SpeechBrain STT provider fully integrated as primary provider
+- 1 new file created (speechbrain-client.ts), 1 file modified (stt.ts)
+- 4-provider fallback chain with dynamic availability checks
+- TypeScript: 0 errors
+
+---
+Task ID: 4-comfyui
+Agent: Sub-agent
+Task: Create ComfyUI client integration and update image-generator.ts
+
+Work Log:
+- Created /src/lib/comfyui-client.ts — Full ComfyUI REST API client
+  - Types: ComfyUIWorkflow, ComfyUIWorkflowNode, ComfyUIGenerateOptions, ComfyUIGenerateResult, etc.
+  - buildTxt2ImgWorkflow(): Constructs standard txt2img workflow (CheckpointLoader → CLIPTextEncode × 2 → EmptyLatentImage → KSampler → VAEDecode → SaveImage)
+  - checkComfyUIHealth(): GET /system_stats with 5s timeout
+  - getAvailableModels(): GET /object_info/CheckpointLoaderSimple to list checkpoints
+  - queuePrompt(): POST /prompt to submit workflow
+  - waitForCompletion(): Poll GET /history/{promptId} with 120s timeout
+  - fetchImageAsBase64(): GET /view to retrieve generated image as base64
+  - generateWithComfyUI(): Main entry point — build → queue → wait → fetch images
+  - Uses centralized logger (createLogger('comfyui-client'))
+  - Configured via COMFYUI_URL env var (default: http://localhost:8188)
+
+- Updated /src/lib/image-generator.ts — Added ComfyUI as primary provider
+  - Added import for checkComfyUIHealth, generateWithComfyUI, COMFYUI_URL from comfyui-client
+  - Added import for createLogger from logger
+  - Added 3 ComfyUI models to FREE_IMAGE_MODELS: comfyui-sd, comfyui-sdxl, comfyui-flux (all $0 cost)
+  - Changed DEFAULT_MODEL to 'comfyui-sd' when COMFYUI_URL is set, else 'flux-1-schnell-free'
+  - Added isComfyUIModel() helper to check model prefix
+  - Added COMFYUI_MODEL_MAP for model name → checkpoint file mapping
+  - Added generateWithComfyUIAdapter() that wraps comfyui-client to return unified format (data:image/png;base64,... URI)
+  - Added attemptOpenRouterOrSDK() helper for P2→P3 fallback (remaps comfyui models to OpenRouter equivalents)
+  - Updated generateImage() fallback chain: ComfyUI (P1) → OpenRouter (P2) → z-ai-sdk (P3)
+    - Health check on ComfyUI before attempting
+    - Graceful fallback with structured logging on each provider transition
+    - Provider tracking in DB records updated dynamically (comfyui/openrouter/z-ai-sdk)
+  - Updated DB create initial provider to 'comfyui' for ComfyUI models
+  - Updated AICost tracking to use actual provider instead of hardcoded 'openrouter'
+  - TypeScript compilation: 0 errors
+
+Stage Summary:
+- New file: /src/lib/comfyui-client.ts (ComfyUI REST API client, ~230 lines)
+- Modified: /src/lib/image-generator.ts (added ComfyUI as P1, 3-tier fallback chain)
+- Fallback chain: ComfyUI → OpenRouter → z-ai-sdk
+- 5 image models now available: 3 ComfyUI + 2 OpenRouter
+- All existing functionality preserved
+- TypeScript: 0 errors, dev server running
+
+---
+Task ID: 8-n8n
+Agent: integration-developer
+Task: n8n Workflow Automation full integration
+
+Work Log:
+- Created /src/lib/n8n-client.ts — Full n8n REST API client
+  - Types: N8NWorkflow, N8NNode, N8NConnection, N8NTag, N8NExecution, N8NCredentials, N8NPaginatedResponse
+  - Core: n8nRequest() authenticated fetch wrapper with X-N8N-API-KEY header, 30s timeout
+  - Health: checkN8NHealth() via /healthz endpoint with 5s timeout
+  - Workflow CRUD: listWorkflows(), getWorkflow(), createWorkflow(), updateWorkflow(), deleteWorkflow()
+  - Lifecycle: activateWorkflow(), deactivateWorkflow()
+  - Executions: listExecutions(), getExecution(), deleteExecution()
+  - Credentials: listCredentialTypes()
+  - Genova helpers: createAgentWorkflow() — creates pre-configured workflow with trigger + agent + output nodes
+  - Supports webhook/schedule/manual triggers, text/image/email outputs
+  - Configured via N8N_API_URL (default: http://localhost:5678) + N8N_API_KEY env vars
+  - Uses centralized logger (createLogger('n8n-client'))
+
+- Created /src/app/api/n8n/workflows/route.ts — Workflow list + create API
+  - GET /api/n8n/workflows — List workflows with health check + pagination
+  - POST /api/n8n/workflows — Create workflow (custom or Genova agent template via agentConfig)
+
+- Created /src/app/api/n8n/workflows/[id]/route.ts — Workflow detail API
+  - GET — Get single workflow
+  - PUT — Update workflow
+  - DELETE — Delete workflow
+  - POST — Activate/deactivate workflow (action param)
+
+- Created /src/app/api/n8n/executions/route.ts — Executions API
+  - GET /api/n8n/executions — List executions with optional workflowId filter
+
+Stage Summary:
+- n8n workflow automation fully integrated
+- 4 new files created (n8n-client.ts, 3 API routes)
+- Full CRUD for workflows, execution tracking, Genova agent workflow templates
+- Health checks on every API call (503 if n8n unavailable)
+- TypeScript: 0 errors
+
+---
+Task ID: 9-pocketbase
+Agent: integration-developer
+Task: PocketBase BaaS full integration
+
+Work Log:
+- Created /src/lib/pocketbase-client.ts — Full PocketBase REST API client
+  - Types: PBRecord, PBListResult, PBAuthResponse, PBCollection, PBSchemaField, AgentMemoryRecord, AgentLearningRecord
+  - Core: pbRequest() authenticated fetch wrapper, 15s timeout, admin token support
+  - Health: checkPocketBaseHealth() via /api/health with 5s timeout
+  - Auth: authenticateAdmin() for admin access
+  - Collections: listCollections(), createCollection()
+  - Record CRUD: listRecords(), getRecord(), createRecord(), updateRecord(), deleteRecord()
+  - Genova Agent Memory: storeAgentMemory(), getAgentMemories(), searchAgentMemories()
+  - Genova Agent Learning: storeAgentLearning(), getAgentLearnings(), incrementLearningUsage()
+  - Setup: initializeGenovaCollections() — auto-creates agent_memories + agent_learnings collections with indexes
+  - Configured via POCKETBASE_URL env var (default: http://localhost:8090)
+  - Uses centralized logger (createLogger('pocketbase-client'))
+
+- Created /src/app/api/pocketbase/status/route.ts — Status API
+  - GET /api/pocketbase/status — Health check + collections list + auto-initialize collections
+
+- Created /src/app/api/pocketbase/memories/route.ts — Agent Memories API
+  - GET /api/pocketbase/memories — List/search memories (userId, agentId, memoryType, q params)
+  - POST /api/pocketbase/memories — Store new memory
+
+- Created /src/app/api/pocketbase/learnings/route.ts — Agent Learnings API
+  - GET /api/pocketbase/learnings — List learnings (userId, agentId, category params)
+  - POST /api/pocketbase/learnings — Store new learning pattern
+
+- Created /src/components/integrations/integrations-view.tsx — Full Integrations UI
+  - 3-tab interface: n8n Workflows, PocketBase, WhatsApp (Baileys)
+  - Service status cards with health indicators (connected/unavailable)
+  - n8n: Workflow list with activate/deactivate/delete, create workflow dialog (name, trigger type, prompt, output type), recent executions
+  - PocketBase: Collections display, memory search by agent ID, learning patterns view
+  - Baileys: Service config, API endpoint reference, health check link
+
+- Updated /src/lib/store.ts — Added 'integrations' to currentView union type
+- Updated /src/components/layout/app-sidebar.tsx — Added Zap icon + 'Intégrations' nav item
+- Updated /src/components/layout/app-header.tsx — Added 'integrations' to viewTitles
+- Updated /src/app/page.tsx — Added IntegrationsView import + rendering condition
+
+- Created /services/start-baileys.js — Baileys WhatsApp micro-service startup script
+  - Express server on port 8186
+  - Endpoints: /health, /session/status, /session/qr, /messages/send, /messages/send-media, /session/disconnect
+  - Auto-reconnect on disconnect (unless logged out)
+
+Stage Summary:
+- PocketBase BaaS fully integrated for agent data persistence
+- 4 new files created (pocketbase-client.ts, 3 API routes)
+- Agent memory + learning system backed by PocketBase
+- Auto-initialization of Genova collections on health check
+- Integrations UI with 3 service tabs
+- Baileys micro-service startup script created
+- 5 files modified (store.ts, sidebar, header, page.tsx, worklog.md)
+- TypeScript: 0 errors
+
+---
+Task ID: 6-video
+Agent: integration-developer
+Task: Create Video API server and SpeechBrain API server as Python micro-services
+
+Work Log:
+- Created /services/video_api_server.py — Job-based Video API server (FastAPI, port 8189)
+  - Endpoints: GET /health, POST /generate (returns job_id), GET /status/{job_id}, GET /models, GET /videos/{filename}
+  - Job-based pattern: submit generation → poll status until completed/failed
+  - Background threading for video generation (non-blocking API)
+  - Lazy model loading for CogVideo and VideoCrafter with automatic mock mode on CPU
+  - FORCE_MOCK mode via VIDEO_MOCK_MODE env var (skips model download)
+  - Auto-detects CUDA availability: uses mock mode on CPU to avoid huge model downloads
+  - Mock generation: 6-second simulated processing with progress updates (0.1→1.0)
+  - Real generation: CogVideoX-2B pipeline (diffusers) + VideoCrafter2 (gradio t2v_test)
+  - Model registry with metadata (resolution, max_frames, fps, description)
+  - In-memory job tracking with progress, duration, metadata, error fields
+
+- Created /services/speechbrain_api_server.py — SpeechBrain ASR API server (FastAPI, port 8187)
+  - Endpoints: GET /health, POST /transcribe, POST /enhance, GET /models
+  - Supports 4 languages: English, French, Spanish, German (wav2vec2-commonvoice models)
+  - Audio enhancement via MetricGAN+ (speechbrain/metricgan-plus-voicebank)
+  - Automatic audio resampling to 16kHz for ASR
+  - Lazy model loading with mock mode fallback
+  - Handles multiple audio formats (wav, webm, mp3, ogg, flac, m4a)
+  - SpeechBrain dev source added to Python path for local development
+
+- Updated /services/start-all.sh — Unified startup script for all micro-services
+  - Starts 7 services: PostgreSQL, Video API, SpeechBrain, PocketBase, n8n, ComfyUI, legacy Video API
+  - Port conflict detection (skips already-running services)
+  - Health checks with status reporting (OK/STARTING/NOT RESPONDING)
+  - Centralized log directory: /services/logs/
+  - Service URLs summary on completion
+
+- Updated /src/lib/video-generator.ts — Job-based API integration
+  - Replaced synchronous generateWithLocalAPI() with job-based pattern:
+    1. POST /generate → submit job, get job_id
+    2. Poll GET /status/{job_id} every 2.5s until completed or failed
+    3. Return video URL with metadata
+  - Max 120 poll attempts (5 minutes total)
+  - Proper timeout handling with AbortController (5 min total)
+  - Provider detection: local-mock for mock mode, actual model name for real generation
+  - Backward compatible: existing fallback chain (local → cloud → error) preserved
+
+- Testing results:
+  - Video API: health OK, generate OK, status polling OK (mock mode completes in ~6s)
+  - SpeechBrain API: health OK, models OK (5 models listed)
+  - Both CogVideo and VideoCrafter mock generation tested successfully
+  - TypeScript compilation: 0 errors
+
+Stage Summary:
+- 2 new Python micro-services created (video_api_server.py, speechbrain_api_server.py)
+- 1 startup script updated (start-all.sh)
+- 1 TypeScript file updated (video-generator.ts with job-based polling pattern)
+- Video API on port 8189 with submit→poll architecture
+- SpeechBrain API on port 8187 with ASR + enhancement endpoints
+- Auto mock mode when no CUDA/GPU available (avoids 5GB model downloads)
+- All existing functionality preserved
+- TypeScript: 0 errors

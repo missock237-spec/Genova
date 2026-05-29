@@ -2,6 +2,7 @@
  * Speech-to-Text Engine — Genova Voice AI
  *
  * Multi-provider STT with fallback chain:
+ *   0. SpeechBrain (P0, when micro-service is available)
  *   1. Groq Whisper (fast, when GROQ_API_KEY set)
  *   2. OpenAI Whisper (high quality, when OPENAI_API_KEY set)
  *   3. z-ai-web-dev-sdk (universal fallback)
@@ -16,6 +17,7 @@
 import ZAI from 'z-ai-web-dev-sdk';
 import { createLogger } from '@/lib/logger';
 import { db } from '@/lib/db';
+import { checkSpeechBrainHealth, transcribeWithSpeechBrain } from '@/lib/speechbrain-client';
 
 const log = createLogger('voice-stt');
 
@@ -41,6 +43,34 @@ export interface STTOptions {
   model?: 'whisper-1' | 'whisper-large-v3' | 'distil-whisper-large-v3-en';
   detectLanguage?: boolean;
   enableDiarization?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Provider: SpeechBrain (P0)
+// ---------------------------------------------------------------------------
+
+async function transcribeSpeechBrain(
+  audioBuffer: Buffer,
+  options: STTOptions,
+): Promise<STTResult> {
+  const result = await transcribeWithSpeechBrain(audioBuffer, {
+    language: options.language,
+    model: options.model,
+    enableDiarization: options.enableDiarization,
+    detectLanguage: options.detectLanguage,
+  });
+  return {
+    text: result.text,
+    language: result.language,
+    confidence: result.confidence,
+    duration: result.duration,
+    segments: result.segments?.map((seg) => ({
+      text: seg.text,
+      start: seg.start,
+      end: seg.end,
+      confidence: seg.confidence,
+    })),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -220,14 +250,28 @@ export class SpeechToTextEngine {
 
   /**
    * Transcribe an audio buffer.
-   * Fallback chain: Groq → OpenAI → z-ai-sdk
+   * Fallback chain: SpeechBrain → Groq → OpenAI → z-ai-sdk
    */
   async transcribe(audioBuffer: Buffer, options: STTOptions = {}): Promise<STTResult> {
-    const providers = [
-      { name: 'groq', fn: () => transcribeGroq(audioBuffer, options) },
-      { name: 'openai', fn: () => transcribeOpenAI(audioBuffer, options) },
-      { name: 'z-ai-sdk', fn: () => transcribeZAI(audioBuffer, options) },
-    ];
+    const providers: Array<{ name: string; fn: () => Promise<STTResult> }> = [];
+
+    // P0: SpeechBrain (if available)
+    if (await checkSpeechBrainHealth()) {
+      providers.push({ name: 'speechbrain', fn: () => transcribeSpeechBrain(audioBuffer, options) });
+    }
+
+    // P1: Groq Whisper
+    if (process.env.GROQ_API_KEY) {
+      providers.push({ name: 'groq', fn: () => transcribeGroq(audioBuffer, options) });
+    }
+
+    // P2: OpenAI Whisper
+    if (process.env.OPENAI_API_KEY) {
+      providers.push({ name: 'openai', fn: () => transcribeOpenAI(audioBuffer, options) });
+    }
+
+    // P3: z-ai-sdk (always available)
+    providers.push({ name: 'z-ai-sdk', fn: () => transcribeZAI(audioBuffer, options) });
 
     let lastError: unknown;
 

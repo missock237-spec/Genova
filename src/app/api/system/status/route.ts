@@ -68,15 +68,35 @@ function checkAIProviders(): ProviderStatus[] {
 function checkVoiceProviders(): ProviderStatus[] {
   return [
     {
+      name: 'WhatsApp (Baileys)',
+      configured: !!process.env.BAILEYS_API_URL,
+      keyPresent: !!process.env.BAILEYS_API_URL,
+      status: process.env.BAILEYS_API_URL ? 'active' : 'not_configured',
+      message: process.env.BAILEYS_API_URL
+        ? 'Baileys WhatsApp Web API configuré'
+        : 'Non configuré. Définissez BAILEYS_API_URL',
+      category: 'Messaging',
+    },
+    {
       name: 'WhatsApp Business API',
       configured: !!(process.env.WHATSAPP_API_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
       keyPresent: !!process.env.WHATSAPP_API_TOKEN,
       status: process.env.WHATSAPP_API_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID
         ? 'active' : 'not_configured',
       message: process.env.WHATSAPP_API_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID
-        ? 'WhatsApp Cloud API configuré'
+        ? 'WhatsApp Cloud API configuré (fallback)'
         : 'Non configuré. Requis: WHATSAPP_API_TOKEN + WHATSAPP_PHONE_NUMBER_ID',
       category: 'Messaging',
+    },
+    {
+      name: 'SpeechBrain (STT)',
+      configured: !!process.env.SPEECHBRAIN_API_URL,
+      keyPresent: !!process.env.SPEECHBRAIN_API_URL,
+      status: process.env.SPEECHBRAIN_API_URL ? 'active' : 'not_configured',
+      message: process.env.SPEECHBRAIN_API_URL
+        ? 'SpeechBrain ASR configuré — Reconnaissance vocale avancée'
+        : 'Non configuré. Fallback: Groq Whisper → OpenAI → z-ai-sdk',
+      category: 'Voice / STT',
     },
     {
       name: 'Twilio',
@@ -95,21 +115,33 @@ function checkVoiceProviders(): ProviderStatus[] {
 function checkMediaProviders(): ProviderStatus[] {
   return [
     {
-      name: 'Génération d\'images',
+      name: 'ComfyUI (Images)',
+      configured: !!process.env.COMFYUI_URL,
+      keyPresent: !!process.env.COMFYUI_URL,
+      status: process.env.COMFYUI_URL ? 'active' : 'not_configured',
+      message: process.env.COMFYUI_URL
+        ? 'ComfyUI configuré — Génération d\'images locale (Stable Diffusion, Flux)'
+        : 'Non configuré. Fallback: OpenRouter → z-ai-sdk',
+      category: 'Media',
+    },
+    {
+      name: 'Génération d\'images (OpenRouter)',
       configured: !!process.env.OPENROUTER_API_KEY,
       keyPresent: !!process.env.OPENROUTER_API_KEY,
       status: process.env.OPENROUTER_API_KEY ? 'active' : 'not_configured',
       message: process.env.OPENROUTER_API_KEY
-        ? 'OpenRouter configuré — Flux, Stable Diffusion'
+        ? 'OpenRouter configuré — Flux, Stable Diffusion (fallback)'
         : 'Fallback: z-ai-sdk utilisé pour la génération d\'images',
       category: 'Media',
     },
     {
       name: 'Génération de vidéos (Local)',
-      configured: false,
-      keyPresent: false,
-      status: 'not_configured',
-      message: `API locale non détectée sur ${process.env.VIDEO_API_URL || 'http://localhost:8189'}`,
+      configured: !!process.env.VIDEO_API_URL,
+      keyPresent: !!process.env.VIDEO_API_URL,
+      status: process.env.VIDEO_API_URL ? 'active' : 'not_configured',
+      message: process.env.VIDEO_API_URL
+        ? `API vidéo locale configurée sur ${process.env.VIDEO_API_URL}`
+        : 'Non configuré',
       category: 'Media',
     },
     {
@@ -168,6 +200,26 @@ function checkServiceProviders(): ProviderStatus[] {
         : 'SQLite vector store utilisé (par défaut)',
       category: 'Services',
     },
+    {
+      name: 'n8n (Workflows)',
+      configured: !!process.env.N8N_API_URL,
+      keyPresent: !!process.env.N8N_API_URL,
+      status: process.env.N8N_API_URL ? 'active' : 'not_configured',
+      message: process.env.N8N_API_URL
+        ? `n8n configuré sur ${process.env.N8N_API_URL} — Automatisation de workflows`
+        : 'Non configuré. Définissez N8N_API_URL',
+      category: 'Integrations',
+    },
+    {
+      name: 'PocketBase',
+      configured: !!process.env.POCKETBASE_URL,
+      keyPresent: !!process.env.POCKETBASE_URL,
+      status: process.env.POCKETBASE_URL ? 'active' : 'not_configured',
+      message: process.env.POCKETBASE_URL
+        ? `PocketBase configuré sur ${process.env.POCKETBASE_URL} — Données agent & mémoire`
+        : 'Non configuré. Définissez POCKETBASE_URL',
+      category: 'Integrations',
+    },
   ];
 }
 
@@ -218,8 +270,8 @@ export async function GET() {
       },
       criticalIssues: criticalIssues.length > 0 ? criticalIssues : undefined,
       fallbackInfo: {
-        message: 'Le SDK z-ai-web-dev-sdk est toujours disponible comme fallback universel pour: Chat, Streaming, Génération d\'images',
-        alwaysAvailable: ['z-ai-sdk Chat', 'z-ai-sdk Streaming', 'z-ai-sdk Image Gen', 'Déterministic Embeddings', 'Subprocess Sandbox', 'SQLite Vector Store'],
+        message: 'Fallback chains: ComfyUI → OpenRouter → z-ai-sdk (images) | SpeechBrain → Groq → OpenAI → z-ai-sdk (STT) | Baileys → Cloud API (WhatsApp)',
+        alwaysAvailable: ['z-ai-sdk Chat', 'z-ai-sdk Streaming', 'z-ai-sdk Image Gen', 'z-ai-sdk ASR', 'Déterministic Embeddings', 'Subprocess Sandbox', 'SQLite Vector Store'],
       },
     });
   } catch (error) {
