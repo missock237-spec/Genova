@@ -113,3 +113,6 @@ temp/
 
 # Docker volumes
 docker-data/
+
+# Uploaded open-source project files
+upload/
