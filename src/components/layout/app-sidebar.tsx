@@ -17,12 +17,14 @@ import {
   X,
   CheckCircle2,
   BarChart3,
+  Package,
 } from 'lucide-react';
 
 const navItems = [
   { id: 'dashboard' as const, label: 'Tableau de bord', icon: LayoutDashboard },
   { id: 'agents' as const, label: 'Agents IA', icon: Bot },
   { id: 'automation' as const, label: 'Automatisation', icon: Wand2 },
+  { id: 'integrations' as const, label: 'Intégrations', icon: Package },
   { id: 'guardrails' as const, label: 'Garde-fous', icon: Shield },
   { id: 'coordination' as const, label: 'Coordination', icon: GitBranch },
   { id: 'approvals' as const, label: 'Approbations', icon: CheckCircle2 },
