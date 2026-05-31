@@ -22,6 +22,10 @@ export const AGENT_TOOLS: AgentTool[] = [
   { id: 'database', name: 'Base de données', description: 'Interroger la base de données interne', icon: 'Database', category: 'data', applicableAgentTypes: ['accounting', 'research', 'custom'] },
   { id: 'api', name: 'APIs externes', description: 'Se connecter à des APIs externes', icon: 'Plug', category: 'data', applicableAgentTypes: ['custom', 'research'] },
 
+  // Connector tools — MCP & Access Keys
+  { id: 'mcp_tools', name: 'Outils MCP', description: 'Utiliser les outils des serveurs MCP connectés', icon: 'Link2', category: 'data', applicableAgentTypes: ['custom', 'research'] },
+  { id: 'access_key_api', name: 'Clés d\'accès API', description: 'Appeler des APIs externes via les clés d\'accès configurées', icon: 'Key', category: 'data', applicableAgentTypes: ['custom', 'research', 'sales'] },
+
   // Automation tools
   { id: 'workflow', name: 'Workflows', description: 'Créer et exécuter des workflows', icon: 'GitBranch', category: 'automation', applicableAgentTypes: ['custom'] },
   { id: 'scheduler', name: 'Planificateur', description: 'Planifier des tâches récurrentes', icon: 'Clock', category: 'automation', applicableAgentTypes: ['marketing', 'sales', 'rh'] },

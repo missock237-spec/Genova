@@ -44,6 +44,9 @@ model User {
   documents         Document[]
   documentChunks    DocumentChunk[]
   auditLogs         AuditLog[]
+  mcpConnectors     MCPConnector[]
+  accessKeys        AccessKey[]
+  connectorExecutions ConnectorExecution[]
 
   @@index([role])
   @@map("users")
@@ -632,4 +635,110 @@ model AuditLog {
   @@index([action, createdAt])
   @@index([severity, createdAt])
   @@map("audit_logs")
+}
+
+// ============================================================
+// MCP Connector — Model Context Protocol connections
+// Enables Genova to connect to external MCP servers and
+// discover/use their tools, resources, and prompts.
+// ============================================================
+
+model MCPConnector {
+  id              String   @id @default(cuid())
+  name            String                            // Display name (e.g., "GitHub MCP", "Slack MCP")
+  description     String   @default("")             // What this connector provides
+  serverUrl       String                            // MCP server endpoint URL (SSE or streamable HTTP)
+  transportType   String   @default("sse")          // sse, streamable-http, stdio
+  status          String   @default("disconnected") // disconnected, connecting, connected, error
+  authType        String   @default("none")         // none, bearer, api_key, oauth2, basic
+  authConfig      String   @default("{}")           // JSON: encrypted auth credentials
+  tools           String   @default("[]")           // JSON: discovered MCP tools
+  resources       String   @default("[]")           // JSON: discovered MCP resources
+  prompts         String   @default("[]")           // JSON: discovered MCP prompts
+  capabilities    String   @default("{}")           // JSON: server capabilities
+  serverInfo      String   @default("{}")           // JSON: server name, version
+  lastConnectedAt DateTime?
+  lastError       String?
+  requestCount    Int      @default(0)              // Total requests made through this connector
+  avgLatencyMs    Int      @default(0)              // Average response latency
+  isActive        Boolean  @default(true)
+  userId          String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  executions      ConnectorExecution[]
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@map("mcp_connectors")
+}
+
+// ============================================================
+// Access Key — API keys and credentials for external services
+// Securely stores and manages API keys, tokens, and credentials
+// for connecting Genova to external platforms and services.
+// ============================================================
+
+model AccessKey {
+  id              String   @id @default(cuid())
+  name            String                            // Display name (e.g., "Stripe API Key", "GitHub Token")
+  description     String   @default("")             // What this key is used for
+  service         String                            // Service identifier (e.g., "stripe", "github", "slack")
+  keyType         String   @default("api_key")      // api_key, bearer_token, oauth2, basic_auth, custom
+  keyValue        String                            // Encrypted key/credential value
+  endpoint        String?                           // Base API endpoint (e.g., "https://api.stripe.com")
+  scopes          String   @default("[]")           // JSON: permission scopes (e.g., ["read", "write"])
+  metadata        String   @default("{}")           // JSON: additional config (headers, params, etc.)
+  testEndpoint    String?                           // URL to test the key validity
+  lastTestedAt    DateTime?
+  lastTestResult  String?                           // JSON: { success: boolean, message: string, statusCode: number }
+  usageCount      Int      @default(0)              // How many times this key has been used
+  rateLimitInfo   String   @default("{}")           // JSON: { maxRequests, windowMs, remaining, resetAt }
+  expiresAt       DateTime?                         // Optional expiration date
+  isActive        Boolean  @default(true)
+  userId          String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  executions      ConnectorExecution[]
+
+  @@index([userId, service])
+  @@index([userId, isActive])
+  @@index([userId, createdAt])
+  @@map("access_keys")
+}
+
+// ============================================================
+// Connector Execution — Audit trail for connector operations
+// Tracks every MCP tool call and access key API request for
+// security, debugging, and analytics purposes.
+// ============================================================
+
+model ConnectorExecution {
+  id              String   @id @default(cuid())
+  connectorType   String                            // mcp, access_key
+  connectorId     String                            // FK to MCPConnector or AccessKey
+  agentId         String?                           // Agent that initiated the call (if any)
+  operation       String                            // Tool name (MCP) or endpoint path (access key)
+  inputParams     String   @default("{}")           // JSON: sanitized input parameters
+  outputResult    String   @default("{}")           // JSON: sanitized output result
+  status          String   @default("pending")      // pending, success, error, timeout
+  errorMessage    String?
+  statusCode      Int?                              // HTTP status code (for access key calls)
+  durationMs      Int      @default(0)              // Execution duration
+  tokenCost       Int      @default(0)              // Token cost if AI was involved
+  userId          String
+  createdAt       DateTime @default(now())
+
+  mcpConnector    MCPConnector? @relation(fields: [connectorId], references: [id], onDelete: SetNull, map: "fk_connector_exec_mcp")
+  accessKey       AccessKey?    @relation(fields: [connectorId], references: [id], onDelete: SetNull, map: "fk_connector_exec_ak")
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([connectorType, connectorId])
+  @@index([userId, createdAt])
+  @@index([agentId, createdAt])
+  @@index([status, createdAt])
+  @@map("connector_executions")
 }

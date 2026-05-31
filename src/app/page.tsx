@@ -13,6 +13,7 @@ import { CoordinationView } from '@/components/coordination/coordination-view';
 import { SettingsView } from '@/components/settings/settings-view';
 import { AnalyticsView } from '@/components/analytics/analytics-view';
 import IntegrationsView from '@/components/integrations/integrations-view';
+import ConnectorsView from '@/components/connectors/connectors-view';
 import { ThemeProvider } from 'next-themes';
 import { Loader2 } from 'lucide-react';
 
@@ -75,6 +76,7 @@ function AppContent() {
           {currentView === 'approvals' && <SettingsView initialTab="approvals" />}
           {currentView === 'analytics' && <AnalyticsView />}
           {currentView === 'integrations' && <IntegrationsView />}
+          {currentView === 'connectors' && <ConnectorsView />}
         </div>
       </main>
     </div>

@@ -29,3 +29,31 @@ Stage Summary:
 - All services have health checks and fallback chains
 - .env properly configured with all API keys
 - Build passes with 0 TypeScript errors
+---
+Task ID: 1
+Agent: Main Agent
+Task: Add MCP Connectors and Access Keys to Genova SaaS
+
+Work Log:
+- Analyzed existing Genova architecture (30+ models, 50+ API routes, 9 integration adapters)
+- Designed 3 new Prisma models: MCPConnector, AccessKey, ConnectorExecution
+- Created MCP Client Library (lib/connectors/mcp-client.ts) with SSE and Streamable HTTP transports
+- Created Access Key Manager (lib/connectors/access-key-manager.ts) with 11 predefined services
+- Created unified Connector Registry (lib/connectors/connector-registry.ts)
+- Created 8 API route groups for connector management
+- Created full ConnectorsView UI component with tabs, cards, and dialogs
+- Added "Connecteurs" navigation item to sidebar
+- Updated Zustand store to include 'connectors' view type
+- Integrated connector tools into agent-tools.ts (mcp_tools, access_key_api)
+- Added MCP_ENCRYPTION_KEY to .env for AES-256-GCM encryption
+- Fixed Prisma schema foreign key constraint naming conflict
+- Fixed TypeScript compilation errors (2 issues resolved)
+- Verified: 0 TypeScript errors, Next.js build successful
+
+Stage Summary:
+- 3 new Prisma models: MCPConnector, AccessKey, ConnectorExecution
+- 3 new library files in src/lib/connectors/
+- 8 new API route directories under src/app/api/connectors/
+- 1 new UI component: src/components/connectors/connectors-view.tsx
+- Updated: store.ts, page.tsx, app-sidebar.tsx, agent-tools.ts, .env
+- All code is production-ready, encrypted credential storage, comprehensive audit logging

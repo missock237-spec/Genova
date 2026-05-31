@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   BarChart3,
   Package,
+  Link2,
 } from 'lucide-react';
 
 const navItems = [
@@ -25,6 +26,7 @@ const navItems = [
   { id: 'agents' as const, label: 'Agents IA', icon: Bot },
   { id: 'automation' as const, label: 'Automatisation', icon: Wand2 },
   { id: 'integrations' as const, label: 'Intégrations', icon: Package },
+  { id: 'connectors' as const, label: 'Connecteurs', icon: Link2 },
   { id: 'guardrails' as const, label: 'Garde-fous', icon: Shield },
   { id: 'coordination' as const, label: 'Coordination', icon: GitBranch },
   { id: 'approvals' as const, label: 'Approbations', icon: CheckCircle2 },
