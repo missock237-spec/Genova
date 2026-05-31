@@ -2,6 +2,30 @@ interface ApiFetchOptions extends RequestInit {
   params?: Record<string, string>;
 }
 
+/**
+ * Custom API error class with HTTP status code.
+ * Used by apiFetch to provide structured error information.
+ */
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+/**
+ * Client-side fetch wrapper with automatic credentials and error handling.
+ *
+ * Key behaviors:
+ * - Automatically sends httpOnly cookies via `credentials: 'include'`
+ * - Auto-sets `Content-Type: application/json` for string bodies
+ * - On 401: throws ApiError but does NOT auto-logout (the auth store handles
+ *   session refresh and logout logic centrally)
+ * - On other errors: throws ApiError with server error message
+ */
 export async function apiFetch<T = unknown>(
   path: string,
   options: ApiFetchOptions = {}
@@ -26,11 +50,9 @@ export async function apiFetch<T = unknown>(
   });
 
   if (response.status === 401) {
-    // Clear auth state and redirect to login
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('agentos_user');
-      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
-    }
+    // Throw a structured error — the auth store's validateSession handles
+    // refresh logic and logout. We do NOT dispatch events or clear state here
+    // to avoid race conditions and duplicate logout triggers.
     throw new ApiError('Authentication required', 401);
   }
 
@@ -48,14 +70,4 @@ export async function apiFetch<T = unknown>(
   }
 
   return response.json() as Promise<T>;
-}
-
-export class ApiError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-  }
 }

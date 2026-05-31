@@ -18,10 +18,9 @@ import { ThemeProvider } from 'next-themes';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, isLoading } = useAuthStore();
   const { currentView } = useAppStore();
   const hydrateRef = useRef(false);
-  const validateRef = useRef(false);
   const validatedRef = useRef(false);
 
   // Hydrate auth from localStorage only once on mount
@@ -29,13 +28,9 @@ function AppContent() {
     if (!hydrateRef.current) {
       hydrateRef.current = true;
       useAuthStore.getState().hydrate();
-    }
-  }, []);
 
-  // Validate session once when authenticated
-  useEffect(() => {
-    if (isAuthenticated && !validateRef.current) {
-      validateRef.current = true;
+      // Immediately validate the session with the server
+      // This checks if the httpOnly cookie session is still valid
       (async () => {
         const valid = await useAuthStore.getState().validateSession();
         if (valid) {
@@ -44,18 +39,31 @@ function AppContent() {
         validatedRef.current = true;
       })();
     }
-  }, [isAuthenticated]);
-
-  // Listen for auth:unauthorized events
-  useEffect(() => {
-    const handleUnauthorized = () => {
-      useAuthStore.getState().logout();
-      validateRef.current = false;
-      validatedRef.current = false;
-    };
-    window.addEventListener('auth:unauthorized', handleUnauthorized);
-    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);
+
+  // Listen for storage events (cross-tab logout)
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'agentos_user' && !e.newValue) {
+        // Another tab logged out — sync this tab
+        useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  // Show loading spinner while validating session
+  if (isLoading && !validatedRef.current) {
+    return (
+      <div className="min-h-screen flex items-center justify-center gradient-bg grid-pattern">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Chargement...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <AuthForm />;

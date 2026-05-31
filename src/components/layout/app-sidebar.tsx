@@ -38,6 +38,15 @@ export function AppSidebar() {
   const { currentView, setCurrentView, sidebarOpen, setSidebarOpen, pendingApprovalCount } = useAppStore();
   const { user, logout } = useAuthStore();
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // Force client-side cleanup even if server logout fails
+      useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
+    }
+  };
+
   return (
     <>
       {/* Mobile overlay */}
@@ -124,7 +133,7 @@ export function AppSidebar() {
               variant="ghost"
               size="icon"
               className="h-8 w-8 flex-shrink-0 text-muted-foreground hover:text-destructive"
-              onClick={logout}
+              onClick={handleLogout}
             >
               <LogOut className="h-4 w-4" />
             </Button>

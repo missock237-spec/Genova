@@ -64,11 +64,18 @@ start_service() {
 # Start Services
 # =============================================
 
-# 1. PostgreSQL (via bundled pg-service if available)
-if [ -f "./mini-services/pg-service/start.sh" ]; then
-    start_service "PostgreSQL" 5432 "bash ./mini-services/pg-service/start.sh"
+# 1. PostgreSQL (user-space installation)
+if [ -f "scripts/start-pg.sh" ]; then
+    echo -ne "${YELLOW}Starting PostgreSQL...${NC} "
+    bash scripts/start-pg.sh >/dev/null 2>&1 && \
+        echo -e "${GREEN}OK${NC}" || echo -e "${RED}FAILED${NC}"
+elif [ -f "/home/z/.local/pg/usr/lib/postgresql/17/bin/pg_ctl" ]; then
+    /home/z/.local/pg/usr/lib/postgresql/17/bin/pg_ctl -D /home/z/.local/pg/data -l /home/z/.local/pg/logfile start 2>/dev/null && \
+        echo -e "${GREEN}PostgreSQL: started (user-space)${NC}" || echo -e "${YELLOW}PostgreSQL: may already be running${NC}"
 elif command -v pg_ctl >/dev/null 2>&1; then
     echo -e "${YELLOW}PostgreSQL: using system installation${NC}"
+else
+    echo -e "${RED}PostgreSQL: NOT FOUND. Run 'bash scripts/start-pg.sh' first or install PostgreSQL.${NC}"
 fi
 
 # 2. Qdrant (if installed)

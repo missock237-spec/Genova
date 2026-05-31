@@ -10,12 +10,16 @@
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "db:start": "bash scripts/start-pg.sh",
+    "db:setup": "bash scripts/start-pg.sh && npx prisma db push",
+    "dev:full": "bash scripts/start-pg.sh && npx prisma db push && next dev"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@electric-sql/pglite": "^0.4.6",
     "@hookform/resolvers": "^5.1.1",
     "@mdxeditor/editor": "^3.39.1",
     "@prisma/client": "^6.11.1",

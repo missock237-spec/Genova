@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
         name: true,
         plan: true,
         avatar: true,
+        role: true,
         emailVerified: true,
         createdAt: true,
       },
@@ -36,7 +37,16 @@ export async function GET(request: NextRequest) {
       return secureResponse(res, request);
     }
 
-    const res = NextResponse.json(user);
+    // Return consistent user shape matching login/register responses
+    const res = NextResponse.json({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      plan: user.plan,
+      avatar: user.avatar,
+      role: user.role || 'user',
+      emailVerified: !!user.emailVerified,
+    });
     return secureResponse(res, request);
   } catch {
     const res = NextResponse.json(

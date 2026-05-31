@@ -1,19 +1,22 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useAuthStore } from '@/lib/store';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Cpu, Mail, Lock, User, Loader2, ArrowLeft, KeyRound, ShieldCheck } from 'lucide-react';
+import { Cpu, Mail, Lock, UserIcon, Loader2, ArrowLeft, KeyRound, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function AuthForm() {
   const [activeTab, setActiveTab] = useState('login');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const { login } = useAuthStore();
   const { toast } = useToast();
 
@@ -22,70 +25,119 @@ export function AuthForm() {
   const [forgotForm, setForgotForm] = useState({ email: '' });
   const [resetForm, setResetForm] = useState({ email: '', code: '', newPassword: '', confirmPassword: '' });
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginForm.email || !loginForm.password) {
       toast({ title: 'Erreur', description: 'Veuillez remplir tous les champs', variant: 'destructive' });
       return;
     }
+    if (!EMAIL_REGEX.test(loginForm.email.trim())) {
+      toast({ title: 'Erreur', description: 'Veuillez entrer un email valide', variant: 'destructive' });
+      return;
+    }
 
     setLoading(true);
     try {
-      const data = await apiFetch<{ id: string; email: string; name: string; plan: string; avatar?: string }>('/api/auth/login', {
+      const data = await apiFetch<{ id: string; email: string; name: string; plan: string; avatar?: string | null; role: string; emailVerified?: boolean }>('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify(loginForm),
+        body: JSON.stringify({
+          email: loginForm.email.trim().toLowerCase(),
+          password: loginForm.password,
+        }),
       });
 
-      login(data);
-      toast({ title: 'Bienvenue !', description: `Connecté en tant que ${data.name}` });
+      login({
+        id: data.id,
+        email: data.email,
+        name: data.name,
+        plan: data.plan,
+        avatar: data.avatar,
+        role: data.role,
+        emailVerified: data.emailVerified ?? false,
+      });
+      toast({ title: 'Bienvenue !', description: `Connecte en tant que ${data.name}` });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Erreur de connexion au serveur';
-      toast({ title: 'Erreur', description: message, variant: 'destructive' });
+      if (err instanceof ApiError) {
+        if (err.status === 429) {
+          toast({ title: 'Trop de tentatives', description: 'Veuillez patienter quelques secondes avant de reessayer.', variant: 'destructive' });
+        } else if (err.status === 401) {
+          toast({ title: 'Identifiants invalides', description: 'Email ou mot de passe incorrect.', variant: 'destructive' });
+        } else {
+          toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+        }
+      } else {
+        toast({ title: 'Erreur', description: 'Erreur de connexion au serveur', variant: 'destructive' });
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [loginForm, login, toast]);
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleRegister = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!registerForm.name || !registerForm.email || !registerForm.password) {
+    if (!registerForm.name.trim() || !registerForm.email.trim() || !registerForm.password) {
       toast({ title: 'Erreur', description: 'Veuillez remplir tous les champs', variant: 'destructive' });
+      return;
+    }
+    if (!EMAIL_REGEX.test(registerForm.email.trim())) {
+      toast({ title: 'Erreur', description: 'Veuillez entrer un email valide', variant: 'destructive' });
+      return;
+    }
+    if (registerForm.password.length < 8) {
+      toast({ title: 'Erreur', description: 'Le mot de passe doit contenir au moins 8 caracteres', variant: 'destructive' });
       return;
     }
     if (registerForm.password !== registerForm.confirmPassword) {
       toast({ title: 'Erreur', description: 'Les mots de passe ne correspondent pas', variant: 'destructive' });
       return;
     }
-    if (registerForm.password.length < 8) {
-      toast({ title: 'Erreur', description: 'Le mot de passe doit contenir au moins 8 caractères', variant: 'destructive' });
-      return;
-    }
 
     setLoading(true);
     try {
-      const data = await apiFetch<{ id: string; email: string; name: string; plan: string; avatar?: string }>('/api/auth/register', {
+      const data = await apiFetch<{ id: string; email: string; name: string; plan: string; avatar?: string | null; role: string; emailVerified?: boolean }>('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify({
-          name: registerForm.name,
-          email: registerForm.email,
+          name: registerForm.name.trim(),
+          email: registerForm.email.trim().toLowerCase(),
           password: registerForm.password,
         }),
       });
 
-      login(data);
-      toast({ title: 'Compte créé !', description: `Bienvenue ${data.name}` });
+      login({
+        id: data.id,
+        email: data.email,
+        name: data.name,
+        plan: data.plan,
+        avatar: data.avatar,
+        role: data.role,
+        emailVerified: data.emailVerified ?? false,
+      });
+      toast({ title: 'Compte cree !', description: `Bienvenue ${data.name}`, variant: 'default' });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Erreur de connexion au serveur';
-      toast({ title: 'Erreur', description: message, variant: 'destructive' });
+      if (err instanceof ApiError) {
+        if (err.status === 409) {
+          toast({ title: 'Email deja utilise', description: 'Un compte avec cet email existe deja.', variant: 'destructive' });
+        } else if (err.status === 429) {
+          toast({ title: 'Trop de tentatives', description: 'Veuillez patienter quelques secondes avant de reessayer.', variant: 'destructive' });
+        } else {
+          toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+        }
+      } else {
+        toast({ title: 'Erreur', description: 'Erreur de connexion au serveur', variant: 'destructive' });
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [registerForm, login, toast]);
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
+  const handleForgotPassword = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!forgotForm.email) {
+    if (!forgotForm.email.trim()) {
       toast({ title: 'Erreur', description: 'Veuillez entrer votre email', variant: 'destructive' });
+      return;
+    }
+    if (!EMAIL_REGEX.test(forgotForm.email.trim())) {
+      toast({ title: 'Erreur', description: 'Veuillez entrer un email valide', variant: 'destructive' });
       return;
     }
 
@@ -93,35 +145,44 @@ export function AuthForm() {
     try {
       await apiFetch<{ message: string }>('/api/auth/forgot-password', {
         method: 'POST',
-        body: JSON.stringify({ email: forgotForm.email }),
+        body: JSON.stringify({ email: forgotForm.email.trim().toLowerCase() }),
       });
 
       toast({
-        title: 'Code envoyé',
-        description: 'Si un compte existe avec cet email, un code de vérification a été envoyé.',
+        title: 'Code envoye',
+        description: 'Si un compte existe avec cet email, un code de verification a ete envoye.',
       });
-      setResetForm((prev) => ({ ...prev, email: forgotForm.email }));
+      setResetForm((prev) => ({ ...prev, email: forgotForm.email.trim().toLowerCase() }));
       setActiveTab('reset');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Erreur lors de l\'envoi';
-      toast({ title: 'Erreur', description: message, variant: 'destructive' });
+      if (err instanceof ApiError && err.status === 429) {
+        toast({ title: 'Trop de tentatives', description: 'Veuillez patienter avant de renvoyer un code.', variant: 'destructive' });
+      } else {
+        // Always show success-like message to prevent email enumeration
+        toast({
+          title: 'Code envoye',
+          description: 'Si un compte existe avec cet email, un code de verification a ete envoye.',
+        });
+        setResetForm((prev) => ({ ...prev, email: forgotForm.email.trim().toLowerCase() }));
+        setActiveTab('reset');
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [forgotForm, toast]);
 
-  const handleResetPassword = async (e: React.FormEvent) => {
+  const handleResetPassword = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resetForm.email || !resetForm.code || !resetForm.newPassword) {
+    if (!resetForm.email.trim() || !resetForm.code.trim() || !resetForm.newPassword) {
       toast({ title: 'Erreur', description: 'Veuillez remplir tous les champs', variant: 'destructive' });
+      return;
+    }
+    if (resetForm.newPassword.length < 8) {
+      toast({ title: 'Erreur', description: 'Le mot de passe doit contenir au moins 8 caracteres', variant: 'destructive' });
       return;
     }
     if (resetForm.newPassword !== resetForm.confirmPassword) {
       toast({ title: 'Erreur', description: 'Les mots de passe ne correspondent pas', variant: 'destructive' });
-      return;
-    }
-    if (resetForm.newPassword.length < 8) {
-      toast({ title: 'Erreur', description: 'Le mot de passe doit contenir au moins 8 caractères', variant: 'destructive' });
       return;
     }
 
@@ -130,27 +191,34 @@ export function AuthForm() {
       await apiFetch<{ message: string }>('/api/auth/reset-password', {
         method: 'POST',
         body: JSON.stringify({
-          email: resetForm.email,
-          code: resetForm.code,
+          email: resetForm.email.trim().toLowerCase(),
+          code: resetForm.code.trim(),
           newPassword: resetForm.newPassword,
         }),
       });
 
       toast({
-        title: 'Mot de passe réinitialisé',
+        title: 'Mot de passe reinitialise',
         description: 'Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.',
       });
       setActiveTab('login');
-      setLoginForm((prev) => ({ ...prev, email: resetForm.email }));
+      setLoginForm((prev) => ({ ...prev, email: resetForm.email.trim().toLowerCase() }));
       setResetForm({ email: '', code: '', newPassword: '', confirmPassword: '' });
       setForgotForm({ email: '' });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Erreur lors de la réinitialisation';
-      toast({ title: 'Erreur', description: message, variant: 'destructive' });
+      if (err instanceof ApiError) {
+        if (err.status === 429) {
+          toast({ title: 'Trop de tentatives', description: 'Le code a ete invalide apres trop d\'essais. Veuillez demander un nouveau code.', variant: 'destructive' });
+        } else {
+          toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+        }
+      } else {
+        toast({ title: 'Erreur', description: 'Erreur lors de la reinitialisation', variant: 'destructive' });
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [resetForm, toast]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 gradient-bg grid-pattern">
@@ -161,7 +229,7 @@ export function AuthForm() {
             <Cpu className="h-10 w-10 text-primary" />
           </div>
           <h1 className="text-3xl font-bold tracking-tight">AgentOS</h1>
-          <p className="text-muted-foreground mt-1">Système d&apos;exploitation pour agents IA</p>
+          <p className="text-muted-foreground mt-1">Systeme d&apos;exploitation pour agents IA</p>
         </div>
 
         <Card className="border-border/50 agent-glow">
@@ -189,6 +257,8 @@ export function AuthForm() {
                         value={loginForm.email}
                         onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
                         className="pl-10"
+                        autoComplete="email"
+                        disabled={loading}
                       />
                     </div>
                   </div>
@@ -198,12 +268,22 @@ export function AuthForm() {
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="login-password"
-                        type="password"
-                        placeholder="••••••••"
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="********"
                         value={loginForm.password}
                         onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                        className="pl-10"
+                        className="pl-10 pr-10"
+                        autoComplete="current-password"
+                        disabled={loading}
                       />
+                      <button
+                        type="button"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        onClick={() => setShowPassword(!showPassword)}
+                        tabIndex={-1}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
                     </div>
                   </div>
                   <Button type="submit" className="w-full" disabled={loading}>
@@ -216,7 +296,7 @@ export function AuthForm() {
                       className="text-xs text-muted-foreground hover:text-primary transition-colors"
                       onClick={() => setActiveTab('forgot')}
                     >
-                      Mot de passe oublié ?
+                      Mot de passe oublie ?
                     </button>
                   </div>
                 </form>
@@ -228,13 +308,15 @@ export function AuthForm() {
                   <div className="space-y-2">
                     <Label htmlFor="register-name">Nom</Label>
                     <div className="relative">
-                      <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="register-name"
                         placeholder="Votre nom"
                         value={registerForm.name}
                         onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
                         className="pl-10"
+                        autoComplete="name"
+                        disabled={loading}
                       />
                     </div>
                   </div>
@@ -249,6 +331,8 @@ export function AuthForm() {
                         value={registerForm.email}
                         onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
                         className="pl-10"
+                        autoComplete="email"
+                        disabled={loading}
                       />
                     </div>
                   </div>
@@ -258,12 +342,22 @@ export function AuthForm() {
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="register-password"
-                        type="password"
-                        placeholder="Min. 8 caractères"
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="Min. 8 caracteres"
                         value={registerForm.password}
                         onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
-                        className="pl-10"
+                        className="pl-10 pr-10"
+                        autoComplete="new-password"
+                        disabled={loading}
                       />
+                      <button
+                        type="button"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        onClick={() => setShowPassword(!showPassword)}
+                        tabIndex={-1}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -273,16 +367,18 @@ export function AuthForm() {
                       <Input
                         id="register-confirm"
                         type="password"
-                        placeholder="••••••••"
+                        placeholder="********"
                         value={registerForm.confirmPassword}
                         onChange={(e) => setRegisterForm({ ...registerForm, confirmPassword: e.target.value })}
                         className="pl-10"
+                        autoComplete="new-password"
+                        disabled={loading}
                       />
                     </div>
                   </div>
                   <Button type="submit" className="w-full" disabled={loading}>
                     {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                    Créer un compte
+                    Creer un compte
                   </Button>
                 </form>
               </TabsContent>
@@ -296,16 +392,16 @@ export function AuthForm() {
                     onClick={() => setActiveTab('login')}
                   >
                     <ArrowLeft className="h-3 w-3" />
-                    Retour à la connexion
+                    Retour a la connexion
                   </button>
                 </div>
                 <div className="text-center mb-6">
                   <div className="inline-flex items-center justify-center p-3 rounded-xl bg-primary/10 mb-3">
                     <KeyRound className="h-6 w-6 text-primary" />
                   </div>
-                  <CardTitle className="text-lg">Mot de passe oublié</CardTitle>
+                  <CardTitle className="text-lg">Mot de passe oublie</CardTitle>
                   <CardDescription className="mt-1">
-                    Entrez votre email pour recevoir un code de vérification
+                    Entrez votre email pour recevoir un code de verification
                   </CardDescription>
                 </div>
                 <form onSubmit={handleForgotPassword} className="space-y-4">
@@ -320,6 +416,8 @@ export function AuthForm() {
                         value={forgotForm.email}
                         onChange={(e) => setForgotForm({ email: e.target.value })}
                         className="pl-10"
+                        autoComplete="email"
+                        disabled={loading}
                       />
                     </div>
                   </div>
@@ -348,7 +446,7 @@ export function AuthForm() {
                   </div>
                   <CardTitle className="text-lg">Nouveau mot de passe</CardTitle>
                   <CardDescription className="mt-1">
-                    Entrez le code reçu par email et votre nouveau mot de passe
+                    Entrez le code recu par email et votre nouveau mot de passe
                   </CardDescription>
                 </div>
                 <form onSubmit={handleResetPassword} className="space-y-4">
@@ -363,11 +461,13 @@ export function AuthForm() {
                         value={resetForm.email}
                         onChange={(e) => setResetForm({ ...resetForm, email: e.target.value })}
                         className="pl-10"
+                        autoComplete="email"
+                        disabled={loading}
                       />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="reset-code">Code de vérification</Label>
+                    <Label htmlFor="reset-code">Code de verification</Label>
                     <div className="relative">
                       <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
@@ -375,9 +475,11 @@ export function AuthForm() {
                         type="text"
                         placeholder="000000"
                         value={resetForm.code}
-                        onChange={(e) => setResetForm({ ...resetForm, code: e.target.value })}
+                        onChange={(e) => setResetForm({ ...resetForm, code: e.target.value.replace(/\D/g, '').slice(0, 6) })}
                         className="pl-10 tracking-widest text-center"
                         maxLength={6}
+                        inputMode="numeric"
+                        disabled={loading}
                       />
                     </div>
                   </div>
@@ -387,12 +489,22 @@ export function AuthForm() {
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="reset-password"
-                        type="password"
-                        placeholder="Min. 8 caractères"
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="Min. 8 caracteres"
                         value={resetForm.newPassword}
                         onChange={(e) => setResetForm({ ...resetForm, newPassword: e.target.value })}
-                        className="pl-10"
+                        className="pl-10 pr-10"
+                        autoComplete="new-password"
+                        disabled={loading}
                       />
+                      <button
+                        type="button"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        onClick={() => setShowPassword(!showPassword)}
+                        tabIndex={-1}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -402,16 +514,18 @@ export function AuthForm() {
                       <Input
                         id="reset-confirm"
                         type="password"
-                        placeholder="••••••••"
+                        placeholder="********"
                         value={resetForm.confirmPassword}
                         onChange={(e) => setResetForm({ ...resetForm, confirmPassword: e.target.value })}
                         className="pl-10"
+                        autoComplete="new-password"
+                        disabled={loading}
                       />
                     </div>
                   </div>
                   <Button type="submit" className="w-full" disabled={loading}>
                     {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                    Réinitialiser le mot de passe
+                    Reinitialiser le mot de passe
                   </Button>
                 </form>
               </TabsContent>
