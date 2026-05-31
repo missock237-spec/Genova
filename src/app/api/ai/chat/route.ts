@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAIRouter } from '@/lib/ai-router';
 import { applySecurity, secureResponse } from '@/lib/security';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('ai-chat');
 
 const MAX_HISTORY_LENGTH = 50;
 const MAX_MESSAGE_LENGTH = 5000;
@@ -99,8 +102,13 @@ export async function POST(request: NextRequest) {
       costUsd: response.costUsd,
     });
     return secureResponse(res, request);
-  } catch {
-    const res = NextResponse.json({ error: 'Erreur lors de la communication avec l\'IA' }, { status: 500 });
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    log.error('AI chat failed', { error: errMsg });
+    const res = NextResponse.json({
+      error: 'Erreur lors de la communication avec l\'IA',
+      details: process.env.NODE_ENV === 'development' ? errMsg : undefined,
+    }, { status: 500 });
     return secureResponse(res, request);
   }
 }

@@ -4,6 +4,7 @@
   "private": true,
   "description": "Ruflo MCP HTTP Server for Genova AgentOS",
   "main": "server.js",
+  "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"

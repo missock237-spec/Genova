@@ -133,31 +133,50 @@ function getCostPerK(
 function isTransientError(error: unknown): boolean {
   if (error instanceof Response) {
     const s = error.status;
+    // Only 429 (rate limit) and 5xx (server errors) are transient
+    // 4xx client errors (401, 403, etc.) are NOT transient — retrying won't help
     return s === 429 || (s >= 500 && s <= 599);
   }
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();
-    // Network-level / timeout / rate-limit
+
+    // Check for explicit HTTP status in the error message
+    const statusMatch = msg.match(/status[:\s]*(\d{3})/);
+    if (statusMatch) {
+      const s = parseInt(statusMatch[1], 10);
+      // 4xx = client error (bad key, forbidden, not found) — NOT transient
+      // 429 = rate limit — IS transient
+      // 5xx = server error — IS transient
+      if (s >= 400 && s < 500 && s !== 429) return false;
+      return s === 429 || (s >= 500 && s <= 599);
+    }
+
+    // Network-level / timeout / rate-limit — these are transient
     if (
       msg.includes('network') ||
       msg.includes('timeout') ||
       msg.includes('econnreset') ||
       msg.includes('econnrefused') ||
-      msg.includes('429') ||
       msg.includes('rate limit') ||
       msg.includes('overloaded')
     ) {
       return true;
     }
-    // If the error was caused by a fetch that returned a status, peek at the message
-    const statusMatch = msg.match(/status[:\s]*(\d{3})/);
-    if (statusMatch) {
-      const s = parseInt(statusMatch[1], 10);
-      return s === 429 || (s >= 500 && s <= 599);
+
+    // Explicitly check for common API auth failures — NOT transient
+    if (
+      msg.includes('forbidden') ||
+      msg.includes('unauthorized') ||
+      msg.includes('invalid api key') ||
+      msg.includes('invalid api_key') ||
+      msg.includes('user not found') ||
+      msg.includes('authentication')
+    ) {
+      return false;
     }
   }
-  // Default to transient so we can retry — safer for unknown error shapes
-  return true;
+  // Default to NON-transient — prevents wasteful retries on unknown persistent errors
+  return false;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -603,9 +622,15 @@ export class AIRouter {
           };
         } catch (error) {
           lastError = error;
+          const isTransient = isTransientError(error);
 
-          // If not transient, don't retry this provider
-          if (!isTransientError(error)) break;
+          log.warn(`Provider ${provider.name}/${model} failed (attempt ${attempt + 1}/${this.config.maxRetries + 1})`, {
+            transient: isTransient,
+            error: error instanceof Error ? error.message : String(error),
+          });
+
+          // If not transient, don't retry this provider — skip to next one
+          if (!isTransient) break;
 
           // If this was the last retry for this provider, move on
           if (attempt < this.config.maxRetries) {
@@ -722,19 +747,41 @@ export class AIRouter {
     switch (providerName) {
       case 'groq':
         if (process.env.GROQ_API_KEY) {
-          return callGroqDirect(messages, model, this.config.timeoutMs);
+          try {
+            return await callGroqDirect(messages, model, this.config.timeoutMs);
+          } catch (error) {
+            // If direct API fails with auth error (4xx), fall through to z-ai-sdk
+            const msg = error instanceof Error ? error.message : '';
+            if (!isTransientError(error)) {
+              log.info(`Groq direct failed (${msg}), falling back to z-ai-sdk`);
+              break; // Fall through to z-ai-sdk below
+            }
+            throw error;
+          }
         }
-        return callZAI(messages, model, providerName, this.config.timeoutMs);
+        break;
 
       case 'openrouter':
         if (process.env.OPENROUTER_API_KEY) {
-          return callOpenRouterDirect(messages, model, this.config.timeoutMs);
+          try {
+            return await callOpenRouterDirect(messages, model, this.config.timeoutMs);
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : '';
+            if (!isTransientError(error)) {
+              log.info(`OpenRouter direct failed (${msg}), falling back to z-ai-sdk`);
+              break; // Fall through to z-ai-sdk below
+            }
+            throw error;
+          }
         }
-        return callZAI(messages, model, providerName, this.config.timeoutMs);
+        break;
 
       default:
-        return callZAI(messages, model, providerName, this.config.timeoutMs);
+        break;
     }
+
+    // Universal fallback: z-ai-web-dev-sdk
+    return callZAI(messages, model, providerName, this.config.timeoutMs);
   }
 
   // -----------------------------------------------------------------------

@@ -873,7 +873,8 @@ finally:
   private async tryLoadVM2(): Promise<unknown | null> {
     try {
       // Dynamic import — will fail if vm2 is not installed
-      const vm2 = await import('vm2');
+      // Using Function() to prevent Turbopack/webpack from trying to resolve this at compile time
+      const vm2 = await new Function('module', 'return import(module)')('vm2');
       return vm2;
     } catch {
       return null;

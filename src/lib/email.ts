@@ -64,6 +64,10 @@ async function sendViaResendSDK(options: EmailOptions): Promise<EmailResult> {
 
     if (error) {
       log.warn('Resend SDK error', { error: error.message, to: options.to });
+      // If this is a domain verification error, note it clearly
+      if (error.message.includes('verify a domain') || error.message.includes('testing emails')) {
+        log.info('Email domain not verified — in development, emails can only be sent to the account owner email. Verify a domain at resend.com/domains for production.');
+      }
       return { success: false, method: 'resend-sdk', error: error.message };
     }
 
