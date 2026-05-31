@@ -16,6 +16,7 @@ import IntegrationsView from '@/components/integrations/integrations-view';
 import ConnectorsView from '@/components/connectors/connectors-view';
 import { ThemeProvider } from 'next-themes';
 import { Loader2 } from 'lucide-react';
+import { GenovaLogo } from '@/components/ui/genova-logo';
 
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuthStore();
@@ -57,8 +58,9 @@ function AppContent() {
   if (isLoading && !validatedRef.current) {
     return (
       <div className="min-h-screen flex items-center justify-center gradient-bg grid-pattern">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="flex flex-col items-center gap-4">
+          <GenovaLogo size="md" showText={true} />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
           <p className="text-sm text-muted-foreground">Chargement...</p>
         </div>
       </div>

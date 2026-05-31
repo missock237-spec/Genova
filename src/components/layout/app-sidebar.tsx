@@ -12,7 +12,6 @@ import {
   Shield,
   GitBranch,
   Settings,
-  Cpu,
   LogOut,
   X,
   CheckCircle2,
@@ -20,6 +19,7 @@ import {
   Package,
   Link2,
 } from 'lucide-react';
+import { GenovaLogo } from '@/components/ui/genova-logo';
 
 const navItems = [
   { id: 'dashboard' as const, label: 'Tableau de bord', icon: LayoutDashboard },
@@ -66,13 +66,7 @@ export function AppSidebar() {
         {/* Header */}
         <div className="p-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-primary/10">
-              <Cpu className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h2 className="font-bold text-sm tracking-tight">AgentOS</h2>
-              <p className="text-[10px] text-muted-foreground">AI Operating System</p>
-            </div>
+            <GenovaLogo size="sm" showText={true} compact={true} />
           </div>
           <Button
             variant="ghost"

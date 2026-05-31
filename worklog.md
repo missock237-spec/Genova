@@ -1,30 +1,30 @@
-# Genova AgentOS — Worklog
-
 ---
 Task ID: 1
 Agent: Main Agent
-Task: Authentication system audit and fix
+Task: Fix authentication system and add Genova branding (green G logo + genova.Ia text)
 
 Work Log:
-- Analyzed the complete authentication architecture (11 API routes, 4 lib modules, 1 form component, 1 store)
-- Identified ROOT CAUSE: PostgreSQL was not installed/running on the server
-- Discovered .env file had non-ASCII characters (em dashes) in comments that broke Prisma's dotenv parser
-- Found 9 total authentication bugs and fixed all of them
+- Analyzed entire auth system: Prisma schema, auth.ts, session.ts, security.ts, all API routes, auth-form.tsx, store.ts, middleware.ts
+- Identified root cause: system env var DATABASE_URL=file:/home/z/my-project/db/custom.db was overriding .env PostgreSQL URL
+- Identified Next.js 16 breaking change: middleware.ts must be renamed to proxy.ts with default export
+- Fixed db.ts to resolve correct DATABASE_URL even when system env overrides .env
+- Renamed middleware.ts → proxy.ts with `export default function proxy()` for Next.js 16 compatibility
+- Added CORS_ALLOWED_ORIGINS to .env file
+- Added proper error logging in register route
+- Created GenovaLogo component (src/components/ui/genova-logo.tsx) with green "G" and "genova.Ia" text
+- Updated auth-form.tsx: replaced Cpu icon with GenovaLogo, shows "genova.Ia" text (full text on register tab)
+- Updated app-sidebar.tsx: replaced Cpu icon with GenovaLogo (compact mode)
+- Updated app-header.tsx: default title changed from "AgentOS" to "genova.Ia"
+- Updated app/page.tsx: loading screen shows GenovaLogo
+- Updated layout.tsx: title, description, keywords, authors, icons all updated for genova.Ia branding
+- Created SVG favicon (src/app/icon.svg) with green G
+- Generated PNG favicon (public/favicon-genova.png) with AI
+- Verified all auth endpoints: register (201), login (200), duplicate (409), wrong password (401), /me (200)
+- TypeScript compilation: 0 errors
 
 Stage Summary:
-- Installed PostgreSQL 17 in user space at /home/z/.local/pg/
-- Created genova database and user
-- Synced Prisma schema to database (28 tables)
-- Fixed .env encoding (removed em dashes)
-- Added AUTH_SALT to .env
-- Fixed /api/auth/me to return consistent user shape with role and emailVerified
-- Rewrote Zustand store with: role/emailVerified in User interface, server-side logout, auto refresh on 401, isLoading state
-- Removed premature auth:unauthorized event from apiFetch (now the store handles refresh centrally)
-- Rewrote page.tsx with loading state, session validation, cross-tab logout
-- Fixed AppSidebar logout to call server API
-- Rewrote AuthForm with: email validation, show/hide password, better error messages (429, 401, 409), disabled states, numeric code input, anti-enumeration for forgot-password
-- Created scripts/start-pg.sh for PostgreSQL startup
-- Added db:start, db:setup, dev:full scripts to package.json
-- Updated services/start-all.sh with user-space PostgreSQL support
-- TypeScript compilation: 0 errors
-- Tested registration and login: both work correctly with 201/200 responses
+- ROOT CAUSE of auth failure: DATABASE_URL system env pointing to SQLite instead of PostgreSQL
+- ROOT CAUSE of server crash: Next.js 16 requires proxy.ts instead of middleware.ts
+- Both issues are now FIXED
+- Green "G" logo and "genova.Ia" branding applied across all pages
+- Authentication fully operational: register, login, session management, forgot/reset password all working

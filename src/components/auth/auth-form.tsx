@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Cpu, Mail, Lock, UserIcon, Loader2, ArrowLeft, KeyRound, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, UserIcon, Loader2, ArrowLeft, KeyRound, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { GenovaLogo } from '@/components/ui/genova-logo';
 import { useToast } from '@/hooks/use-toast';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -223,13 +224,19 @@ export function AuthForm() {
   return (
     <div className="min-h-screen flex items-center justify-center p-4 gradient-bg grid-pattern">
       <div className="w-full max-w-md">
-        {/* Logo */}
+        {/* Logo & Branding */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center p-4 rounded-2xl bg-primary/10 agent-glow mb-4">
-            <Cpu className="h-10 w-10 text-primary" />
+          <div className="flex justify-center mb-4">
+            <GenovaLogo size="lg" showText={activeTab === 'register'} />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">AgentOS</h1>
-          <p className="text-muted-foreground mt-1">Systeme d&apos;exploitation pour agents IA</p>
+          {activeTab !== 'register' && (
+            <>
+              <h1 className="text-3xl font-bold tracking-tight">
+                genova<span className="text-primary">.Ia</span>
+              </h1>
+              <p className="text-muted-foreground mt-1">Système d&apos;exploitation pour agents IA</p>
+            </>
+          )}
         </div>
 
         <Card className="border-border/50 agent-glow">

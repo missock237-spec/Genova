@@ -164,7 +164,8 @@ export async function POST(request: NextRequest) {
     });
 
     return secureResponse(res, request);
-  } catch {
+  } catch (error) {
+    console.error('[REGISTER] Registration error:', error instanceof Error ? error.message : error);
     const res = NextResponse.json(
       { error: 'Registration failed' },
       { status: 500 }
