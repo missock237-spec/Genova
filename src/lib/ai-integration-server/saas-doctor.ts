@@ -306,6 +306,122 @@ async function checkResendAPI(): Promise<DiagnosticCheck> {
   };
 }
 
+async function checkQdrant(): Promise<DiagnosticCheck> {
+  const start = Date.now();
+  const qdrantUrl = process.env.QDRANT_URL || 'http://localhost:6333';
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+
+    const headers: Record<string, string> = {};
+    if (process.env.QDRANT_API_KEY) {
+      headers['api-key'] = process.env.QDRANT_API_KEY;
+    }
+
+    const res = await fetch(`${qdrantUrl}/healthz`, {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      return {
+        id: 'service-qdrant',
+        name: 'Qdrant Vector DB',
+        category: 'integration',
+        severity: 'healthy',
+        message: 'Qdrant vector database is accessible and healthy',
+        details: `URL: ${qdrantUrl}`,
+        autoFixAvailable: false,
+        checkedAt: new Date(),
+        durationMs: Date.now() - start,
+      };
+    }
+    return {
+      id: 'service-qdrant',
+      name: 'Qdrant Vector DB',
+      category: 'integration',
+      severity: 'warning',
+      message: `Qdrant returned status ${res.status}`,
+      fix: 'Check Qdrant server status or start with: docker run -p 6333:6333 qdrant/qdrant',
+      autoFixAvailable: false,
+      checkedAt: new Date(),
+      durationMs: Date.now() - start,
+    };
+  } catch {
+    const vectorStoreType = process.env.VECTOR_STORE_TYPE || 'sqlite';
+    return {
+      id: 'service-qdrant',
+      name: 'Qdrant Vector DB',
+      category: 'integration',
+      severity: vectorStoreType === 'qdrant' ? 'warning' : 'info',
+      message: `Qdrant server not reachable at ${qdrantUrl}`,
+      details: vectorStoreType === 'qdrant'
+        ? 'VECTOR_STORE_TYPE is set to qdrant but the server is not running — vector search will fail'
+        : 'Using SQLite vector store as fallback (VECTOR_STORE_TYPE is not "qdrant")',
+      fix: 'Start Qdrant: docker run -d --name qdrant -p 6333:6333 qdrant/qdrant',
+      autoFixAvailable: false,
+      checkedAt: new Date(),
+      durationMs: Date.now() - start,
+    };
+  }
+}
+
+async function checkRuflo(): Promise<DiagnosticCheck> {
+  const start = Date.now();
+  const rufloUrl = process.env.RUFLO_MCP_URL || 'http://localhost:8190';
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(`${rufloUrl}/health`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (res.ok) {
+      return {
+        id: 'service-ruflo',
+        name: 'Ruflo MCP Server',
+        category: 'integration',
+        severity: 'healthy',
+        message: 'Ruflo MCP server is accessible and healthy',
+        details: `URL: ${rufloUrl}`,
+        autoFixAvailable: false,
+        checkedAt: new Date(),
+        durationMs: Date.now() - start,
+      };
+    }
+    return {
+      id: 'service-ruflo',
+      name: 'Ruflo MCP Server',
+      category: 'integration',
+      severity: 'info',
+      message: `Ruflo MCP server returned status ${res.status}`,
+      fix: 'Check Ruflo service status',
+      autoFixAvailable: false,
+      checkedAt: new Date(),
+      durationMs: Date.now() - start,
+    };
+  } catch {
+    return {
+      id: 'service-ruflo',
+      name: 'Ruflo MCP Server',
+      category: 'integration',
+      severity: 'info',
+      message: 'Ruflo MCP server not reachable — agent orchestration will use Genova built-in engine',
+      fix: 'Start Ruflo: cd services/ruflo && node server.js',
+      autoFixAvailable: false,
+      checkedAt: new Date(),
+      durationMs: Date.now() - start,
+    };
+  }
+}
+
 // ============================================================
 // Integration Checks
 // ============================================================
@@ -497,6 +613,8 @@ export async function runDiagnostics(): Promise<DiagnosticReport> {
     groqAPI,
     openRouterAPI,
     resendAPI,
+    qdrantCheck,
+    rufloCheck,
     integrationChecks,
     securityChecks,
   ] = await Promise.all([
@@ -505,11 +623,13 @@ export async function runDiagnostics(): Promise<DiagnosticReport> {
     checkGroqAPI(),
     checkOpenRouterAPI(),
     checkResendAPI(),
+    checkQdrant(),
+    checkRuflo(),
     checkIntegrationHealth(),
     Promise.resolve(checkSecurity()),
   ]);
 
-  checks.push(dbConnection, dbSchema, groqAPI, openRouterAPI, resendAPI, ...integrationChecks, ...securityChecks);
+  checks.push(dbConnection, dbSchema, groqAPI, openRouterAPI, resendAPI, qdrantCheck, rufloCheck, ...integrationChecks, ...securityChecks);
 
   // Calculate health score
   let healthScore = 100;

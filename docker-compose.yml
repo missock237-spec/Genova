@@ -1,0 +1,218 @@
+# =============================================
+# Genova AgentOS — Docker Compose Stack
+# =============================================
+# Production-ready microservice stack for all integrations
+# Start with: docker compose up -d
+# =============================================
+
+version: "3.9"
+
+services:
+  # =============================================
+  # PostgreSQL — Primary Database
+  # =============================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: genova-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: genova
+      POSTGRES_PASSWORD: genova_secret
+      POSTGRES_DB: genova
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U genova"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =============================================
+  # Qdrant — Vector Database
+  # =============================================
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: genova-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"  # REST API
+      - "6334:6334"  # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # =============================================
+  # PocketBase — Lightweight Backend
+  # =============================================
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: genova-pocketbase
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    volumes:
+      - pocketbase_data:/pb_data
+    environment:
+      TZ: UTC
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # =============================================
+  # Baileys — WhatsApp Web API
+  # =============================================
+  baileys:
+    build:
+      context: ./services/baileys
+      dockerfile: Dockerfile
+    container_name: genova-baileys
+    restart: unless-stopped
+    ports:
+      - "8186:8186"
+    volumes:
+      - baileys_auth:/app/auth_info
+    environment:
+      PORT: 8186
+      NODE_ENV: production
+
+  # =============================================
+  # SpeechBrain — ASR Server
+  # =============================================
+  speechbrain:
+    build:
+      context: ./services/speechbrain
+      dockerfile: Dockerfile
+    container_name: genova-speechbrain
+    restart: unless-stopped
+    ports:
+      - "8187:8187"
+    volumes:
+      - speechbrain_models:/app/models
+    environment:
+      PORT: 8187
+      MODEL: speechbrain/asr-conformer-transformerlm-librispeech
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # =============================================
+  # ComfyUI — Image Generation
+  # =============================================
+  comfyui:
+    build:
+      context: ./services/comfyui
+      dockerfile: Dockerfile
+    container_name: genova-comfyui
+    restart: unless-stopped
+    ports:
+      - "8188:8188"
+    volumes:
+      - comfyui_models:/app/models
+      - comfyui_output:/app/output
+    environment:
+      PORT: 8188
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # =============================================
+  # Video API Server — CogVideo/VideoCrafter
+  # =============================================
+  video-api:
+    build:
+      context: ./services/video
+      dockerfile: Dockerfile
+    container_name: genova-video-api
+    restart: unless-stopped
+    ports:
+      - "8189:8189"
+    volumes:
+      - video_models:/app/models
+      - video_output:/app/output
+    environment:
+      PORT: 8189
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # =============================================
+  # Ruflo — MCP Agent Orchestration
+  # =============================================
+  ruflo:
+    build:
+      context: ./services/ruflo
+      dockerfile: Dockerfile
+    container_name: genova-ruflo
+    restart: unless-stopped
+    ports:
+      - "8190:8190"
+    environment:
+      PORT: 8190
+      NODE_ENV: production
+
+  # =============================================
+  # n8n — Workflow Automation
+  # =============================================
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: genova-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: admin
+      N8N_BASIC_AUTH_PASSWORD: genova_admin
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+
+# =============================================
+# Volumes
+# =============================================
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  pocketbase_data:
+    driver: local
+  baileys_auth:
+    driver: local
+  speechbrain_models:
+    driver: local
+  comfyui_models:
+    driver: local
+  comfyui_output:
+    driver: local
+  video_models:
+    driver: local
+  video_output:
+    driver: local
+  n8n_data:
+    driver: local

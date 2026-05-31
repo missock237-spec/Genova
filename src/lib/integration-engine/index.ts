@@ -16,6 +16,9 @@ import { N8nAdapter } from './adapters/n8n';
 import { ComfyUIAdapter } from './adapters/comfyui';
 import { PocketBaseAdapter } from './adapters/pocketbase';
 import { CogVideoAdapter } from './adapters/cogvideo';
+import { RufloAdapter } from './adapters/ruflo';
+import { QdrantAdapter } from './adapters/qdrant';
+import { ClaudeCodeAdapter } from './adapters/claude-code';
 
 const log = createLogger('integration-engine');
 
@@ -46,7 +49,7 @@ export async function initializeIntegrationEngine(): Promise<void> {
 
   const registry = getIntegrationRegistry();
 
-  // Register all built-in adapters
+  // Register all built-in adapters (9 integrations)
   const adapters = [
     new SpeechBrainAdapter(),
     new BaileysAdapter(),
@@ -54,6 +57,9 @@ export async function initializeIntegrationEngine(): Promise<void> {
     new ComfyUIAdapter(),
     new PocketBaseAdapter(),
     new CogVideoAdapter(),
+    new RufloAdapter(),
+    new QdrantAdapter(),
+    new ClaudeCodeAdapter(),
   ];
 
   for (const adapter of adapters) {
