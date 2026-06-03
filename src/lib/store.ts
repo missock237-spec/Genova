@@ -9,6 +9,8 @@ interface User {
   avatar?: string | null;
   role: string;
   emailVerified: boolean;
+  isEmailVerified?: boolean;
+  isActive?: boolean;
 }
 
 interface AuthState {

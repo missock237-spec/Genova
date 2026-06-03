@@ -1,37 +1,62 @@
+/**
+ * GENOVA AI OS — Session Manager
+ * Matches existing architecture:
+ *   - httpOnly cookies
+ *   - Max 10 sessions per user (oldest evicted)
+ *   - Session TTL: 24h  |  Refresh token TTL: 7 days
+ *   - All operations logged in AuditLog
+ *   - rememberMe support
+ *   - getCurrentSession reads from cookies()
+ */
+
 import { db } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createAuditLog } from '@/lib/auth';
 import { createLogger } from '@/lib/logger';
+import { generateSessionToken } from '@/lib/auth';
 
 const log = createLogger('session');
 
-const SESSION_DURATION_HOURS = 24;
-const REFRESH_TOKEN_DURATION_HOURS = 168; // 7 days
-const COOKIE_NAME = 'genova_session';
-const REFRESH_COOKIE_NAME = 'genova_refresh';
-const MAX_SESSIONS_PER_USER = 10; // Prevent session flooding
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
 
-export function createRefreshToken(): string {
-  return crypto.randomBytes(48).toString('hex');
+export const SESSION_TTL_MS = 24 * 60 * 60 * 1000;       // 24 h
+export const REFRESH_TTL_MS = 7  * 24 * 60 * 60 * 1000;  // 7 days
+export const MAX_SESSIONS_PER_USER = 10;
+const SESSION_COOKIE = 'genova_session';
+const REFRESH_COOKIE = 'genova_refresh';
+
+// ─── TYPES ───────────────────────────────────────────────────────────────────
+
+export interface SessionPayload {
+  userId: string;
+  email: string;
+  name: string;
+  role: string;
+  isActive: boolean;
+  isEmailVerified: boolean;
+  sessionId: string;
 }
 
 interface CreateSessionOptions {
   ipAddress?: string | null;
   userAgent?: string | null;
+  rememberMe?: boolean;
 }
+
+// ─── CREATE SESSION ───────────────────────────────────────────────────────────
 
 export async function createSession(
   userId: string,
   options: CreateSessionOptions = {}
 ): Promise<{ token: string; refreshToken: string }> {
-  const token = crypto.randomBytes(48).toString('hex');
-  const refreshToken = createRefreshToken();
-  const expiresAt = new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000);
-  const refreshExpiresAt = new Date(Date.now() + REFRESH_TOKEN_DURATION_HOURS * 60 * 60 * 1000);
+  const token = generateSessionToken();
+  const refreshToken = crypto.randomBytes(48).toString('hex');
+  const rememberMe = options.rememberMe ?? false;
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+  const refreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
   // Session hardening: Enforce max sessions per user
-  // If user has too many active sessions, revoke the oldest ones
   const activeSessions = await db.session.findMany({
     where: { userId, expiresAt: { gt: new Date() } },
     orderBy: { lastAccessedAt: 'asc' },
@@ -39,7 +64,6 @@ export async function createSession(
   });
 
   if (activeSessions.length >= MAX_SESSIONS_PER_USER) {
-    // Remove oldest sessions to make room
     const sessionsToRemove = activeSessions.slice(0, activeSessions.length - MAX_SESSIONS_PER_USER + 1);
     const idsToRemove = sessionsToRemove.map(s => s.id);
 
@@ -50,10 +74,8 @@ export async function createSession(
     log.info('Evicted oldest sessions for user', {
       userId,
       evictedCount: idsToRemove.length,
-      remainingActive: activeSessions.length - idsToRemove.length,
     });
 
-    // Audit log for session eviction
     await createAuditLog({
       userId,
       action: 'session_evict',
@@ -72,17 +94,17 @@ export async function createSession(
       refreshToken,
       expiresAt,
       refreshExpiresAt,
+      rememberMe,
       ipAddress: options.ipAddress || null,
       userAgent: options.userAgent || null,
     },
   });
 
-  // Audit log for new session creation
   await createAuditLog({
     userId,
     action: 'session_create',
     resource: 'session',
-    details: { expiresAt: expiresAt.toISOString() },
+    details: { expiresAt: expiresAt.toISOString(), rememberMe },
     ipAddress: options.ipAddress,
     userAgent: options.userAgent,
     severity: 'info',
@@ -90,6 +112,8 @@ export async function createSession(
 
   return { token, refreshToken };
 }
+
+// ─── VALIDATE SESSION ────────────────────────────────────────────────────────
 
 export async function validateSession(token: string): Promise<string | null> {
   if (!token) return null;
@@ -115,6 +139,8 @@ export async function validateSession(token: string): Promise<string | null> {
   return session.userId;
 }
 
+// ─── REFRESH SESSION ─────────────────────────────────────────────────────────
+
 export async function refreshSession(
   refreshToken: string
 ): Promise<{ token: string; refreshToken: string } | null> {
@@ -132,19 +158,16 @@ export async function refreshSession(
 
   if (!session) return null;
 
-  // Check refresh token expiry
   if (session.refreshExpiresAt && session.refreshExpiresAt < new Date()) {
     await db.session.delete({ where: { id: session.id } }).catch(() => {});
     return null;
   }
 
-  // Create new tokens
-  const newToken = crypto.randomBytes(48).toString('hex');
-  const newRefreshToken = createRefreshToken();
-  const newExpiresAt = new Date(Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000);
-  const newRefreshExpiresAt = new Date(Date.now() + REFRESH_TOKEN_DURATION_HOURS * 60 * 60 * 1000);
+  const newToken = generateSessionToken();
+  const newRefreshToken = crypto.randomBytes(48).toString('hex');
+  const newExpiresAt = new Date(Date.now() + SESSION_TTL_MS);
+  const newRefreshExpiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
-  // Update the session with new tokens
   await db.session.update({
     where: { id: session.id },
     data: {
@@ -156,7 +179,6 @@ export async function refreshSession(
     },
   });
 
-  // Audit log for session refresh
   await createAuditLog({
     userId: session.userId,
     action: 'session_refresh',
@@ -168,12 +190,82 @@ export async function refreshSession(
   return { token: newToken, refreshToken: newRefreshToken };
 }
 
+// ─── GET CURRENT SESSION (from cookies) ──────────────────────────────────────
+
+export async function getCurrentSession(): Promise<SessionPayload | null> {
+  try {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const token = cookieStore.get(SESSION_COOKIE)?.value;
+    if (!token) return null;
+
+    const session = await db.session.findUnique({
+      where: { token },
+      include: { user: { select: { id: true, email: true, name: true, role: true, isActive: true, isEmailVerified: true } } },
+    });
+
+    if (!session) return null;
+
+    if (session.expiresAt < new Date()) {
+      await db.session.delete({ where: { id: session.id } }).catch(() => {});
+      return null;
+    }
+
+    if (!session.user.isActive) return null;
+
+    // Update last accessed timestamp
+    await db.session.update({
+      where: { token },
+      data: { lastAccessedAt: new Date() },
+    }).catch(() => {});
+
+    return {
+      userId: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      role: session.user.role,
+      isActive: session.user.isActive,
+      isEmailVerified: session.user.isEmailVerified,
+      sessionId: session.id,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─── DESTROY SESSION ─────────────────────────────────────────────────────────
+
+export async function destroySession(request: Request): Promise<void> {
+  try {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const token = cookieStore.get(SESSION_COOKIE)?.value;
+    if (!token) return;
+
+    const session = await db.session.findUnique({ where: { token }, select: { id: true, userId: true } });
+
+    if (session) {
+      const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+      await db.session.delete({ where: { id: session.id } }).catch(() => {});
+      await createAuditLog({
+        userId: session.userId,
+        action: 'logout',
+        resource: 'session',
+        ipAddress: ip,
+        userAgent: request.headers.get('user-agent') ?? 'unknown',
+      });
+    }
+  } catch {
+    // Silently fail
+  }
+}
+
+// ─── TOKEN EXTRACTION ────────────────────────────────────────────────────────
+
 export function extractToken(request: NextRequest): string | null {
-  // Check cookie first
-  const cookieToken = request.cookies.get(COOKIE_NAME)?.value;
+  const cookieToken = request.cookies.get(SESSION_COOKIE)?.value;
   if (cookieToken) return cookieToken;
 
-  // Then check Authorization Bearer header
   const authHeader = request.headers.get('authorization');
   if (authHeader?.startsWith('Bearer ')) {
     return authHeader.slice(7);
@@ -183,11 +275,9 @@ export function extractToken(request: NextRequest): string | null {
 }
 
 export function extractRefreshToken(request: NextRequest): string | null {
-  // Check cookie first
-  const cookieToken = request.cookies.get(REFRESH_COOKIE_NAME)?.value;
+  const cookieToken = request.cookies.get(REFRESH_COOKIE)?.value;
   if (cookieToken) return cookieToken;
 
-  // Then check X-Refresh-Token header
   const headerToken = request.headers.get('x-refresh-token');
   if (headerToken) return headerToken;
 
@@ -203,7 +293,6 @@ export async function getAuthenticatedUser(
   const userId = await validateSession(token);
   if (!userId) return null;
 
-  // Fetch user role for RBAC
   const user = await db.user.findUnique({
     where: { id: userId },
     select: { role: true },
@@ -212,14 +301,16 @@ export async function getAuthenticatedUser(
   return { userId, role: user?.role || 'user' };
 }
 
-export function setSessionCookie(response: NextResponse, token: string): void {
+// ─── COOKIE HELPERS ──────────────────────────────────────────────────────────
+
+export function setSessionCookie(response: NextResponse, token: string, rememberMe: boolean = false): void {
   const isProduction = process.env.NODE_ENV === 'production';
 
-  response.cookies.set(COOKIE_NAME, token, {
+  response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: isProduction,
     sameSite: 'lax',
-    maxAge: SESSION_DURATION_HOURS * 60 * 60,
+    maxAge: rememberMe ? SESSION_TTL_MS / 1000 : undefined, // session cookie if not remember
     path: '/',
   });
 }
@@ -227,11 +318,11 @@ export function setSessionCookie(response: NextResponse, token: string): void {
 export function setRefreshCookie(response: NextResponse, refreshToken: string): void {
   const isProduction = process.env.NODE_ENV === 'production';
 
-  response.cookies.set(REFRESH_COOKIE_NAME, refreshToken, {
+  response.cookies.set(REFRESH_COOKIE, refreshToken, {
     httpOnly: true,
     secure: isProduction,
     sameSite: 'lax',
-    maxAge: REFRESH_TOKEN_DURATION_HOURS * 60 * 60,
+    maxAge: REFRESH_TTL_MS / 1000,
     path: '/',
   });
 }
@@ -248,7 +339,7 @@ export function refreshSessionCookie(
 export function clearSessionCookie(response: NextResponse): void {
   const isProduction = process.env.NODE_ENV === 'production';
 
-  response.cookies.set(COOKIE_NAME, '', {
+  response.cookies.set(SESSION_COOKIE, '', {
     httpOnly: true,
     secure: isProduction,
     sameSite: 'lax',
@@ -256,8 +347,7 @@ export function clearSessionCookie(response: NextResponse): void {
     path: '/',
   });
 
-  // Also clear refresh cookie
-  response.cookies.set(REFRESH_COOKIE_NAME, '', {
+  response.cookies.set(REFRESH_COOKIE, '', {
     httpOnly: true,
     secure: isProduction,
     sameSite: 'lax',
@@ -265,6 +355,8 @@ export function clearSessionCookie(response: NextResponse): void {
     path: '/',
   });
 }
+
+// ─── SESSION DELETION ────────────────────────────────────────────────────────
 
 export async function deleteSession(token: string): Promise<void> {
   const session = await db.session.findUnique({
@@ -329,8 +421,8 @@ if (typeof globalThis !== 'undefined') {
       } catch {
         // Silently fail - cleanup will retry next interval
       }
-    }, 60 * 60 * 1000); // Every hour
+    }, 60 * 60 * 1000);
   }
 }
 
-export { COOKIE_NAME, REFRESH_COOKIE_NAME, MAX_SESSIONS_PER_USER };
+export { SESSION_COOKIE as COOKIE_NAME, REFRESH_COOKIE as REFRESH_COOKIE_NAME };

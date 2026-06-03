@@ -8,15 +8,17 @@ datasource db {
 }
 
 model User {
-  id             String   @id @default(cuid())
-  email          String   @unique
-  name           String
-  password       String
-  avatar         String?
-  plan           String   @default("free")
-  role           String   @default("user")      // user, admin, super_admin
-  emailVerified  DateTime?
-  createdAt      DateTime @default(now())
+  id              String   @id @default(cuid())
+  email           String   @unique
+  name            String
+  password        String
+  avatar          String?
+  plan            String   @default("free")
+  role            String   @default("user")      // user, admin, super_admin
+  isActive        Boolean  @default(false)        // activated after email verification
+  isEmailVerified Boolean  @default(false)        // replaces emailVerified DateTime?
+  emailVerified   DateTime?
+  createdAt       DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   agents           Agent[]
@@ -48,6 +50,7 @@ model User {
   accessKeys        AccessKey[]
   connectorExecutions ConnectorExecution[]
 
+  @@index([email])
   @@index([role])
   @@map("users")
 }
@@ -59,6 +62,7 @@ model Session {
   refreshToken     String?   @unique
   expiresAt        DateTime
   refreshExpiresAt DateTime?
+  rememberMe       Boolean   @default(false)
   createdAt        DateTime  @default(now())
   lastAccessedAt   DateTime  @default(now())
   ipAddress        String?
@@ -71,33 +75,27 @@ model Session {
 
 model PasswordReset {
   id        String   @id @default(cuid())
-  email     String
-  code      String
-  attempts  Int      @default(0)
-  used      Boolean  @default(false)
+  token     String   @unique   // PBKDF2-hashed token
   expiresAt DateTime
   createdAt DateTime @default(now())
   userId    String
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([email, code])
+  @@index([userId])
   @@map("password_resets")
 }
 
 model EmailVerification {
   id        String   @id @default(cuid())
-  email     String
-  code      String
-  attempts  Int      @default(0)
-  used      Boolean  @default(false)
+  token     String   @unique   // PBKDF2-hashed token
   expiresAt DateTime
   createdAt DateTime @default(now())
   userId    String
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([email, code])
+  @@index([userId])
   @@map("email_verifications")
 }
 

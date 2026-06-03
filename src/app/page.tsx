@@ -19,7 +19,7 @@ import { Loader2 } from 'lucide-react';
 import { GenovaLogo } from '@/components/ui/genova-logo';
 
 function AppContent() {
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, user } = useAuthStore();
   const { currentView } = useAppStore();
   const hydrateRef = useRef(false);
   const validatedRef = useRef(false);
@@ -31,7 +31,6 @@ function AppContent() {
       useAuthStore.getState().hydrate();
 
       // Immediately validate the session with the server
-      // This checks if the httpOnly cookie session is still valid
       (async () => {
         const valid = await useAuthStore.getState().validateSession();
         if (valid) {
@@ -46,7 +45,6 @@ function AppContent() {
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key === 'agentos_user' && !e.newValue) {
-        // Another tab logged out — sync this tab
         useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
       }
     };
@@ -65,6 +63,14 @@ function AppContent() {
         </div>
       </div>
     );
+  }
+
+  // Check if email not verified — redirect to verify-email page
+  if (isAuthenticated && user && user.isEmailVerified === false) {
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login?error=email_not_verified';
+    }
+    return null;
   }
 
   if (!isAuthenticated) {

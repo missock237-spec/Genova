@@ -1,20 +1,13 @@
+/**
+ * GENOVA AI OS — POST /api/auth/logout
+ * Destroys current session and clears cookies.
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
-import { extractToken, extractRefreshToken, deleteSession, deleteSessionByRefreshToken, clearSessionCookie } from '@/lib/session';
-import { applySecurity, secureResponse } from '@/lib/security';
+import { extractToken, extractRefreshToken, deleteSession, deleteSessionByRefreshToken, clearSessionCookie, destroySession } from '@/lib/session';
 import { db } from '@/lib/db';
 
-export async function OPTIONS(request: NextRequest) {
-  const { error } = await applySecurity(request);
-  if (error) return error;
-  return new NextResponse(null, { status: 204 });
-}
-
-export async function POST(request: NextRequest) {
-  const { auth, error: secError } = await applySecurity(request, {
-    requireAuth: true,
-  });
-  if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
-
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     // Delete the session by session token
     const token = extractToken(request);
@@ -28,23 +21,11 @@ export async function POST(request: NextRequest) {
       await deleteSessionByRefreshToken(refreshToken);
     }
 
-    await db.activityLog.create({
-      data: {
-        action: 'Logout',
-        details: '{}',
-        category: 'auth',
-        userId: auth.userId,
-      },
-    });
-
     const res = NextResponse.json({ success: true });
     clearSessionCookie(res);
-    return secureResponse(res, request);
+    return res;
   } catch {
-    const res = NextResponse.json(
-      { error: 'Logout failed' },
-      { status: 500 }
-    );
-    return secureResponse(res, request);
+    const res = NextResponse.json({ error: 'Logout failed' }, { status: 500 });
+    return res;
   }
 }

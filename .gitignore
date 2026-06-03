@@ -116,3 +116,6 @@ docker-data/
 
 # Uploaded open-source project files
 upload/
+data/pg/
+agent-ctx/
+.next/

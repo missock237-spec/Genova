@@ -1,18 +1,23 @@
 /**
- * Auth — Password Hashing & Verification with Per-User Salts
+ * Auth — Password Hashing, Verification, Token Utilities & RBAC
  *
  * Security improvements over the previous global-salt approach:
- * - Each password hash now uses a unique random salt (32 bytes)
+ * - Each password hash uses a unique random salt (32 bytes)
  * - Salt is stored within the hash string itself (format: pbkdf2:iterations:salt:hash)
  * - Legacy global-salt hashes are still supported for backward compatibility
  *   and automatically migrated on next successful login
  * - Timing-safe comparison prevents timing attacks
+ * - verifyPassword now returns { valid, needsMigration } for auto-migration
+ * - New token utilities for reset/session tokens with PBKDF2 hashing
  */
 
 import crypto from 'crypto';
+import { promisify } from 'util';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('auth');
+
+const pbkdf2Async = promisify(crypto.pbkdf2);
 
 const ITERATIONS = 100000;
 const KEY_LENGTH = 64;
@@ -56,6 +61,10 @@ function deriveKey(password: string, salt: string, iterations: number): Promise<
  * The salt is embedded in the hash so no separate storage is needed.
  */
 export async function hashPassword(password: string): Promise<string> {
+  if (!password || password.length === 0) {
+    throw new Error('Password must not be empty');
+  }
+
   const salt = generateSalt();
   const derivedKey = await deriveKey(password, salt, ITERATIONS);
   return `${PREFIX}${ITERATIONS}:${salt}:${derivedKey.toString('hex')}`;
@@ -64,13 +73,15 @@ export async function hashPassword(password: string): Promise<string> {
 /**
  * Verify a password against a stored hash.
  *
- * Supports three formats:
- * 1. Current:    pbkdf2:iterations:salt:hash (per-user salt)
- * 2. Legacy v2:  gs:iterations:hash (global AUTH_SALT)
- * 3. Legacy v1:  sha256:hash (PBKDF2 with global salt, SHA-256)
- * 4. Original:   raw hex (simple SHA-256 + hardcoded salt)
+ * Returns { valid, needsMigration } instead of just boolean.
+ * Supports multiple legacy formats for auto-migration.
  */
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+export async function verifyPassword(
+  password: string,
+  hash: string
+): Promise<{ valid: boolean; needsMigration: boolean }> {
+  if (!password || !hash) return { valid: false, needsMigration: false };
+
   // Current format: pbkdf2:iterations:salt:derivedKey
   if (hash.startsWith(PREFIX)) {
     const parts = hash.slice(PREFIX.length).split(':');
@@ -82,8 +93,11 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
       const derivedKey = await deriveKey(password, salt, iterations);
 
       const storedBuf = Buffer.from(storedKey, 'hex');
-      if (storedBuf.length !== derivedKey.length) return false;
-      return crypto.timingSafeEqual(storedBuf, derivedKey);
+      if (storedBuf.length !== derivedKey.length) return { valid: false, needsMigration: false };
+      const valid = crypto.timingSafeEqual(storedBuf, derivedKey);
+      // Needs migration if iterations are outdated
+      const needsMigration = valid && iterations < ITERATIONS;
+      return { valid, needsMigration };
     }
 
     // Fallback: old format without embedded salt (gs:iterations:hash)
@@ -95,8 +109,9 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
       const derivedKey = await deriveKey(password, salt, iterations);
 
       const storedBuf = Buffer.from(storedKey, 'hex');
-      if (storedBuf.length !== derivedKey.length) return false;
-      return crypto.timingSafeEqual(storedBuf, derivedKey);
+      if (storedBuf.length !== derivedKey.length) return { valid: false, needsMigration: false };
+      const valid = crypto.timingSafeEqual(storedBuf, derivedKey);
+      return { valid, needsMigration: valid };
     }
   }
 
@@ -110,8 +125,9 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
     const derivedKey = await deriveKey(password, salt, iterations);
 
     const storedBuf = Buffer.from(storedKey, 'hex');
-    if (storedBuf.length !== derivedKey.length) return false;
-    return crypto.timingSafeEqual(storedBuf, derivedKey);
+    if (storedBuf.length !== derivedKey.length) return { valid: false, needsMigration: false };
+    const valid = crypto.timingSafeEqual(storedBuf, derivedKey);
+    return { valid, needsMigration: valid };
   }
 
   // Legacy v1 format: sha256:hash (PBKDF2 SHA-256 with global salt)
@@ -128,8 +144,9 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 
     const legacyBuf = Buffer.from(storedKey, 'hex');
     const legacyHexBuf = Buffer.from(derivedKey.toString('hex').slice(0, storedKey.length), 'hex');
-    if (legacyBuf.length !== legacyHexBuf.length) return false;
-    return crypto.timingSafeEqual(legacyBuf, legacyHexBuf);
+    if (legacyBuf.length !== legacyHexBuf.length) return { valid: false, needsMigration: false };
+    const valid = crypto.timingSafeEqual(legacyBuf, legacyHexBuf);
+    return { valid, needsMigration: valid };
   }
 
   // Original format: simple SHA-256 + hardcoded salt (most legacy)
@@ -142,8 +159,9 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 
   const hashBuf = Buffer.from(hash, 'hex');
   const computedBuf = Buffer.from(computedHex, 'hex');
-  if (hashBuf.length !== computedBuf.length) return false;
-  return crypto.timingSafeEqual(hashBuf, computedBuf);
+  if (hashBuf.length !== computedBuf.length) return { valid: false, needsMigration: false };
+  const valid = crypto.timingSafeEqual(hashBuf, computedBuf);
+  return { valid, needsMigration: valid };
 }
 
 /**
@@ -157,6 +175,35 @@ export function needsMigration(hash: string): boolean {
     return parts.length !== 3; // Needs migration if it's the old 2-part format
   }
   return true; // All other formats need migration
+}
+
+// ─── RESET TOKEN UTILITIES ───────────────────────────────────────────────────
+
+/** Generate a cryptographically secure URL-safe reset token (48 bytes = 96 hex chars) */
+export function generateResetToken(): string {
+  return crypto.randomBytes(48).toString('hex');
+}
+
+/** Generate a session token (48 bytes = 96 hex chars) */
+export function generateSessionToken(): string {
+  return crypto.randomBytes(48).toString('hex');
+}
+
+/** PBKDF2-hash a reset token for safe storage in DB */
+export async function hashToken(token: string): Promise<string> {
+  const salt = Buffer.from('genova_token_salt_v1'); // fixed salt for tokens is acceptable
+  const hash = await pbkdf2Async(token, salt, 10000, 32, 'sha256');
+  return hash.toString('hex');
+}
+
+/** Timing-safe comparison for tokens */
+export function safeCompare(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  } catch {
+    return false;
+  }
 }
 
 // ============================================================
