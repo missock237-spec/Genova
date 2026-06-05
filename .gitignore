@@ -114,8 +114,21 @@ temp/
 # Docker volumes
 docker-data/
 
+# Services source code (sub-projects - build separately)
+services/comfyui/
+services/speechbrain/
+services/video/
+services/ruflo/
+services/baileys/
+
+# Generated/Downloaded files
+download/
+
 # Uploaded open-source project files
 upload/
-data/pg/
+data/
 agent-ctx/
 .next/
+
+# Package locks (use bun.lock only)
+package-lock.json

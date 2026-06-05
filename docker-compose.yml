@@ -1,16 +1,26 @@
 # =============================================
-# Genova AgentOS — Docker Compose Stack
+# Genova AgentOS — Docker Compose Stack v2
 # =============================================
-# Production-ready microservice stack for all integrations
-# Start with: docker compose up -d
+# Architecture 3-tier:
+#   Tier 1: Genova Backend (Next.js + Prisma + BullMQ)
+#   Tier 2: API IA / Orchestration (Ruflo, n8n, PocketBase)
+#   Tier 3: GPU Server (ComfyUI, SpeechBrain, Video API)
+#
+# Heavy AI models DO NOT run on the backend server.
+# They run on a separate GPU server (Tier 3).
+#
+# Start backend + infra:  docker compose up -d
+# Start GPU server:       docker compose -f docker-compose.gpu.yml up -d
 # =============================================
 
 version: "3.9"
 
 services:
   # =============================================
-  # PostgreSQL — Primary Database
+  # TIER 1: Genova Backend Infrastructure
   # =============================================
+
+  # PostgreSQL — Primary Database
   postgres:
     image: postgres:16-alpine
     container_name: genova-postgres
@@ -29,16 +39,30 @@ services:
       timeout: 5s
       retries: 5
 
-  # =============================================
-  # Qdrant — Vector Database
-  # =============================================
+  # Redis — BullMQ Job Queue + Cache + Rate Limiting
+  redis:
+    image: redis:7-alpine
+    container_name: genova-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Qdrant — Vector Database (for RAG / embeddings)
   qdrant:
     image: qdrant/qdrant:latest
     container_name: genova-qdrant
     restart: unless-stopped
     ports:
-      - "6333:6333"  # REST API
-      - "6334:6334"  # gRPC API
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     environment:
@@ -50,8 +74,10 @@ services:
       retries: 5
 
   # =============================================
-  # PocketBase — Lightweight Backend
+  # TIER 2: API IA / Orchestration
   # =============================================
+
+  # PocketBase — Lightweight Backend
   pocketbase:
     image: ghcr.io/muchobien/pocketbase:latest
     container_name: genova-pocketbase
@@ -68,98 +94,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # =============================================
-  # Baileys — WhatsApp Web API
-  # =============================================
-  baileys:
-    build:
-      context: ./services/baileys
-      dockerfile: Dockerfile
-    container_name: genova-baileys
-    restart: unless-stopped
-    ports:
-      - "8186:8186"
-    volumes:
-      - baileys_auth:/app/auth_info
-    environment:
-      PORT: 8186
-      NODE_ENV: production
-
-  # =============================================
-  # SpeechBrain — ASR Server
-  # =============================================
-  speechbrain:
-    build:
-      context: ./services/speechbrain
-      dockerfile: Dockerfile
-    container_name: genova-speechbrain
-    restart: unless-stopped
-    ports:
-      - "8187:8187"
-    volumes:
-      - speechbrain_models:/app/models
-    environment:
-      PORT: 8187
-      MODEL: speechbrain/asr-conformer-transformerlm-librispeech
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-  # =============================================
-  # ComfyUI — Image Generation
-  # =============================================
-  comfyui:
-    build:
-      context: ./services/comfyui
-      dockerfile: Dockerfile
-    container_name: genova-comfyui
-    restart: unless-stopped
-    ports:
-      - "8188:8188"
-    volumes:
-      - comfyui_models:/app/models
-      - comfyui_output:/app/output
-    environment:
-      PORT: 8188
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-  # =============================================
-  # Video API Server — CogVideo/VideoCrafter
-  # =============================================
-  video-api:
-    build:
-      context: ./services/video
-      dockerfile: Dockerfile
-    container_name: genova-video-api
-    restart: unless-stopped
-    ports:
-      - "8189:8189"
-    volumes:
-      - video_models:/app/models
-      - video_output:/app/output
-    environment:
-      PORT: 8189
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-  # =============================================
   # Ruflo — MCP Agent Orchestration
-  # =============================================
   ruflo:
     build:
       context: ./services/ruflo
@@ -171,10 +106,15 @@ services:
     environment:
       PORT: 8190
       NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://genova:genova_secret@postgres:5432/genova
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
-  # =============================================
   # n8n — Workflow Automation
-  # =============================================
   n8n:
     image: n8nio/n8n:latest
     container_name: genova-n8n
@@ -192,11 +132,71 @@ services:
       N8N_PROTOCOL: http
       WEBHOOK_URL: http://localhost:5678/
 
+  # Baileys — WhatsApp Web API
+  baileys:
+    build:
+      context: ./services/baileys
+      dockerfile: Dockerfile
+    container_name: genova-baileys
+    restart: unless-stopped
+    ports:
+      - "8186:8186"
+    volumes:
+      - baileys_auth:/app/auth_info
+    environment:
+      PORT: 8186
+      NODE_ENV: production
+
+  # =============================================
+  # TIER 3: Monitoring Stack
+  # =============================================
+
+  # Prometheus — Metrics Collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: genova-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=5GB'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # Grafana — Dashboards & Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: genova-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: genova_grafana
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/genova-overview.json
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
 # =============================================
 # Volumes
 # =============================================
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
     driver: local
   qdrant_data:
     driver: local
@@ -204,15 +204,9 @@ volumes:
     driver: local
   baileys_auth:
     driver: local
-  speechbrain_models:
-    driver: local
-  comfyui_models:
-    driver: local
-  comfyui_output:
-    driver: local
-  video_models:
-    driver: local
-  video_output:
-    driver: local
   n8n_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
     driver: local

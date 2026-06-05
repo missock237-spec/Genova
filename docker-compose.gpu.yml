@@ -1,0 +1,123 @@
+# =============================================
+# Genova AgentOS — GPU Server Docker Compose
+# =============================================
+# Architecture: Tier 3 — GPU Server
+# This file should run on a SEPARATE server with GPU access.
+# Heavy AI models (ComfyUI, SpeechBrain, Video) run here.
+#
+# Genova Backend communicates with these services via API:
+#
+#   Genova Backend  →  API IA (Ruflo)  →  GPU Server
+#        ↓                                    ↓
+#   BullMQ Queue                     ComfyUI / SpeechBrain / Video
+#
+# Start: docker compose -f docker-compose.gpu.yml up -d
+# =============================================
+
+version: "3.9"
+
+services:
+  # =============================================
+  # ComfyUI — Image Generation (GPU Required)
+  # =============================================
+  comfyui:
+    build:
+      context: ./services/comfyui
+      dockerfile: Dockerfile
+    container_name: genova-comfyui
+    restart: unless-stopped
+    ports:
+      - "8188:8188"
+    volumes:
+      - comfyui_models:/app/models
+      - comfyui_output:/app/output
+    environment:
+      PORT: 8188
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # =============================================
+  # SpeechBrain — ASR Server (GPU Required)
+  # =============================================
+  speechbrain:
+    build:
+      context: ./services/speechbrain
+      dockerfile: Dockerfile
+    container_name: genova-speechbrain
+    restart: unless-stopped
+    ports:
+      - "8187:8187"
+    volumes:
+      - speechbrain_models:/app/models
+    environment:
+      PORT: 8187
+      MODEL: speechbrain/asr-conformer-transformerlm-librispeech
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8187/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # =============================================
+  # Video API Server — CogVideo/VideoCrafter (GPU Required)
+  # =============================================
+  video-api:
+    build:
+      context: ./services/video
+      dockerfile: Dockerfile
+    container_name: genova-video-api
+    restart: unless-stopped
+    ports:
+      - "8189:8189"
+    volumes:
+      - video_models:/app/models
+      - video_output:/app/output
+    environment:
+      PORT: 8189
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8189/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+# =============================================
+# Volumes
+# =============================================
+volumes:
+  comfyui_models:
+    driver: local
+  comfyui_output:
+    driver: local
+  speechbrain_models:
+    driver: local
+  video_models:
+    driver: local
+  video_output:
+    driver: local

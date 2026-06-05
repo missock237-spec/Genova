@@ -1,0 +1,15 @@
+[Unit]
+Description=PocketBase for Genova SaaS
+After=network.target
+
+[Service]
+Type=simple
+User=z
+WorkingDirectory=/home/z/my-project/services/pocketbase
+ExecStart=/home/z/my-project/services/pocketbase/pocketbase serve --http=0.0.0.0:8090
+Restart=on-failure
+RestartSec=5
+Environment=PB_ENCRYPTION_KEY=genova-pb-2024-secure-key
+
+[Install]
+WantedBy=default.target

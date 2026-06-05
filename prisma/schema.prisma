@@ -40,6 +40,7 @@ model User {
   monitoringEvents MonitoringEvent[]
   emailVerifications EmailVerification[]
   imageGenerations  ImageGeneration[]
+  videoGenerations  VideoGeneration[]
   memories          AgentMemory[]
   conversations     Conversation[]
   knowledgeEntries  Knowledge[]
@@ -479,6 +480,33 @@ model ImageGeneration {
   @@index([userId, createdAt])
   @@index([provider, createdAt])
   @@map("image_generations")
+}
+
+// ============================================================
+// Video Generation — Track AI-generated videos
+// ============================================================
+
+model VideoGeneration {
+  id              String   @id @default(cuid())
+  userId          String
+  prompt          String                          // The text prompt used
+  model           String                          // Model used for generation
+  provider        String   @default("cogvideo")   // Provider (cogvideo, replicate, etc.)
+  videoUrl        String?                         // URL to generated video
+  status          String   @default("pending")    // pending, processing, completed, failed
+  costUsd         Float    @default(0)
+  duration        Float?                          // Video duration in seconds
+  fps             Int?                            // Frames per second
+  resolution      String?                         // e.g. "480x480"
+  metadata        String   @default("{}")         // JSON metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([provider, createdAt])
+  @@map("video_generations")
 }
 
 // ============================================================
