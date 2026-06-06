@@ -319,4 +319,12 @@ export async function generateWithComfyUI(options: ComfyUIGenerateOptions): Prom
   };
 }
 
+export function getComfyUIClient() {
+  return {
+    health: checkComfyUIHealth,
+    getModels: getAvailableModels,
+    generate: generateWithComfyUI,
+  };
+}
+
 export { COMFYUI_URL, DEFAULT_CHECKPOINT };

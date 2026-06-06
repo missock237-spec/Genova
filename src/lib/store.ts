@@ -34,7 +34,7 @@ interface AppState {
   fetchApprovalCount: () => Promise<void>;
 }
 
-const STORAGE_KEY = 'agentos_user';
+const STORAGE_KEY = 'genova_user';
 
 function getStoredUser(): User | null {
   if (typeof window === 'undefined') return null;

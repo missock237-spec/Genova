@@ -101,7 +101,7 @@ function VideoGeneratorTab() {
   const fetchVideos = useCallback(async () => {
     try {
       const res = await fetch('/api/videos/generate', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('agentos_token') || ''}` },
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('genova_token') || ''}` },
       });
       if (res.ok) {
         const data = await res.json();
@@ -121,7 +121,7 @@ function VideoGeneratorTab() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('agentos_token') || ''}`,
+          'Authorization': `Bearer ${localStorage.getItem('genova_token') || ''}`,
         },
         body: JSON.stringify({
           prompt: prompt.trim(),
@@ -147,7 +147,7 @@ function VideoGeneratorTab() {
     try {
       const res = await fetch(`/api/videos/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('agentos_token') || ''}` },
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('genova_token') || ''}` },
       });
       if (res.ok) fetchVideos();
     } catch { /* silent */ }
@@ -317,7 +317,7 @@ function ImageGeneratorTab() {
   const fetchImages = useCallback(async () => {
     try {
       const res = await fetch('/api/images/generate', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('agentos_token') || ''}` },
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('genova_token') || ''}` },
       });
       if (res.ok) {
         const data = await res.json();
@@ -337,7 +337,7 @@ function ImageGeneratorTab() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('agentos_token') || ''}`,
+          'Authorization': `Bearer ${localStorage.getItem('genova_token') || ''}`,
         },
         body: JSON.stringify({ prompt: prompt.trim(), model }),
       });
@@ -358,7 +358,7 @@ function ImageGeneratorTab() {
     try {
       const res = await fetch(`/api/images/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('agentos_token') || ''}` },
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('genova_token') || ''}` },
       });
       if (res.ok) fetchImages();
     } catch { /* silent */ }

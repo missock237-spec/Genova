@@ -394,4 +394,25 @@ export async function initializeGenovaCollections(): Promise<void> {
   }
 }
 
+export const pocketBase = {
+  health: checkPocketBaseHealth,
+  getBaseUrl: () => POCKETBASE_URL,
+  isAuthenticated: () => !!authToken,
+  authenticateAdmin,
+  listCollections,
+  createCollection,
+  listRecords,
+  getRecord,
+  createRecord,
+  updateRecord,
+  deleteRecord,
+  storeAgentMemory,
+  getAgentMemories,
+  searchAgentMemories,
+  storeAgentLearning,
+  getAgentLearnings,
+  incrementLearningUsage,
+  initializeGenovaCollections,
+};
+
 export { POCKETBASE_URL };

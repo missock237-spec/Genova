@@ -1,7 +1,7 @@
 #!/bin/bash
-# Genova AgentOS — Stop All Services
+# Genova Genova — Stop All Services
 
-echo "🛑 Stopping Genova AgentOS Services..."
+echo "🛑 Stopping Genova Genova Services..."
 
 # Stop n8n
 pkill -f "n8n start" 2>/dev/null

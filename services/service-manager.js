@@ -2,7 +2,7 @@
 /**
  * Genova Service Manager — Persistent Process Manager
  *
- * Starts and monitors all microservices for Genova AgentOS.
+ * Starts and monitors all microservices for Genova Genova.
  * Runs as a daemon that keeps all services alive.
  *
  * Usage: node service-manager.js [start|stop|status]
@@ -192,7 +192,7 @@ async function checkServiceHealth(service) {
 
 async function cmdStart() {
   console.log('=============================================');
-  console.log(' Genova AgentOS — Service Manager');
+  console.log(' Genova Genova — Service Manager');
   console.log('=============================================\n');
 
   // Write PID file

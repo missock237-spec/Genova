@@ -43,7 +43,7 @@ function AppContent() {
   // Listen for storage events (cross-tab logout)
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'agentos_user' && !e.newValue) {
+      if (e.key === 'genova_user' && !e.newValue) {
         useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
       }
     };

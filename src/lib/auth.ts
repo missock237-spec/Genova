@@ -151,7 +151,7 @@ export async function verifyPassword(
 
   // Original format: simple SHA-256 + hardcoded salt (most legacy)
   const encoder = new TextEncoder();
-  const data = encoder.encode(password + 'agentos-salt-2024');
+  const data = encoder.encode(password + 'genova-salt-2024');
   const computed = await crypto.subtle.digest('SHA-256', data);
   const computedHex = Array.from(new Uint8Array(computed))
     .map((b) => b.toString(16).padStart(2, '0'))

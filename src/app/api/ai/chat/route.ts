@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     const messages = [
       {
         role: 'system' as const,
-        content: `Tu es l'assistant AgentOS, un IA qui aide les utilisateurs à contrôler leur système d'agents IA. Tu parles en français. Tu aides à comprendre les commandes en langage naturel et à les transformer en actions. Tu es concis et professionnel. Réponds toujours en français.`,
+        content: `Tu es l'assistant Genova, un IA qui aide les utilisateurs à contrôler leur système d'agents IA. Tu parles en français. Tu aides à comprendre les commandes en langage naturel et à les transformer en actions. Tu es concis et professionnel. Réponds toujours en français.`,
       },
       ...validatedHistory.map((m) => ({
         role: m.role as 'user' | 'assistant',

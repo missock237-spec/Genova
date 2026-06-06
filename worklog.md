@@ -14,7 +14,7 @@ Work Log:
 - Created GenovaLogo component (src/components/ui/genova-logo.tsx) with green "G" and "genova.Ia" text
 - Updated auth-form.tsx: replaced Cpu icon with GenovaLogo, shows "genova.Ia" text (full text on register tab)
 - Updated app-sidebar.tsx: replaced Cpu icon with GenovaLogo (compact mode)
-- Updated app-header.tsx: default title changed from "AgentOS" to "genova.Ia"
+- Updated app-header.tsx: default title changed from "Genova" to "genova.Ia"
 - Updated app/page.tsx: loading screen shows GenovaLogo
 - Updated layout.tsx: title, description, keywords, authors, icons all updated for genova.Ia branding
 - Created SVG favicon (src/app/icon.svg) with green G
@@ -64,7 +64,7 @@ Stage Summary:
 
 ---
 Task ID: auth-system-v2
-Agent: Super Z (main)
+Agent: Genova AI (main)
 Task: Replace auth system with new design from genova-auth-system.zip
 
 Work Log:

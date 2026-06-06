@@ -1,5 +1,5 @@
 #!/bin/bash
-# n8n Workflow Engine for Genova AgentOS
+# n8n Workflow Engine for Genova Genova
 # Runs on port 5678 with data stored locally
 
 export N8N_PORT=5678

@@ -150,7 +150,7 @@ class BaileysWhatsAppService {
         markOnlineOnConnect: true,
         connectTimeoutMs: 30_000,
         defaultQueryTimeoutMs: 30_000,
-        browser: ['Genova AgentOS', 'Chrome', '121.0.0'],
+        browser: ['Genova Genova', 'Chrome', '121.0.0'],
       });
 
       // Wire up event handlers
