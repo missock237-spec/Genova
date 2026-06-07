@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================
-# Genova Genova - PostgreSQL Startup Script
+# Genova - PostgreSQL Startup Script
 # =============================================
 # Starts the user-space PostgreSQL instance required
 # for the Genova SaaS authentication and data storage.

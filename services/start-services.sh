@@ -1,5 +1,5 @@
 #!/bin/bash
-# Genova Genova — Start All Services
+# Genova — Start All Services
 # Uses double-fork to fully detach from parent process
 
 LOG_DIR="/tmp/genova-logs"

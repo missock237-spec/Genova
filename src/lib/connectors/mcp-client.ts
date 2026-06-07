@@ -427,7 +427,7 @@ export class MCPClient {
           prompts: { listChanged: true },
         },
         clientInfo: {
-          name: 'Genova Genova',
+          name: 'Genova',
           version: '1.0.0',
         },
       });

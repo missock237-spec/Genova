@@ -1,5 +1,5 @@
 #!/bin/bash
-# n8n Workflow Engine for Genova Genova
+# n8n Workflow Engine for Genova
 # Runs on port 5678 with data stored locally
 
 export N8N_PORT=5678

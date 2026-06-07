@@ -1,5 +1,5 @@
 # =============================================
-# Genova Genova — Docker Compose Stack v2
+# Genova — Docker Compose Stack v2
 # =============================================
 # Architecture 3-tier:
 #   Tier 1: Genova Backend (Next.js + Prisma + BullMQ)

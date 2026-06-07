@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Genova Genova - Rapport d'audit de securite complet (3 passes)"""
+"""Genova - Rapport d'audit de securite complet (3 passes)"""
 import os
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch, cm
@@ -131,7 +131,7 @@ story = []
 
 # ===== COVER PAGE =====
 story.append(Spacer(1, 120))
-story.append(Paragraph('<b>Genova Genova</b>', title_style))
+story.append(Paragraph('<b>Genova</b>', title_style))
 story.append(Spacer(1, 12))
 story.append(Paragraph('Rapport d\'Audit de Securite Complet', subtitle_style))
 story.append(Paragraph('Analyse en 3 Passes - Securite, Logique Metier, Frontend', subtitle_style))

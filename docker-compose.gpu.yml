@@ -1,5 +1,5 @@
 # =============================================
-# Genova Genova — GPU Server Docker Compose
+# Genova — GPU Server Docker Compose
 # =============================================
 # Architecture: Tier 3 — GPU Server
 # This file should run on a SEPARATE server with GPU access.
