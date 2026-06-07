@@ -1,5 +1,5 @@
 /**
- * Centralized Logger — Structured logging for Genova AgentOS
+ * Centralized Logger — Structured logging for Genova Genova
  *
  * Replaces raw console.log / console.error throughout the codebase.
  * Provides leveled logging (debug, info, warn, error) with structured

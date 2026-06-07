@@ -31,7 +31,7 @@ export interface WorkspaceResult {
   id: string;
   name: string;
   slug: string;
-  description: string;
+  description: string | null;
   icon: string | null;
   settings: Record<string, unknown>;
   isActive: boolean;

@@ -2,7 +2,6 @@
 
 import { useEffect, useRef } from 'react';
 import { useAuthStore, useAppStore } from '@/lib/store';
-import { AuthForm } from '@/components/auth/auth-form';
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { AppHeader } from '@/components/layout/app-header';
 import { DashboardView } from '@/components/dashboard/dashboard-view';
@@ -44,7 +43,7 @@ function AppContent() {
   // Listen for storage events (cross-tab logout)
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'agentos_user' && !e.newValue) {
+      if (e.key === 'genova_user' && !e.newValue) {
         useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
       }
     };
@@ -52,8 +51,15 @@ function AppContent() {
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
-  // Show loading spinner while validating session
-  if (isLoading && !validatedRef.current) {
+  // If not authenticated and not loading, redirect to login page
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated && validatedRef.current) {
+      window.location.href = '/login';
+    }
+  }, [isLoading, isAuthenticated]);
+
+  // Show loading spinner while validating session or redirecting
+  if (isLoading || !isAuthenticated || !validatedRef.current) {
     return (
       <div className="min-h-screen flex items-center justify-center gradient-bg grid-pattern">
         <div className="flex flex-col items-center gap-4">
@@ -65,16 +71,12 @@ function AppContent() {
     );
   }
 
-  // Check if email not verified — redirect to verify-email page
+  // Check if email not verified — redirect to login with error
   if (isAuthenticated && user && user.isEmailVerified === false) {
     if (typeof window !== 'undefined') {
       window.location.href = '/login?error=email_not_verified';
     }
     return null;
-  }
-
-  if (!isAuthenticated) {
-    return <AuthForm />;
   }
 
   return (

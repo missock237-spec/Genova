@@ -104,7 +104,7 @@ export async function addReview(options: AddReviewOptions): Promise<ReviewResult
 
   // Check if user already reviewed this listing
   const existing = await db.marketplaceReview.findUnique({
-    where: { listingId_userId: { listingId, userId } },
+    where: { userId_listingId: { listingId, userId } },
   });
 
   if (existing) {

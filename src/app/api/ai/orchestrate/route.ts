@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       [
         {
           role: 'system',
-          content: `Tu es l'orchestrateur AgentOS. Tu analyses les commandes en langage naturel et les transforme en plans d'action utilisant les agents IA disponibles. Réponds TOUJOURS en JSON valide avec cette structure:
+          content: `Tu es l'orchestrateur Genova. Tu analyses les commandes en langage naturel et les transforme en plans d'action utilisant les agents IA disponibles. Réponds TOUJOURS en JSON valide avec cette structure:
 {
   "understanding": "Compréhension de la demande",
   "steps": [

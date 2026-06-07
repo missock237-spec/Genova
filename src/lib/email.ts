@@ -31,12 +31,12 @@ interface EmailOptions {
   tags?: Array<{ name: string; value: string }>;
 }
 
-const DEFAULT_FROM = 'Genova AgentOS <onboarding@resend.dev>';
+const DEFAULT_FROM = 'Genova Genova <onboarding@resend.dev>';
 
 /**
  * Récupère l'adresse d'expédition configurée.
  * En production avec un domaine vérifié Resend, utiliser :
- *   'Genova AgentOS <noreply@votre-domaine.com>'
+ *   'Genova Genova <noreply@votre-domaine.com>'
  */
 function getFromAddress(): string {
   return process.env.EMAIL_FROM || DEFAULT_FROM;
@@ -179,10 +179,10 @@ export async function sendVerificationEmail(
   code: string,
   userName?: string
 ): Promise<EmailResult> {
-  return sendEmail(to, 'Vérifiez votre adresse email — Genova AgentOS', `
+  return sendEmail(to, 'Vérifiez votre adresse email — Genova Genova', `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="text-align: center; margin-bottom: 32px;">
-        <h1 style="color: #f5f5f5; font-size: 24px; font-weight: 700;">Genova AgentOS</h1>
+        <h1 style="color: #f5f5f5; font-size: 24px; font-weight: 700;">Genova Genova</h1>
       </div>
       <div style="background: #1a1a2e; border-radius: 12px; padding: 32px; border: 1px solid #2a2a4a;">
         <h2 style="color: #e0e0e0; margin-top: 0;">Vérification de votre email</h2>
@@ -194,10 +194,10 @@ export async function sendVerificationEmail(
           ${code}
         </div>
         <p style="color: #808090; font-size: 13px;">Ce code expire dans 15 minutes.</p>
-        <p style="color: #808090; font-size: 13px;">Si vous n'avez pas créé de compte Genova AgentOS, veuillez ignorer cet email.</p>
+        <p style="color: #808090; font-size: 13px;">Si vous n'avez pas créé de compte Genova Genova, veuillez ignorer cet email.</p>
       </div>
       <p style="text-align: center; color: #606070; font-size: 12px; margin-top: 24px;">
-        Genova AgentOS — AI Operating System
+        Genova Genova — AI Operating System
       </p>
     </div>
   `, {
@@ -212,10 +212,10 @@ export async function sendPasswordResetEmail(
   to: string,
   code: string
 ): Promise<EmailResult> {
-  return sendEmail(to, 'Code de réinitialisation — Genova AgentOS', `
+  return sendEmail(to, 'Code de réinitialisation — Genova Genova', `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="text-align: center; margin-bottom: 32px;">
-        <h1 style="color: #f5f5f5; font-size: 24px; font-weight: 700;">Genova AgentOS</h1>
+        <h1 style="color: #f5f5f5; font-size: 24px; font-weight: 700;">Genova Genova</h1>
       </div>
       <div style="background: #1a1a2e; border-radius: 12px; padding: 32px; border: 1px solid #2a2a4a;">
         <h2 style="color: #e0e0e0; margin-top: 0;">Réinitialisation du mot de passe</h2>
@@ -229,7 +229,7 @@ export async function sendPasswordResetEmail(
         <p style="color: #808090; font-size: 13px;">Si vous n'avez pas demandé cette réinitialisation, veuillez ignorer cet email.</p>
       </div>
       <p style="text-align: center; color: #606070; font-size: 12px; margin-top: 24px;">
-        Genova AgentOS — AI Operating System
+        Genova Genova — AI Operating System
       </p>
     </div>
   `, {
@@ -244,15 +244,15 @@ export async function sendWelcomeEmail(
   to: string,
   userName: string
 ): Promise<EmailResult> {
-  return sendEmail(to, 'Bienvenue sur Genova AgentOS !', `
+  return sendEmail(to, 'Bienvenue sur Genova Genova !', `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="text-align: center; margin-bottom: 32px;">
-        <h1 style="color: #f5f5f5; font-size: 24px; font-weight: 700;">Genova AgentOS</h1>
+        <h1 style="color: #f5f5f5; font-size: 24px; font-weight: 700;">Genova Genova</h1>
       </div>
       <div style="background: #1a1a2e; border-radius: 12px; padding: 32px; border: 1px solid #2a2a4a;">
         <h2 style="color: #e0e0e0; margin-top: 0;">Bienvenue, ${userName} !</h2>
         <p style="color: #a0a0b0; font-size: 15px;">
-          Votre compte Genova AgentOS a été créé avec succès. Vous pouvez maintenant :
+          Votre compte Genova Genova a été créé avec succès. Vous pouvez maintenant :
         </p>
         <ul style="color: #a0a0b0; font-size: 14px; line-height: 2;">
           <li>Créer et gérer vos agents IA</li>
@@ -266,7 +266,7 @@ export async function sendWelcomeEmail(
         </a>
       </div>
       <p style="text-align: center; color: #606070; font-size: 12px; margin-top: 24px;">
-        Genova AgentOS — AI Operating System
+        Genova Genova — AI Operating System
       </p>
     </div>
   `, {

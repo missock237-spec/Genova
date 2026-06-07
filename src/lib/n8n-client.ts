@@ -362,4 +362,25 @@ export async function createAgentWorkflow(
   });
 }
 
+export function getN8nClient() {
+  return {
+    health: checkN8NHealth,
+    listWorkflows: async () => {
+      const res = await listWorkflows();
+      return res.data;
+    },
+    getWorkflow,
+    createWorkflow,
+    updateWorkflow,
+    deleteWorkflow,
+    activateWorkflow,
+    deactivateWorkflow,
+    listExecutions,
+    getExecution,
+    deleteExecution,
+    listCredentialTypes,
+    createAgentWorkflow,
+  };
+}
+
 export { N8N_API_URL, N8N_API_KEY };

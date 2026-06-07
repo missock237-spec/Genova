@@ -22,11 +22,11 @@ export interface PurchaseResult {
   id: string;
   listingId: string;
   userId: string;
-  amount: number;
+  price: number;
   currency: string;
   status: string;
   metadata: Record<string, unknown>;
-  purchasedAt: Date;
+  createdAt: Date;
   listing?: {
     name: string;
     type: string;
@@ -64,7 +64,7 @@ export async function purchaseListing(options: PurchaseOptions): Promise<Purchas
 
   // Check if already purchased
   const existingPurchase = await db.marketplacePurchase.findUnique({
-    where: { listingId_userId: { listingId, userId } },
+    where: { userId_listingId: { listingId, userId } },
   });
 
   if (existingPurchase) {
@@ -73,11 +73,11 @@ export async function purchaseListing(options: PurchaseOptions): Promise<Purchas
       id: existingPurchase.id,
       listingId: existingPurchase.listingId,
       userId: existingPurchase.userId,
-      amount: existingPurchase.amount,
+      price: existingPurchase.price,
       currency: existingPurchase.currency,
       status: existingPurchase.status,
       metadata: safeParse<Record<string, unknown>>(existingPurchase.metadata, {}),
-      purchasedAt: existingPurchase.purchasedAt,
+      createdAt: existingPurchase.createdAt,
       listing: {
         name: listing.name,
         type: listing.type,
@@ -91,7 +91,7 @@ export async function purchaseListing(options: PurchaseOptions): Promise<Purchas
     data: {
       listingId,
       userId,
-      amount: 0,
+      price: 0,
       currency: listing.currency,
       status: 'completed',
       metadata: JSON.stringify({ type: 'free', license: 'standard' }),
@@ -108,11 +108,11 @@ export async function purchaseListing(options: PurchaseOptions): Promise<Purchas
     id: purchase.id,
     listingId: purchase.listingId,
     userId: purchase.userId,
-    amount: purchase.amount,
+    price: purchase.price,
     currency: purchase.currency,
     status: purchase.status,
     metadata: safeParse<Record<string, unknown>>(purchase.metadata, {}),
-    purchasedAt: purchase.purchasedAt,
+    createdAt: purchase.createdAt,
     listing: {
       name: listing.name,
       type: listing.type,
@@ -140,7 +140,7 @@ export async function verifyAccess(userId: string, listingId: string): Promise<b
 
   // Check purchase record
   const purchase = await db.marketplacePurchase.findUnique({
-    where: { listingId_userId: { listingId, userId } },
+    where: { userId_listingId: { listingId, userId } },
   });
 
   return purchase !== null && purchase.status === 'completed';
@@ -159,7 +159,7 @@ export async function getPurchaseHistory(
   const [purchases, total] = await Promise.all([
     db.marketplacePurchase.findMany({
       where: { userId },
-      orderBy: { purchasedAt: 'desc' },
+      orderBy: { createdAt: 'desc' },
       skip: (page - 1) * limit,
       take: limit,
       include: {
@@ -174,11 +174,11 @@ export async function getPurchaseHistory(
       id: p.id,
       listingId: p.listingId,
       userId: p.userId,
-      amount: p.amount,
+      price: p.price,
       currency: p.currency,
       status: p.status,
       metadata: safeParse<Record<string, unknown>>(p.metadata, {}),
-      purchasedAt: p.purchasedAt,
+      createdAt: p.createdAt,
       listing: {
         name: p.listing.name,
         type: p.listing.type,

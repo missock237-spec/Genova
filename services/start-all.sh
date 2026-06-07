@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================
-# Genova AgentOS — Start All Microservices
+# Genova Genova — Start All Microservices
 # =============================================
 # Starts all integration microservices for local development.
 # For production, use: docker compose up -d
@@ -14,7 +14,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 echo -e "${GREEN}=================================${NC}"
-echo -e "${GREEN} Genova AgentOS — Service Starter${NC}"
+echo -e "${GREEN} Genova Genova — Service Starter${NC}"
 echo -e "${GREEN}=================================${NC}"
 echo ""
 

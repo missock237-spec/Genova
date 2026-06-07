@@ -372,7 +372,7 @@ async function fetchWebContent(url: string, cssSelector?: string): Promise<strin
   try {
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Genova-AgentOS-Monitor/1.0',
+        'User-Agent': 'Genova-Genova-Monitor/1.0',
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
       signal: AbortSignal.timeout(15000), // 15 second timeout

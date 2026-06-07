@@ -401,7 +401,7 @@ export async function generateVideo(
       model: updated.model,
       provider: updated.provider,
       costUsd,
-      durationSeconds: updated.durationSeconds,
+      durationSeconds: updated.durationSeconds || 0,
       metadata: JSON.parse(updated.metadata || '{}'),
     };
   } catch (error) {

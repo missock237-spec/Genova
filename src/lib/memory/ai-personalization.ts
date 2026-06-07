@@ -25,7 +25,7 @@ export interface UserStyle {
   tonePreferences: Record<string, number>;
   topicInterests: string[];
   languagePreference: string;
-  customInstructions: string;
+  customInstructions: string | null;
   adaptationScore: number;
   totalInteractions: number;
 }
@@ -48,7 +48,7 @@ export interface AdaptedResponse {
   length: string;
   tone: string;
   language: string;
-  customAdditions: string;
+  customAdditions: string | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -80,7 +80,7 @@ function addSecurityHeaders(response: NextResponse): void {
   response.headers.set('X-XSS-Protection', '1; mode=block');
 }
 
-export default function proxy(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const origin = request.headers.get('origin');
 

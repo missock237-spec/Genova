@@ -1,5 +1,5 @@
 /**
- * AI Integration Server — Genova AgentOS
+ * AI Integration Server — Genova Genova
  *
  * The central orchestrator that ties together:
  * - Code Analyzer: Deep AI analysis of open-source project code

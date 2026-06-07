@@ -7,7 +7,8 @@
 'use client';
 
 import { type ReactNode } from 'react';
-import { AnimatedBackground, FeaturesPanel, ShieldCheck } from './shared';
+import { AnimatedBackground, FeaturesPanel } from './shared';
+import { GenovaLogo } from '@/components/ui/genova-logo';
 
 interface AuthLayoutProps {
   title: string;
@@ -36,11 +37,7 @@ export function AuthLayout({ title, subtitle, children }: AuthLayoutProps) {
             {/* Logo + Brand */}
             <div className="mb-8 space-y-1">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/30">
-                  <ShieldCheck className="w-5 h-5 text-white" />
-                </div>
-                <span className="text-lg font-bold tracking-tight text-white">Genova</span>
-                <span className="text-xs text-cyan-400/70 font-mono tracking-widest uppercase">AI OS</span>
+                <GenovaLogo size="sm" showText={true} compact={true} />
               </div>
               <h1 className="text-2xl font-bold text-white tracking-tight">{title}</h1>
               {subtitle && <p className="text-sm text-slate-400">{subtitle}</p>}
