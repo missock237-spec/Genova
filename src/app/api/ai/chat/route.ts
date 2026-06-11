@@ -92,6 +92,25 @@ export async function POST(request: NextRequest) {
       { role: 'user' as const, content: message },
     ];
 
+    // ── 3. Deduct Credits (PRD Requirement 13/14) ───────────────────────────
+    const { deductCredits, CREDIT_COSTS } = await import('@/lib/billing/credits');
+    const creditCheck = await deductCredits({
+      userId: auth.userId,
+      amount: CREDIT_COSTS.token, // 1 credit per 1K tokens (approximate for this simplified call)
+      resourceType: 'token',
+      description: `Chat IA: ${message.slice(0, 30)}...`,
+    });
+
+    if (!creditCheck.success) {
+      return secureResponse(
+        NextResponse.json({
+          error: 'Crédits insuffisants',
+          message: 'Vous avez épuisé vos 500 crédits quotidiens. Revenez demain ou passez au plan Pro !'
+        }, { status: 403 }),
+        request
+      );
+    }
+
     const response = await router.chat(messages, { model: 'default' });
 
     const res = NextResponse.json({
@@ -100,6 +119,7 @@ export async function POST(request: NextRequest) {
       provider: response.provider,
       model: response.model,
       costUsd: response.costUsd,
+      remainingCredits: creditCheck.newBalance,
     });
     return secureResponse(res, request);
   } catch (error: unknown) {

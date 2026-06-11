@@ -282,10 +282,10 @@ export async function initializeUserCredits(userId: string): Promise<void> {
 
   await addCredits({
     userId,
-    amount: 100, // Free tier: 100 credits
+    amount: 500, // Free tier: 500 credits
     type: 'bonus',
     resourceType: 'plan_upgrade',
-    description: 'Welcome bonus: 100 free credits',
+    description: 'Welcome bonus: 500 free credits',
     metadata: { plan: 'free' },
   });
 

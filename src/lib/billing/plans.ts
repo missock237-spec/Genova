@@ -67,7 +67,7 @@ export const PLANS: Plan[] = [
     price: 0,
     currency: 'usd',
     interval: 'month',
-    credits: 100,
+    credits: 500,
     stripePriceId: '',
     features: [
       { name: '2 AI Agents', included: true, limit: 2 },
@@ -225,7 +225,7 @@ export const CREDIT_PACKAGES: CreditPackage[] = [
   {
     id: 'credits_100',
     name: '100 Credits',
-    credits: 100,
+    credits: 500,
     price: 4.99,
     currency: 'usd',
     stripePriceId: process.env.STRIPE_CREDITS_100_PRICE_ID || 'price_credits_100',
@@ -265,7 +265,7 @@ export const CREDIT_PACKAGES: CreditPackage[] = [
 // ---------------------------------------------------------------------------
 
 export const PLAN_CREDITS: Record<string, number> = {
-  free: 100,
+  free: 500,
   starter: 1000,
   pro: 5000,
   enterprise: -1, // Unlimited
