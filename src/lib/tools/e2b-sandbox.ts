@@ -233,9 +233,6 @@ export function createSandbox(type?: SandboxType): SandboxManager {
     case 'e2b':
       return new E2BSandbox();
     case 'docker': {
-      // Use require to avoid circular dependency and type conflicts
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { DockerSandboxAdapter } = require('./sandbox') as typeof import('./sandbox');
       return new DockerSandboxAdapter() as unknown as SandboxManager;
     }
     case 'subprocess':

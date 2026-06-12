@@ -131,6 +131,7 @@ class BaileysWhatsAppService {
       await mkdir(SESSION_DIR, { recursive: true });
 
       // Load or create auth state
+      // eslint-disable-next-line react-hooks/rules-of-hooks
       this.authState = await useMultiFileAuthState(SESSION_DIR);
 
       // Fetch latest Baileys version

@@ -72,7 +72,7 @@ export interface ServerStatus {
 // ============================================================
 
 let currentPipeline: PipelineProgress | null = null;
-let serverStats = {
+const serverStats = {
   totalIntegrationsProcessed: 0,
   successfulIntegrations: 0,
   failedIntegrations: 0,

@@ -250,7 +250,7 @@ Respond ONLY with valid JSON:
 
   try {
     const result = await chatCompletion(messages, 'analysis');
-    let content = result.content.trim().replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    const content = result.content.trim().replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     return JSON.parse(content);
   } catch (error) {
     log.warn('AI project structure analysis failed, using fallback', { error: error instanceof Error ? error.message : String(error) });
@@ -316,7 +316,7 @@ If no APIs are found, return an empty array [].`,
 
   try {
     const result = await chatCompletion(messages, 'analysis');
-    let content = result.content.trim().replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    const content = result.content.trim().replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(content);
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
@@ -379,7 +379,7 @@ If no models are found, return [].`,
 
   try {
     const result = await chatCompletion(messages, 'analysis');
-    let content = result.content.trim().replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    const content = result.content.trim().replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(content);
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
@@ -451,7 +451,7 @@ Respond ONLY with valid JSON array:
 
   try {
     const result = await chatCompletion(messages, 'fast');
-    let content = result.content.trim().replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    const content = result.content.trim().replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(content);
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
@@ -544,7 +544,7 @@ Respond ONLY with valid JSON:
 
   try {
     const result = await chatCompletion(messages, 'reasoning');
-    let content = result.content.trim().replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    const content = result.content.trim().replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     return JSON.parse(content);
   } catch (error) {
     log.warn('AI integration point analysis failed', { error: error instanceof Error ? error.message : String(error) });

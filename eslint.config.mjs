@@ -9,47 +9,24 @@ const __dirname = dirname(__filename);
 const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
   rules: {
     // TypeScript rules
-    "@typescript-eslint/no-explicit-any": "off",
-    "@typescript-eslint/no-unused-vars": "off",
-    "@typescript-eslint/no-non-null-assertion": "off",
+    "@typescript-eslint/no-explicit-any": "warn",
+    "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
+    "@typescript-eslint/no-require-imports": "error",
     "@typescript-eslint/ban-ts-comment": "off",
-    "@typescript-eslint/prefer-as-const": "off",
-    "@typescript-eslint/no-unused-disable-directive": "off",
-    "@typescript-eslint/no-require-imports": "off",
-    "@typescript-eslint/no-empty-object-type": "off",
-    "@typescript-eslint/no-wrapper-object-types": "off",
-    "@typescript-eslint/no-unsafe-declaration-merging": "off",
     
     // React rules
-    "react-hooks/exhaustive-deps": "off",
-    "react-hooks/rules-of-hooks": "off",
-    "react-hooks/purity": "off",
+    "react-hooks/exhaustive-deps": "warn",
+    "react-hooks/rules-of-hooks": "warn",
     "react/no-unescaped-entities": "off",
-    "react/display-name": "off",
-    "react/prop-types": "off",
-    "react-compiler/react-compiler": "off",
-    "react-hooks/set-state-in-effect": "off",
-    "react-hooks/immutability": "off",
     
     // Next.js rules
-    "@next/next/no-img-element": "off",
-    "@next/next/no-html-link-for-pages": "off",
+    "@next/next/no-img-element": "warn",
     
-    // General JavaScript rules
-    "prefer-const": "off",
-    "no-unused-vars": "off",
-    "no-console": "off",
-    "no-debugger": "off",
-    "no-empty": "off",
-    "no-irregular-whitespace": "off",
-    "no-case-declarations": "off",
-    "no-fallthrough": "off",
-    "no-mixed-spaces-and-tabs": "off",
-    "no-redeclare": "off",
-    "no-undef": "off",
-    "no-unreachable": "off",
-    "no-useless-escape": "off",
-    "jsx-a11y/alt-text": "off",
+    // Temporarily suppress specific errors that block the build
+    "prefer-const": "warn",
+    "react-hooks/set-state-in-effect": "off",
+    "react-compiler/react-compiler": "off",
+    "react-hooks/purity": "off",
   },
 }, {
   ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills/**", "services/**"]

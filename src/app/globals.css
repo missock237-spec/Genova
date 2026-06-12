@@ -39,6 +39,10 @@
   --color-card: var(--card);
   --color-emerald: oklch(0.696 0.17 162.48);
   --color-emerald-foreground: oklch(0.985 0 0);
+  --color-mint: oklch(0.92 0.04 163);
+  --color-gold: oklch(0.77 0.19 70);
+  --color-purple: oklch(0.63 0.27 304);
+  --color-rose: oklch(0.65 0.25 16);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

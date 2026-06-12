@@ -72,10 +72,13 @@ function AppContent() {
   }
 
   // Check if email not verified — redirect to login with error
-  if (isAuthenticated && user && user.isEmailVerified === false) {
-    if (typeof window !== 'undefined') {
+  useEffect(() => {
+    if (isAuthenticated && user && user.isEmailVerified === false) {
       window.location.href = '/login?error=email_not_verified';
     }
+  }, [isAuthenticated, user]);
+
+  if (isAuthenticated && user && user.isEmailVerified === false) {
     return null;
   }
 

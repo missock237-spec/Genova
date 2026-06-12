@@ -301,6 +301,14 @@ export async function processIncomingWhatsAppMessage(
     const router = getWhatsAppRouter();
     const sendResult = await router.sendMessage(senderPhone, aiResponse);
 
+    // Check if we should also initiate a voice response (PRD Requirement 5)
+    try {
+      const { initiateVoiceResponse } = await import('./whatsapp-voice-responder');
+      await initiateVoiceResponse(userId, senderPhone, aiResponse);
+    } catch (voiceError) {
+      log.warn('Failed to trigger optional voice response', { error: voiceError });
+    }
+
     const totalDuration = Date.now() - startTime;
     log.info('WhatsApp auto-response sent', {
       from: senderPhone,

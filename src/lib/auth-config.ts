@@ -6,10 +6,10 @@
 
 export function getAuthSecret(): string {
   const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || process.env.JWT_SECRET;
-  if (!secret && process.env.NODE_ENV === 'production') {
-    throw new Error('AUTH_SECRET environment variable is missing in production');
+  if (!secret) {
+    throw new Error('AUTH_SECRET environment variable is missing. Please check your .env file.');
   }
-  return secret || 'genova-dev-secret-key-32-chars-minimum-length';
+  return secret;
 }
 
 export function getJwtSecret(): string {
@@ -18,12 +18,16 @@ export function getJwtSecret(): string {
 
 export function getAuthSalt(): string {
   const salt = process.env.AUTH_SALT;
-  if (!salt && process.env.NODE_ENV === 'production') {
-    throw new Error('AUTH_SALT environment variable is missing in production');
+  if (!salt) {
+    throw new Error('AUTH_SALT environment variable is missing. Please check your .env file.');
   }
-  return salt || '506e789c629f64923e597c45873995f571348888b58a1f736034f7833896504a';
+  return salt;
 }
 
 export function getEncryptionKey(): string {
-  return process.env.MCP_ENCRYPTION_KEY || process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || 'genova-mcp-encryption-key-32ch';
+  const key = process.env.MCP_ENCRYPTION_KEY || process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
+  if (!key) {
+    throw new Error('Encryption key (MCP_ENCRYPTION_KEY or AUTH_SECRET) is missing.');
+  }
+  return key;
 }

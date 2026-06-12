@@ -44,6 +44,7 @@ import { Job } from 'bullmq';
 import { processImageJob } from './workers/image-worker';
 import { processVideoJob } from './workers/video-worker';
 import { processAIJob } from './workers/ai-worker';
+import { resetDailyCredits } from '@/lib/credits-cron';
 
 import { createLogger } from '@/lib/logger';
 
@@ -104,6 +105,19 @@ export class AIJobQueue {
   private ensureWorkersRegistered(): void {
     if (this.workersRegistered) return;
 
+    // Register repeatable job for daily credit reset (runs every day at midnight)
+    const systemQueue = this.bullMQ.getQueue('ai:long'); // Use an existing queue for system tasks
+    if (systemQueue) {
+      systemQueue.add(
+        'system:daily-credit-reset',
+        {},
+        {
+          repeat: { pattern: '0 0 * * *' }, // Midnight every day
+          jobId: 'system:daily-credit-reset',
+        }
+      ).catch(err => log.error('Failed to schedule daily credit reset', { error: err.message }));
+    }
+
     // Register image worker on ai:image queue
     this.bullMQ.registerWorker('ai:image', async (job) => {
       return processImageJob(job as Job<ImageJobPayload, JobResult>);
@@ -116,6 +130,11 @@ export class AIJobQueue {
 
     // Register AI worker on ai:long queue
     this.bullMQ.registerWorker('ai:long', async (job) => {
+      if (job.name === 'system:daily-credit-reset') {
+        log.info('Executing scheduled daily credit reset');
+        await resetDailyCredits();
+        return { success: true, durationMs: 0, provider: 'system', costUsd: 0 };
+      }
       return processAIJob(job as Job<AIJobPayload, JobResult>);
     });
 
