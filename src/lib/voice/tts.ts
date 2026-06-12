@@ -137,7 +137,7 @@ async function synthesizeZAI(
     const speed = Math.max(0.25, Math.min(4.0, options.speed ?? 1.0));
 
     // Use the TTS capability of z-ai-web-dev-sdk
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     const tts = (zai as any).audio?.tts;
     if (!tts) {
       throw new Error('z-ai-sdk TTS not available');

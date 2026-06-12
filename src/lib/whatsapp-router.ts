@@ -1,15 +1,17 @@
 /**
- * WhatsApp Router — Unified entry point for all WhatsApp operations
+ * WhatsApp Router — Unified interface for WhatsApp messaging
  *
- * Strategy: Baileys FIRST → Official WhatsApp Cloud API fallback
+ * Routes messages through either Baileys (WhatsApp Web) or the
+ * official WhatsApp Business API, with automatic failover.
  *
- * If Baileys fails 3 times in a row, automatically switch to fallback
- * mode for 5 minutes before retrying Baileys.
+ * Priority:
+ *  1. Baileys (more flexible, no message fees)
+ *  2. WhatsApp Cloud API (more reliable, fallback)
  */
 
 import { createLogger } from '@/lib/logger';
-import { getBaileysService, type BaileysConnectionState } from '@/lib/whatsapp-baileys';
-import { getWhatsAppClient, type WhatsAppMessageResponse } from '@/lib/whatsapp-client';
+import { getBaileysService } from '@/lib/whatsapp-baileys';
+import { getWhatsAppClient, type WhatsAppMessageResponse, type WhatsAppCallResponse } from '@/lib/whatsapp-client';
 import { registerBaileysAutoResponder } from '@/lib/whatsapp-auto-responder';
 
 const log = createLogger('whatsapp-router');
@@ -19,18 +21,6 @@ const log = createLogger('whatsapp-router');
 // ---------------------------------------------------------------------------
 
 export type WhatsAppProvider = 'baileys' | 'official';
-
-export interface WhatsAppRouterStatus {
-  activeProvider: WhatsAppProvider;
-  baileysState: BaileysConnectionState;
-  baileysQrRequired: boolean;
-  baileysQrCode: string | null;
-  officialApiAvailable: boolean;
-  lastActivity: string | null;
-  fallbackMode: boolean;
-  consecutiveBaileysFailures: number;
-  fallbackRetryAt: string | null;
-}
 
 export interface RouterSendMessageResult {
   provider: WhatsAppProvider;
@@ -45,8 +35,25 @@ export interface RouterSendImageResult {
   timestamp?: number;
 }
 
+export interface RouterCallResult {
+  provider: WhatsAppProvider;
+  callId: string;
+}
+
+export interface WhatsAppRouterStatus {
+  activeProvider: WhatsAppProvider;
+  baileysState: string;
+  baileysQrRequired: boolean;
+  baileysQrCode: string | null;
+  officialApiAvailable: boolean;
+  lastActivity: string | null;
+  fallbackMode: boolean;
+  consecutiveBaileysFailures: number;
+  fallbackRetryAt: string | null;
+}
+
 // ---------------------------------------------------------------------------
-// Router class
+// Router Class
 // ---------------------------------------------------------------------------
 
 class WhatsAppRouter {
@@ -60,7 +67,6 @@ class WhatsAppRouter {
   private lastProviderSwitch: Date | null = null;
 
   constructor() {
-    // Attempt to connect Baileys and register auto-responder on initialization
     this.initBaileys().catch((err) => {
       log.warn('Baileys auto-connect failed on init', {
         error: err instanceof Error ? err.message : String(err),
@@ -68,15 +74,7 @@ class WhatsAppRouter {
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // Public API
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Send a text message. Try Baileys first, fall back to official API.
-   */
   async sendMessage(to: string, message: string): Promise<RouterSendMessageResult> {
-    // Check if we should attempt to reset from fallback
     this.maybeResetFromFallback();
 
     if (!this.fallbackMode && this.activeProvider === 'baileys') {
@@ -90,26 +88,15 @@ class WhatsAppRouter {
             messageId: result.messageId,
             timestamp: result.timestamp,
           };
-        } else {
-          log.info('Baileys not connected, falling back to official API', {
-            state: baileys.getConnectionState(),
-          });
         }
       } catch (error) {
         this.onBaileysFailure(error);
-        log.warn('Baileys send failed, falling back to official API', {
-          error: error instanceof Error ? error.message : String(error),
-        });
       }
     }
 
-    // Fallback to official WhatsApp API
     return this.sendViaOfficialApi(to, message);
   }
 
-  /**
-   * Send an image message. Same fallback strategy.
-   */
   async sendImage(to: string, imageBuffer: Buffer, caption?: string): Promise<RouterSendImageResult> {
     this.maybeResetFromFallback();
 
@@ -127,42 +114,33 @@ class WhatsAppRouter {
         }
       } catch (error) {
         this.onBaileysFailure(error);
-        log.warn('Baileys image send failed, falling back to official API', {
-          error: error instanceof Error ? error.message : String(error),
-        });
       }
     }
 
-    // Official API doesn't support direct image buffer sending in the same way.
-    // Graceful degradation: send a text message indicating an image was attempted.
-    log.warn('Image send only available via Baileys, sending text fallback', { to });
+    const fallbackMessage = caption ? `[Image: ${caption}]` : '[Image]';
+    const result = await this.sendViaOfficialApi(to, fallbackMessage);
+    return {
+      provider: result.provider,
+      messageId: result.messageId,
+      timestamp: result.timestamp,
+    };
+  }
 
+  async initiateCall(to: string, message?: string): Promise<RouterCallResult> {
+    log.info('Initiating call via official WhatsApp API', { to });
     try {
-      const fallbackMessage = caption
-        ? `[Image: ${caption}]`
-        : '[Image — visual content not available via official API]';
-      const result = await this.sendViaOfficialApi(to, fallbackMessage);
+      const client = getWhatsAppClient();
+      const result = await client.initiateCall(to, message);
       return {
-        provider: result.provider,
-        messageId: result.messageId,
-        timestamp: result.timestamp,
+        provider: 'official',
+        callId: result.callId,
       };
     } catch (error) {
-      log.error('Official API text fallback also failed for image', {
-        to,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw new Error(
-        'Image sending is only available via Baileys (WhatsApp Web). ' +
-        'The official WhatsApp Cloud API requires a media upload step first. ' +
-        'Please ensure Baileys is connected for image sending.'
-      );
+      log.error('WhatsApp call failed', { to, error: error instanceof Error ? error.message : String(error) });
+      throw error;
     }
   }
 
-  /**
-   * Get current connection status showing which provider is active.
-   */
   getConnectionStatus(): WhatsAppRouterStatus {
     const baileys = getBaileysService();
     const baileysHealth = baileys.healthCheck();
@@ -188,32 +166,18 @@ class WhatsAppRouter {
     };
   }
 
-  /**
-   * Manually switch to official API (fallback mode).
-   */
   forceFallback(): void {
-    log.info('Manually switching to official WhatsApp API fallback');
     this.fallbackMode = true;
     this.activeProvider = 'official';
-    this.lastProviderSwitch = new Date();
     this.fallbackRetryAt = new Date(Date.now() + this.fallbackDurationMs);
-
-    // Schedule retry after fallback duration
     this.scheduleFallbackRetry();
   }
 
-  /**
-   * Try switching back to Baileys.
-   */
   async resetToPrimary(): Promise<boolean> {
-    log.info('Attempting to switch back to Baileys as primary provider');
-
     try {
       const baileys = getBaileysService();
       if (!baileys.isConnected()) {
-        log.info('Baileys not connected, attempting to connect...');
         await baileys.connect();
-        // Give it a moment to establish connection
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
 
@@ -222,127 +186,61 @@ class WhatsAppRouter {
         this.activeProvider = 'baileys';
         this.consecutiveBaileysFailures = 0;
         this.fallbackRetryAt = null;
-        this.lastProviderSwitch = new Date();
-
         if (this.retryTimer) {
           clearTimeout(this.retryTimer);
           this.retryTimer = null;
         }
-
-        log.info('Successfully switched back to Baileys');
         return true;
       }
-
-      log.warn('Baileys still not connected after reset attempt');
       return false;
-    } catch (error) {
-      log.error('Failed to reset to Baileys primary', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+    } catch {
       return false;
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Private methods
-  // ---------------------------------------------------------------------------
 
   private async initBaileys(): Promise<void> {
     const baileys = getBaileysService();
     await baileys.connect();
-
-    // Register the auto-responder with 10-second delay
     await registerBaileysAutoResponder();
-
-    log.info('Baileys WhatsApp service initialized with auto-responder (10s delay)');
   }
 
   private onBaileysSuccess(): void {
-    if (this.consecutiveBaileysFailures > 0) {
-      log.info('Baileys recovered after failures', {
-        previousFailures: this.consecutiveBaileysFailures,
-      });
-    }
     this.consecutiveBaileysFailures = 0;
   }
 
   private onBaileysFailure(error: unknown): void {
     this.consecutiveBaileysFailures++;
-
-    log.warn('Baileys failure recorded', {
-      consecutiveFailures: this.consecutiveBaileysFailures,
-      maxBeforeFallback: this.maxConsecutiveFailures,
-      error: error instanceof Error ? error.message : String(error),
-    });
-
     if (this.consecutiveBaileysFailures >= this.maxConsecutiveFailures) {
-      log.error('Baileys failed too many times, switching to fallback mode', {
-        failures: this.consecutiveBaileysFailures,
-        fallbackDurationMs: this.fallbackDurationMs,
-      });
       this.forceFallback();
     }
   }
 
   private maybeResetFromFallback(): void {
-    if (!this.fallbackMode) return;
-
-    if (this.fallbackRetryAt && new Date() >= this.fallbackRetryAt) {
-      log.info('Fallback duration expired, attempting to reset to Baileys');
-      this.resetToPrimary().catch((err) => {
-        log.warn('Auto-reset to Baileys failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
+    if (this.fallbackMode && this.fallbackRetryAt && new Date() >= this.fallbackRetryAt) {
+      this.resetToPrimary().catch(() => {});
     }
   }
 
   private scheduleFallbackRetry(): void {
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer);
-    }
-
+    if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => {
-      log.info('Fallback timer expired, attempting to reset to Baileys');
-      this.resetToPrimary().catch((err) => {
-        log.warn('Scheduled reset to Baileys failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
+      this.resetToPrimary().catch(() => {});
     }, this.fallbackDurationMs);
   }
 
   private async sendViaOfficialApi(to: string, message: string): Promise<RouterSendMessageResult> {
-    log.info('Sending message via official WhatsApp API', { to });
-
-    try {
-      const client = getWhatsAppClient();
-      const result: WhatsAppMessageResponse = await client.sendMessage(to, message);
-
-      return {
-        provider: 'official',
-        messageId: result.messageId,
-        recipientWaId: result.recipientWaId,
-      };
-    } catch (error) {
-      log.error('Official WhatsApp API also failed', {
-        to,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
+    const client = getWhatsAppClient();
+    const result = await client.sendMessage(to, message);
+    return {
+      provider: 'official',
+      messageId: result.messageId,
+      recipientWaId: result.recipientWaId,
+    };
   }
 }
 
-// ---------------------------------------------------------------------------
-// Singleton export
-// ---------------------------------------------------------------------------
-
 let _router: WhatsAppRouter | null = null;
 
-/**
- * Get the singleton WhatsAppRouter instance.
- */
 export function getWhatsAppRouter(): WhatsAppRouter {
   if (!_router) {
     _router = new WhatsAppRouter();
@@ -350,7 +248,4 @@ export function getWhatsAppRouter(): WhatsAppRouter {
   return _router;
 }
 
-/**
- * WhatsAppRouter class export for direct usage.
- */
 export { WhatsAppRouter };

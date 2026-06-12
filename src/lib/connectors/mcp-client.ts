@@ -15,6 +15,7 @@
  */
 
 import { createLogger } from '@/lib/logger';
+import { getAuthSecret } from "@/lib/auth-config";
 import { db } from '@/lib/db';
 import crypto from 'crypto';
 
@@ -119,19 +120,19 @@ interface JSONRPCNotification {
 // Encryption Utilities for Auth Config
 // ============================================================
 
-const ENCRYPTION_KEY = process.env.MCP_ENCRYPTION_KEY || process.env.NEXTAUTH_SECRET || 'genova-mcp-encryption-key-32ch';
+const RAW_ENCRYPTION_KEY = getAuthSecret();
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
-function getEncryptionKey(): Buffer {
-  const key = ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32);
+function getDerivedEncryptionKey(): Buffer {
+  const key = RAW_ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32);
   return Buffer.from(key, 'utf-8');
 }
 
 export function encryptAuthConfig(config: Record<string, string>): string {
   const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ALGORITHM, getEncryptionKey(), iv);
+  const cipher = crypto.createCipheriv(ALGORITHM, getDerivedEncryptionKey(), iv);
   let encrypted = cipher.update(JSON.stringify(config), 'utf8', 'hex');
   encrypted += cipher.final('hex');
   const tag = cipher.getAuthTag();
@@ -145,7 +146,7 @@ export function decryptAuthConfig(encrypted: string): Record<string, string> {
     const iv = Buffer.from(parts[0], 'hex');
     const tag = Buffer.from(parts[1], 'hex');
     const encryptedData = parts[2];
-    const decipher = crypto.createDecipheriv(ALGORITHM, getEncryptionKey(), iv);
+    const decipher = crypto.createDecipheriv(ALGORITHM, getDerivedEncryptionKey(), iv);
     decipher.setAuthTag(tag);
     let decrypted = decipher.update(encryptedData, 'hex', 'utf8');
     decrypted += decipher.final('utf8');

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/session';
-import { hasRole, isValidRole, UserRole } from '@/lib/auth';
+import { hasRole, UserRole } from '@/lib/auth';
 
 interface RateLimitEntry {
   timestamps: number[];
@@ -9,15 +9,20 @@ interface RateLimitEntry {
 const rateLimitStore = new Map<string, RateLimitEntry>();
 
 // Clean up old entries every 5 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of rateLimitStore.entries()) {
-    entry.timestamps = entry.timestamps.filter((t) => now - t < 60000);
-    if (entry.timestamps.length === 0) {
-      rateLimitStore.delete(key);
-    }
+if (typeof globalThis !== 'undefined') {
+  const g = globalThis as any;
+  if (!g.rateLimitCleanupInterval) {
+    g.rateLimitCleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of rateLimitStore.entries()) {
+        entry.timestamps = entry.timestamps.filter((t) => now - t < 60000);
+        if (entry.timestamps.length === 0) {
+          rateLimitStore.delete(key);
+        }
+      }
+    }, 5 * 60 * 1000);
   }
-}, 5 * 60 * 1000);
+}
 
 export function applyCorsHeaders(
   response: NextResponse,
@@ -34,24 +39,19 @@ export function applyCorsHeaders(
 }
 
 const ALLOWED_ORIGINS: string[] = [
-  // Production origins
   ...(process.env.CORS_ALLOWED_ORIGINS?.split(',').filter(Boolean) || []),
-  // Development origins
   ...(process.env.NODE_ENV === 'development' ? ['http://localhost:3000'] : []),
 ];
 
 export function getAllowedOrigins(origin?: string): string | null {
   if (!origin) return null;
-  // Strict origin validation: only allow explicitly whitelisted origins
   if (ALLOWED_ORIGINS.includes(origin)) {
     return origin;
   }
-  // Same-origin requests (origin matches the server's own host)
   const serverHost = process.env.NEXT_PUBLIC_APP_URL || '';
   if (serverHost && origin === serverHost) {
     return origin;
   }
-  // Deny all other origins
   return null;
 }
 
@@ -69,7 +69,6 @@ export function checkRateLimit(
     rateLimitStore.set(identifier, entry);
   }
 
-  // Remove timestamps outside the window
   entry.timestamps = entry.timestamps.filter((t) => t > windowStart);
 
   const remaining = Math.max(0, limit - entry.timestamps.length);
@@ -103,17 +102,15 @@ export async function applySecurity(
   request: NextRequest,
   options: SecurityOptions = {}
 ): Promise<SecurityResult> {
-  // Handle CORS preflight
   if (request.method === 'OPTIONS') {
     const response = new NextResponse(null, { status: 204 });
     applyCorsHeaders(response, request.headers.get('origin') || undefined);
     return { auth: null, error: response };
   }
 
-  // Rate limiting
   if (options.rateLimit) {
     const identifier =
-      request.headers.get('x-forwarded-for') ||
+      request.headers.get('x-forwarded-for')?.split(',')[0] ||
       request.headers.get('x-real-ip') ||
       'unknown';
 
@@ -134,7 +131,6 @@ export async function applySecurity(
     }
   }
 
-  // Auth check
   if (options.requireAuth) {
     const auth = await getAuthenticatedUser(request);
     if (!auth) {
@@ -146,7 +142,6 @@ export async function applySecurity(
       return { auth: null, error: response };
     }
 
-    // RBAC: Check role if required
     if (options.requireRole) {
       const userRole = auth.role || 'user';
       if (!hasRole(userRole, options.requireRole)) {
@@ -173,10 +168,6 @@ export function secureResponse(
   return response;
 }
 
-/**
- * Verify that the authenticated user owns the resource.
- * Returns a 403 NextResponse if ownership check fails, or null if OK.
- */
 export function verifyOwnership(
   authUserId: string,
   resourceUserId: string,

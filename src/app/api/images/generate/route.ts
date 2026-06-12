@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { applySecurity, secureResponse } from '@/lib/security';
 import {
-  generateImage,
   getUserImages,
   MAX_PROMPT_LENGTH,
   FREE_IMAGE_MODELS,
+  DEFAULT_MODEL,
 } from '@/lib/image-generator';
+import { getAIJobQueue } from '@/lib/queue';
 
 export async function OPTIONS(request: NextRequest) {
   const { error } = await applySecurity(request);
@@ -14,19 +15,19 @@ export async function OPTIONS(request: NextRequest) {
 }
 
 // ============================================================
-// POST /api/images/generate — Generate an image from a prompt
+// POST /api/images/generate — Add image generation job to queue
 // ============================================================
 
 export async function POST(request: NextRequest) {
   try {
     const { auth, error: secError } = await applySecurity(request, {
       requireAuth: true,
-      rateLimit: { limit: 20, windowMs: 60 * 1000 }, // 20 req/min for image gen
+      rateLimit: { limit: 20, windowMs: 60 * 1000 },
     });
     if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
     const body = await request.json();
-    const { prompt, model, width, height } = body;
+    const { prompt, model, width, height, negativePrompt, steps, seed, sampler } = body;
 
     // Validate prompt
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
@@ -46,8 +47,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate model if provided
-    if (model && !FREE_IMAGE_MODELS[model]) {
+    // Validate model
+    const selectedModel = model || DEFAULT_MODEL;
+    if (!FREE_IMAGE_MODELS[selectedModel]) {
       return secureResponse(
         NextResponse.json(
           { error: `Invalid model. Available: ${Object.keys(FREE_IMAGE_MODELS).join(', ')}` },
@@ -57,43 +59,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate dimensions if provided
-    if (width !== undefined && (typeof width !== 'number' || width < 1 || width > 2048)) {
-      return secureResponse(
-        NextResponse.json({ error: 'Width must be a number between 1 and 2048' }, { status: 400 }),
-        request
-      );
-    }
-
-    if (height !== undefined && (typeof height !== 'number' || height < 1 || height > 2048)) {
-      return secureResponse(
-        NextResponse.json({ error: 'Height must be a number between 1 and 2048' }, { status: 400 }),
-        request
-      );
-    }
-
-    // Generate the image
-    const result = await generateImage(auth.userId, prompt, {
-      model: model || undefined,
-      width: width || undefined,
-      height: height || undefined,
+    // Add to BullMQ queue for async processing (Vercel-safe)
+    const queue = getAIJobQueue();
+    const jobId = await queue.addImageJob(auth.userId, prompt, {
+      model: selectedModel,
+      width: width ? parseInt(width) : undefined,
+      height: height ? parseInt(height) : undefined,
+      negativePrompt,
+      steps: steps ? parseInt(steps) : undefined,
+      seed: seed ? parseInt(seed) : undefined,
+      sampler,
     });
 
     return secureResponse(
-      NextResponse.json(result, { status: 201 }),
+      NextResponse.json({
+        success: true,
+        jobId,
+        message: 'Génération d\'image ajoutée à la file d\'attente',
+        status: 'pending',
+      }, { status: 202 }),
       request
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to generate image';
-
-    // Rate limit errors get a 429
-    if (message.includes('Rate limit')) {
-      return secureResponse(
-        NextResponse.json({ error: message }, { status: 429 }),
-        request
-      );
-    }
-
+    const message = err instanceof Error ? err.message : 'Failed to queue image generation';
     return secureResponse(
       NextResponse.json({ error: message }, { status: 500 }),
       request
@@ -114,17 +102,6 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20', 10);
     const offset = parseInt(searchParams.get('offset') || '0', 10);
     const status = searchParams.get('status') || undefined;
-
-    // Validate status filter
-    if (status && !['pending', 'completed', 'failed'].includes(status)) {
-      return secureResponse(
-        NextResponse.json(
-          { error: 'Invalid status filter. Allowed: pending, completed, failed' },
-          { status: 400 }
-        ),
-        request
-      );
-    }
 
     const result = await getUserImages(auth.userId, { limit, offset, status });
 

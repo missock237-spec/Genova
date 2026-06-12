@@ -16,6 +16,7 @@
 import crypto from 'crypto';
 import { db } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
+import { getAuthSecret } from "@/lib/auth-config";
 import { createAuditLog } from '@/lib/auth';
 
 const log = createLogger('secret-vault');
@@ -77,9 +78,9 @@ export class SecretVault {
       // Derive a proper 32-byte key from the provided value using SHA-256
       key = crypto.createHash('sha256').update(masterKeyHex).digest();
       log.warn('VAULT_MASTER_KEY is not a 64-char hex string — deriving key via SHA-256. Use a proper 64-char hex key in production.');
-    } else if (process.env.NEXTAUTH_SECRET) {
+    } else if (getAuthSecret()) {
       // Fallback: derive from NEXTAUTH_SECRET
-      key = crypto.createHash('sha256').update('vault:' + process.env.NEXTAUTH_SECRET).digest();
+      key = crypto.createHash('sha256').update('vault:' + getAuthSecret()).digest();
       log.warn('VAULT_MASTER_KEY not set — deriving from NEXTAUTH_SECRET. Set VAULT_MASTER_KEY for proper secret isolation.');
     } else {
       // Last resort: deterministic key (NOT secure — development only)

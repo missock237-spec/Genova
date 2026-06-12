@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { applySecurity, secureResponse } from '@/lib/security';
+import { getAuthSecret, getAuthSalt } from "@/lib/auth-config";
 import { db } from '@/lib/db';
 
 // ── Types ─────────────────────────────────────────────────────
@@ -222,8 +223,8 @@ export async function GET(request: NextRequest) {
 
     // Check critical requirements
     const criticalIssues: string[] = [];
-    if (!process.env.AUTH_SECRET) criticalIssues.push('AUTH_SECRET manquant — L\'authentification ne fonctionnera pas');
-    if (!process.env.AUTH_SALT) criticalIssues.push('AUTH_SALT manquant — La vérification des mots de passe échouera');
+    if (!getAuthSecret()) criticalIssues.push('AUTH_SECRET manquant — L\'authentification ne fonctionnera pas');
+    if (!getAuthSalt()) criticalIssues.push('AUTH_SALT manquant — La vérification des mots de passe échouera');
     if (dbStatus === 'error') criticalIssues.push('Base de données inaccessible');
 
     return secureResponse(

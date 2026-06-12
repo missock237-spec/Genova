@@ -14,6 +14,7 @@
 import crypto from 'crypto';
 import { promisify } from 'util';
 import { createLogger } from '@/lib/logger';
+import { getAuthSalt } from "@/lib/auth-config";
 
 const log = createLogger('auth');
 
@@ -26,15 +27,6 @@ const SALT_LENGTH = 32; // 32 bytes = 64 hex chars
 const PREFIX = 'pbkdf2:';     // Current format: pbkdf2:iterations:salt:hash
 const LEGACY_PREFIX = 'sha256:'; // Legacy: sha256:hash (global salt)
 const GLOBAL_SALT_PREFIX = 'gs:'; // Old global-salt format: gs:iterations:hash
-
-function getGlobalSalt(): string {
-  const salt = process.env.AUTH_SALT;
-  if (!salt) {
-    throw new Error('AUTH_SALT environment variable is required');
-  }
-  return salt;
-}
-
 /**
  * Generate a cryptographically secure random salt (hex string).
  */
@@ -104,7 +96,7 @@ export async function verifyPassword(
     if (parts.length === 2) {
       const iterations = parseInt(parts[0], 10);
       const storedKey = parts[1];
-      const salt = getGlobalSalt();
+      const salt = getAuthSalt();
 
       const derivedKey = await deriveKey(password, salt, iterations);
 
@@ -120,7 +112,7 @@ export async function verifyPassword(
     const parts = hash.slice(GLOBAL_SALT_PREFIX.length).split(':');
     const iterations = parseInt(parts[0], 10);
     const storedKey = parts[1];
-    const salt = getGlobalSalt();
+    const salt = getAuthSalt();
 
     const derivedKey = await deriveKey(password, salt, iterations);
 
@@ -133,7 +125,7 @@ export async function verifyPassword(
   // Legacy v1 format: sha256:hash (PBKDF2 SHA-256 with global salt)
   if (hash.startsWith(LEGACY_PREFIX)) {
     const storedKey = hash.slice(LEGACY_PREFIX.length);
-    const salt = getGlobalSalt();
+    const salt = getAuthSalt();
 
     const derivedKey = await new Promise<Buffer>((resolve, reject) => {
       crypto.pbkdf2(password, salt, ITERATIONS, KEY_LENGTH, 'sha256', (err, key) => {

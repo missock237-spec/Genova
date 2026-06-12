@@ -2,16 +2,12 @@
  * Database — Prisma Client Singleton
  *
  * Ensures the correct DATABASE_URL is used even when a system-level
- * environment variable overrides the .env file (e.g. in shared hosting
- * or container environments where DATABASE_URL may point to SQLite).
- *
- * Resolution order:
- *   1. GENOVA_DATABASE_URL — explicit override for production deployments
- *   2. .env file — parsed directly via dotenv (bypasses system env)
- *   3. process.env.DATABASE_URL — system-level fallback
+ * environment variable overrides the .env file.
  */
 
 import { PrismaClient } from '@prisma/client'
+import fs from 'fs';
+import path from 'path';
 
 // ---------------------------------------------------------------------------
 // Resolve the correct DATABASE_URL
@@ -23,17 +19,13 @@ function resolveDatabaseUrl(): string {
     return process.env.GENOVA_DATABASE_URL;
   }
 
-  // Priority 2: Read from .env file directly to bypass system env override
+  // Priority 2: Read from system env if it's already a PostgreSQL URL
   if (typeof process.env.DATABASE_URL === 'string' && process.env.DATABASE_URL.startsWith('postgresql://')) {
-    // The system env is already correct — use it
     return process.env.DATABASE_URL;
   }
 
-  // The system DATABASE_URL is wrong (e.g. SQLite or empty).
-  // Parse .env manually to get the correct PostgreSQL URL.
+  // Priority 3: Manual .env parsing as fallback (bypasses system-level SQLite overrides)
   try {
-    const fs = require('fs');
-    const path = require('path');
     const envPath = path.join(process.cwd(), '.env');
     if (fs.existsSync(envPath)) {
       const envContent = fs.readFileSync(envPath, 'utf8');
@@ -51,17 +43,15 @@ function resolveDatabaseUrl(): string {
       }
     }
   } catch {
-    // Fall through to default
+    // Silent fail, fall back to process.env
   }
 
-  // Priority 3: System env fallback (may be wrong, but let Prisma handle the error)
   return process.env.DATABASE_URL || '';
 }
 
 const databaseUrl = resolveDatabaseUrl();
 
-// Override the system env so Prisma uses the correct URL
-// This must happen before PrismaClient instantiation
+// Synchronously update process.env for Prisma
 if (databaseUrl && databaseUrl.startsWith('postgresql')) {
   process.env.DATABASE_URL = databaseUrl;
 }

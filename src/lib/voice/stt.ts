@@ -208,7 +208,7 @@ async function transcribeZAI(
     const base64Audio = audioBuffer.toString('base64');
 
     // Use the ASR capability of z-ai-web-dev-sdk
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     const asr = (zai as any).audio?.asr;
     if (!asr) {
       throw new Error('z-ai-sdk ASR not available');

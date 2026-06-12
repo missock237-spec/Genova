@@ -17,6 +17,7 @@ import { chatCompletion, type AIMessage } from '@/lib/ai-router';
 import { createLogger } from '@/lib/logger';
 import { getIntegrationRegistry } from '@/lib/integration-engine/registry';
 import { db } from '@/lib/db';
+import { getJwtSecret } from "@/lib/auth-config";
 
 const log = createLogger('saas-doctor');
 
@@ -523,7 +524,7 @@ function checkSecurity(): DiagnosticCheck[] {
   });
 
   // Check JWT secret
-  const jwtSecret = process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET;
+  const jwtSecret = getJwtSecret();
   if (!jwtSecret) {
     checks.push({
       id: 'security-jwt',
