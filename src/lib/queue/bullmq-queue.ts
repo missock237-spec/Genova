@@ -38,7 +38,7 @@ export enum JobPriority {
   LOW = 4,
 }
 
-export type QueueName = 'ai:image' | 'ai:video' | 'ai:long';
+export type QueueName = "ai-image" | "ai-video" | "ai-long";
 
 export interface BaseJobPayload {
   userId: string;
@@ -127,26 +127,26 @@ interface QueueConfig {
 }
 
 const QUEUE_CONFIGS: Record<QueueName, QueueConfig> = {
-  'ai:image': {
-    name: 'ai:image',
-    concurrency: 3,
-    timeoutMs: 120_000,
-    maxRetries: 3,
-    backoffType: 'exponential',
-    backoffDelayMs: 2_000,
-  },
-  'ai:video': {
-    name: 'ai:video',
-    concurrency: 2,
-    timeoutMs: 600_000,
-    maxRetries: 3,
+  'ai-image': {
+    name: 'ai-image',
+    concurrency: 5,
+    timeoutMs: 180_000,
+    maxRetries: 5,
     backoffType: 'exponential',
     backoffDelayMs: 5_000,
   },
-  'ai:long': {
-    name: 'ai:long',
-    concurrency: 5,
-    timeoutMs: 300_000,
+  'ai-video': {
+    name: 'ai-video',
+    concurrency: 2,
+    timeoutMs: 900_000,
+    maxRetries: 3,
+    backoffType: 'exponential',
+    backoffDelayMs: 10_000,
+  },
+  'ai-long': {
+    name: 'ai-long',
+    concurrency: 10,
+    timeoutMs: 600_000,
     maxRetries: 3,
     backoffType: 'exponential',
     backoffDelayMs: 3_000,
@@ -158,9 +158,9 @@ const QUEUE_CONFIGS: Record<QueueName, QueueConfig> = {
 // ---------------------------------------------------------------------------
 
 const USER_RATE_LIMITS: Record<QueueName, { maxJobs: number; windowMs: number }> = {
-  'ai:image': { maxJobs: 20, windowMs: 60 * 60 * 1000 },       // 20 images/hour
-  'ai:video': { maxJobs: 5, windowMs: 60 * 60 * 1000 },         // 5 videos/hour
-  'ai:long':  { maxJobs: 30, windowMs: 60 * 60 * 1000 },        // 30 long AI calls/hour
+  'ai-image': { maxJobs: 20, windowMs: 60 * 60 * 1000 },       // 20 images/hour
+  'ai-video': { maxJobs: 5, windowMs: 60 * 60 * 1000 },         // 5 videos/hour
+  'ai-long':  { maxJobs: 30, windowMs: 60 * 60 * 1000 },        // 30 long AI calls/hour
 };
 
 const RATE_LIMIT_PREFIX = 'genova:ratelimit:';

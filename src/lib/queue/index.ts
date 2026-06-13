@@ -106,31 +106,31 @@ export class AIJobQueue {
     if (this.workersRegistered) return;
 
     // Register repeatable job for daily credit reset (runs every day at midnight)
-    const systemQueue = this.bullMQ.getQueue('ai:long'); // Use an existing queue for system tasks
+    const systemQueue = this.bullMQ.getQueue('ai-long'); // Use an existing queue for system tasks
     if (systemQueue) {
       systemQueue.add(
-        'system:daily-credit-reset',
+        'system-daily-credit-reset',
         {},
         {
           repeat: { pattern: '0 0 * * *' }, // Midnight every day
-          jobId: 'system:daily-credit-reset',
+          jobId: 'system-daily-credit-reset',
         }
       ).catch(err => log.error('Failed to schedule daily credit reset', { error: err.message }));
     }
 
-    // Register image worker on ai:image queue
-    this.bullMQ.registerWorker('ai:image', async (job) => {
+    // Register image worker on ai-image queue
+    this.bullMQ.registerWorker('ai-image', async (job) => {
       return processImageJob(job as Job<ImageJobPayload, JobResult>);
     });
 
-    // Register video worker on ai:video queue
-    this.bullMQ.registerWorker('ai:video', async (job) => {
+    // Register video worker on ai-video queue
+    this.bullMQ.registerWorker('ai-video', async (job) => {
       return processVideoJob(job as Job<VideoJobPayload, JobResult>);
     });
 
-    // Register AI worker on ai:long queue
-    this.bullMQ.registerWorker('ai:long', async (job) => {
-      if (job.name === 'system:daily-credit-reset') {
+    // Register AI worker on ai-long queue
+    this.bullMQ.registerWorker('ai-long', async (job) => {
+      if (job.name === 'system-daily-credit-reset') {
         log.info('Executing scheduled daily credit reset');
         await resetDailyCredits();
         return { success: true, durationMs: 0, provider: 'system', costUsd: 0 };
@@ -164,7 +164,7 @@ export class AIJobQueue {
       priority: options.priority ?? JobPriority.NORMAL,
     };
 
-    const jobId = await this.bullMQ.addJob('ai:image', payload, {
+    const jobId = await this.bullMQ.addJob('ai-image', payload, {
       priority: options.priority,
       delay: options.delay,
     });
@@ -193,7 +193,7 @@ export class AIJobQueue {
       priority: options.priority ?? JobPriority.NORMAL,
     };
 
-    const jobId = await this.bullMQ.addJob('ai:video', payload, {
+    const jobId = await this.bullMQ.addJob('ai-video', payload, {
       priority: options.priority,
       delay: options.delay,
     });
@@ -221,7 +221,7 @@ export class AIJobQueue {
       priority: options.priority ?? JobPriority.NORMAL,
     };
 
-    const jobId = await this.bullMQ.addJob('ai:long', payload, {
+    const jobId = await this.bullMQ.addJob('ai-long', payload, {
       priority: options.priority,
       delay: options.delay,
     });

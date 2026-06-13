@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { applySecurity, secureResponse } from '@/lib/security';
 import { createVisionEngine } from '@/lib/multimodal/vision-engine';
+import { FileValidator } from '@/lib/security/file-validator';
+import { apiError, apiResponse } from '@/lib/server-api';
 
 export async function OPTIONS(request: NextRequest) {
   const { error } = await applySecurity(request);
@@ -30,8 +32,19 @@ export async function POST(request: NextRequest) {
       const imageFile = formData.get('image') as File | null;
 
       if (!imageFile) {
-        const res = NextResponse.json({ error: 'No image file provided' }, { status: 400 });
-        return secureResponse(res, request);
+        return apiError('No image file provided', 400, request);
+      }
+
+      // Security: Validate file before processing
+      const validator = new FileValidator();
+      const validation = validator.validateImage({
+        name: imageFile.name,
+        size: imageFile.size,
+        type: imageFile.type,
+      });
+
+      if (!validation.allowed) {
+        return apiError(`Invalid image: ${validation.reason}`, 400, request);
       }
 
       const arrayBuffer = await imageFile.arrayBuffer();

@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { applySecurity, secureResponse } from '@/lib/security';
 import { createSTTEngine } from '@/lib/voice';
+import { FileValidator } from '@/lib/security/file-validator';
+import { apiError, apiResponse } from '@/lib/server-api';
 
 const MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25MB max audio size
 
@@ -37,8 +39,19 @@ export async function POST(request: NextRequest) {
       const audioFile = formData.get('audio') as File | null;
 
       if (!audioFile) {
-        const res = NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
-        return secureResponse(res, request);
+        return apiError('No audio file provided', 400, request);
+      }
+
+      // Security: Validate file before processing
+      const validator = new FileValidator();
+      const validation = validator.validate({
+        name: audioFile.name,
+        size: audioFile.size,
+        type: audioFile.type,
+      });
+
+      if (!validation.allowed) {
+        return apiError(`Invalid audio: ${validation.reason}`, 400, request);
       }
 
       const arrayBuffer = await audioFile.arrayBuffer();
