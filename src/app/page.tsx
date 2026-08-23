@@ -161,12 +161,35 @@ function AppContent() {
   }, [handleUnauthorized]);
 
   if (loadError) {
+    const isSessionError = loadError.includes('Session expirée') || loadError.includes('reconnect');
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4 gap-4">
         <Alert variant="destructive" className="max-w-md">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>{loadError}</AlertDescription>
         </Alert>
+        <div className="flex flex-col sm:flex-row gap-3">
+          {isSessionError && (
+            <button
+              onClick={() => { window.location.href = '/login'; }}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              Se reconnecter
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setLoadError(null);
+              validatedRef.current = false;
+              hydratedRef.current = false;
+              void hydrate();
+            }}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Reessayer
+          </button>
+        </div>
       </div>
     );
   }

@@ -49,20 +49,35 @@ export async function applySecurity(
   const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
   if (sessionCookie) {
     // --- Tentative Firebase (si configure) ---
+    // Même logique de retry que getServerSession() et verifyIdToken() :
+    //   1. verifySessionCookie(cookie, true)  — vérif signature + révocation
+    //   2. verifySessionCookie(cookie, false) — sans révocation (cold start)
+    //   3. Pause 1s + retry — cold start Vercel (JWKS download)
     if (isFirebaseConfigured()) {
-      try {
-        const { getAdminAuth } = await import('@/lib/firebase/admin');
-        const decoded = await getAdminAuth().verifySessionCookie(sessionCookie, true);
-        const user = await getAdminAuth().getUser(decoded.uid);
-        const role = (user.customClaims?.role as string) || 'user';
-        const auth: SecurityContext = {
-          userId: decoded.uid, uid: decoded.uid, id: decoded.uid,
-          role, email: user.email || undefined,
-        };
-        return validateRole(auth, options);
-      } catch {
-        // Cookie Firebase invalide, on tente le standalone
+      let fbAuth: SecurityContext | null = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const { getAdminAuth } = await import('@/lib/firebase/admin');
+          const adminAuth = getAdminAuth();
+          const checkRevoked = attempt === 1;
+          const decoded = await adminAuth.verifySessionCookie(sessionCookie, checkRevoked);
+          const user = await adminAuth.getUser(decoded.uid);
+          const role = (user.customClaims?.role as string) || 'user';
+          fbAuth = {
+            userId: decoded.uid, uid: decoded.uid, id: decoded.uid,
+            role, email: user.email || undefined,
+          };
+          break; // Succès — sortir de la boucle
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.error(`[applySecurity] Firebase session verify attempt ${attempt}/3 failed:`, errMsg);
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 1000 * attempt));
+          }
+        }
       }
+      if (fbAuth) return validateRole(fbAuth, options);
+      // Tous les tentatives Firebase ont échoué — on tente le standalone
     }
 
     // --- Tentative Standalone JWT ---
