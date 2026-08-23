@@ -11,12 +11,18 @@
 //    2. Une organisation a toujours au moins un owner.
 //    3. Le slug est unique (utilisé pour les URLs publiques / marketplace).
 //
-//  Toutes les écritures passent par la façade `db` (Firestore).
+//  Conventions d'identifiants :
+//    - organization id : `org_<uuid>` (généré une seule fois).
+//    - membership id   : `<userId>_<orgId>` (DÉTERMINISTE, voir
+//      `buildMembershipId`). Garantit l'unicité structurelle d'une
+//      adhésion (un user = une seule adhésion) et aligne les Security
+//      Rules `isActiveMemberOf(orgId)` sur une résolution O(1).
 // ============================================================
 
 import { randomUUID } from 'crypto';
 import { db } from '@/lib/db';
 import {
+  buildMembershipId,
   normalizeOrgRole,
   normalizeOrgStatus,
   ORG_COLLECTIONS,
@@ -61,7 +67,7 @@ function buildOrg(input: Pick<Organization, 'name' | 'ownerId'> & Partial<Organi
   };
 }
 
-/** Construit un document Membership valide. */
+/** Construit un document Membership valide (id déterministe). */
 function buildMembership(input: {
   orgId: string;
   userId: string;
@@ -70,7 +76,7 @@ function buildMembership(input: {
 }): Membership {
   const now = new Date();
   return {
-    id: `mbr_${randomUUID()}`,
+    id: buildMembershipId(input.userId, input.orgId),
     orgId: input.orgId,
     userId: input.userId,
     role: normalizeOrgRole(input.role),
@@ -151,6 +157,17 @@ export async function getOrgForUser(userId: string): Promise<{ org: Organization
 }
 
 /**
+ * Récupère directement une adhésion par son identifiant déterministe.
+ * O(1) — aligné sur la résolution des Security Rules.
+ */
+export async function getMembershipById(userId: string, orgId: string): Promise<Membership | null> {
+  const id = buildMembershipId(userId, orgId);
+  const membership = (await db.membership.findUnique({ where: { id } })) as Membership | null;
+  if (!membership) return null;
+  return { ...membership, role: normalizeOrgRole(membership.role) };
+}
+
+/**
  * Résout une organisation par id, en vérifiant que l'utilisateur en est
  * membre actif (contrôle d'accès par organisation).
  */
@@ -158,15 +175,8 @@ export async function getOrgForUserById(
   userId: string,
   orgId: string,
 ): Promise<{ org: Organization; membership: Membership } | null> {
-  const membership = (await db.membership.findFirst({
-    where: [
-      { field: 'userId', op: '==', value: userId },
-      { field: 'orgId', op: '==', value: orgId },
-      { field: 'status', op: '==', value: 'active' },
-    ],
-    limit: 1,
-  })) as Membership | null;
-  if (!membership) return null;
+  const membership = await getMembershipById(userId, orgId);
+  if (!membership || membership.status !== 'active') return null;
 
   const org = await db.organization.findUnique({ where: { id: orgId } });
   if (!org) return null;
@@ -231,29 +241,29 @@ export async function addMember(input: AddMemberInput): Promise<Membership> {
  * Met à jour le rôle d'un membre. Refuse de dégrader le dernier `owner`
  * (invariant : une org a toujours au moins un owner).
  */
-export async function updateMemberRole(membershipId: string, newRole: OrgRole): Promise<void> {
-  const membership = (await db.membership.findUnique({
-    where: { id: membershipId },
-  })) as Membership | null;
-  if (!membership) throw new Error('MEMBERSHIP_NOT_FOUND');
+export async function updateMemberRole(userId: string, orgId: string, newRole: OrgRole): Promise<void> {
+  const membership = await getMembershipById(userId, orgId);
+  if (!membership || membership.status !== 'active') {
+    throw new Error('MEMBERSHIP_NOT_FOUND');
+  }
 
   if (membership.role === 'owner' && newRole !== 'owner') {
     const otherOwners = await db.membership.findMany({
       where: [
-        { field: 'orgId', op: '==', value: membership.orgId },
+        { field: 'orgId', op: '==', value: orgId },
         { field: 'role', op: '==', value: 'owner' },
         { field: 'status', op: '==', value: 'active' },
       ],
       limit: 10,
     });
-    const ownerCount = (otherOwners as Membership[]).filter((m) => m.id !== membershipId).length;
+    const ownerCount = (otherOwners as Membership[]).filter((m) => m.userId !== userId).length;
     if (ownerCount === 0) {
       throw new Error('LAST_OWNER: impossible de dégrader le dernier owner');
     }
   }
 
   await db.membership.update({
-    where: { id: membershipId },
+    where: { id: buildMembershipId(userId, orgId) },
     data: { role: newRole, updatedAt: new Date() },
   });
 }
@@ -261,29 +271,29 @@ export async function updateMemberRole(membershipId: string, newRole: OrgRole): 
 /**
  * Retire un membre (statut `removed`). Refuse de retirer le dernier owner.
  */
-export async function removeMember(membershipId: string): Promise<void> {
-  const membership = (await db.membership.findUnique({
-    where: { id: membershipId },
-  })) as Membership | null;
-  if (!membership) throw new Error('MEMBERSHIP_NOT_FOUND');
+export async function removeMember(userId: string, orgId: string): Promise<void> {
+  const membership = await getMembershipById(userId, orgId);
+  if (!membership || membership.status !== 'active') {
+    throw new Error('MEMBERSHIP_NOT_FOUND');
+  }
 
   if (membership.role === 'owner') {
     const otherOwners = await db.membership.findMany({
       where: [
-        { field: 'orgId', op: '==', value: membership.orgId },
+        { field: 'orgId', op: '==', value: orgId },
         { field: 'role', op: '==', value: 'owner' },
         { field: 'status', op: '==', value: 'active' },
       ],
       limit: 10,
     });
-    const ownerCount = (otherOwners as Membership[]).filter((m) => m.id !== membershipId).length;
+    const ownerCount = (otherOwners as Membership[]).filter((m) => m.userId !== userId).length;
     if (ownerCount === 0) {
       throw new Error('LAST_OWNER: impossible de retirer le dernier owner');
     }
   }
 
   await db.membership.update({
-    where: { id: membershipId },
+    where: { id: buildMembershipId(userId, orgId) },
     data: { status: 'removed', updatedAt: new Date() },
   });
 }
