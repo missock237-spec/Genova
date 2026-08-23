@@ -56,6 +56,11 @@ export interface Organization {
 
 /** Document `memberships/{membershipId}` dans Firestore. */
 export interface Membership {
+  /**
+   * DocId déterministe `{userId}_{orgId}` (voir `buildMembershipId`).
+   * Garantit l'unicité (un user = une seule adhésion active) et permet
+   * une résolution O(1) dans les Security Rules via `isActiveMemberOf`.
+   */
   id: string;
   orgId: string;
   userId: string;
@@ -80,6 +85,18 @@ export const ORG_COLLECTIONS = {
   organizations: 'organizations',
   memberships: 'memberships',
 } as const;
+
+/**
+ * Construit l'identifiant déterministe d'une adhésion.
+ * Format : `{userId}_{orgId}`. Les deux segments sont encodés pour être
+ * sûrs vis-à-vis de Firestore (les docIds ne peuvent pas contenir `/`).
+ *
+ * IMPORTANT : toute modification de cet encodage nécessite une migration
+ * des documents existants ET une mise à jour des Security Rules.
+ */
+export function buildMembershipId(userId: string, orgId: string): string {
+  return `${userId}_${orgId}`;
+}
 
 /**
  * Normalise un rôle d'organisation arbitraire (chaîne persistée) vers un OrgRole valide.
