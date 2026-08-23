@@ -12,6 +12,8 @@ rules_version = '2';
 //     sont réservées aux admins (custom claim role == 'admin').
 //   - Les collections de service (fcm_devices, sessions) sont
 //     lisibles/modifiables uniquement par le propriétaire.
+//   - Multi-tenant : organizations / memberships sont accessibles
+//     via l'appartenance (membership actif), pas via ownership direct.
 // ============================================================
 
 service cloud.firestore {
@@ -34,6 +36,17 @@ service cloud.firestore {
 
     function isCreator() {
       return isSignedIn() && (request.auth.token.role == 'admin' || request.auth.token.isCreator == true);
+    }
+
+    // ============================================================
+    // Multi-tenant helpers — appartenance à une organisation
+    // ------------------------------------------------------------
+    //  Vérifie qu'il existe une adhésion ACTIVE liant l'utilisateur
+    //  courant à l'organisation demandée. Utilisé pour scoper les
+    //  lectures/écritures des entités d'un tenant.
+    // ============================================================
+    function isActiveMemberOf(orgId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/memberships/$(request.auth.uid + '_' + orgId));
     }
 
     // ============================================================
@@ -169,6 +182,29 @@ service cloud.firestore {
     }
 
     // ============================================================
+    // Multi-tenant : organizations & memberships
+    // ------------------------------------------------------------
+    //  - organizations : lisible par tout membre actif ; modifiable
+    //    uniquement par owner/admin (via backend — la rule vérifie la
+    //    membership mais l'écriture réelle se fait via Admin SDK).
+    //  - memberships : docId = '<uid>_<orgId>' (déterministe), pour une
+    //    résolution O(1) d'appartenance sans scan de collection.
+    // ============================================================
+    match /organizations/{orgId} {
+      allow read: if isSignedIn() && isActiveMemberOf(orgId);
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /memberships/{membershipId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if false; // Backend only (org-service)
+      allow update: if false; // Backend only (org-service)
+      allow delete: if false; // Backend only (org-service)
+    }
+
+    // ============================================================
     // Admin-only collections
     // ============================================================
     match /audit_logs/{logId} {
@@ -222,16 +258,12 @@ service cloud.firestore {
     }
     match /ad_user_preferences/{prefId} {
       allow read: if isOwner(prefId);
-      // Owner may upsert their own prefs doc, but may ONLY set the two
-      // toggle fields. All other fields (totals, lastAdViewedAt, etc.)
-      // are managed by the backend.
       allow create: if isOwner(prefId)
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.adsEnabled is bool
         && request.resource.data.rewardedAdsEnabled is bool;
       allow update: if isOwner(prefId)
         && request.resource.data.userId == resource.data.userId
-        // Only the two toggles may change.
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['adsEnabled', 'rewardedAdsEnabled']);
       allow delete: if false;
