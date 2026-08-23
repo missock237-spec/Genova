@@ -1,21 +1,10 @@
 // ============================================================
-// POST /api/auth/reset-password — Confirmation reset (Firebase)
-// ============================================================
-//  Body: { oobCode, newPassword }
-//  Le client a reçu un lien de reset généré par Firebase.
-//  Cette route valide la force du mot de passe et met à jour
-//  le mot de passe via Admin SDK.
-//
-//  Note: Firebase Admin SDK n'expose pas verifyPasswordResetCode.
-//  Le client doit d'abord vérifier le code (verifyPasswordResetCode
-//  côté client), puis envoyer le oobCode + nouveau mot de passe.
+// POST /api/auth/reset-password — Confirmation reset
+// Supporte Firebase et Standalone
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-
-import { validatePasswordStrength } from '@/lib/firebase/auth';
-import { getAdminAuth } from '@/lib/firebase/admin';
-import { createAuditLog } from '@/lib/firebase/analytics';
+import { isFirebaseConfigured, validatePasswordStrength as standalonePwCheck } from '@/lib/standalone-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,21 +12,39 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => null);
-    const oobCode = body?.oobCode as string | undefined;
     const newPassword = body?.newPassword as string | undefined;
 
-    if (!oobCode || !newPassword) {
-      return NextResponse.json({ error: 'oobCode et newPassword requis' }, { status: 400 });
+    if (!newPassword) {
+      return NextResponse.json({ error: 'newPassword requis' }, { status: 400 });
     }
+
+    if (!isFirebaseConfigured()) {
+      const strength = standalonePwCheck(newPassword);
+      if (!strength.valid) {
+        return NextResponse.json({ error: 'Mot de passe trop faible', reasons: strength.reasons }, { status: 400 });
+      }
+      // En mode standalone, le reset par email n'est pas supporte.
+      // L'utilisateur doit contacter l'admin.
+      return NextResponse.json({
+        error: 'La reinitialisation par email n\'est pas disponible en mode standalone. Contactez l\'administrateur.',
+      }, { status: 501 });
+    }
+
+    // Mode Firebase
+    const oobCode = body?.oobCode as string | undefined;
+    if (!oobCode) {
+      return NextResponse.json({ error: 'oobCode requis' }, { status: 400 });
+    }
+
+    const { validatePasswordStrength } = await import('@/lib/firebase/auth');
+    const { getAdminAuth } = await import('@/lib/firebase/admin');
+    const { createAuditLog } = await import('@/lib/firebase/analytics');
 
     const strength = validatePasswordStrength(newPassword);
     if (!strength.valid) {
       return NextResponse.json({ error: 'Mot de passe trop faible', reasons: strength.reasons }, { status: 400 });
     }
 
-    // Le client doit avoir vérifié le oobCode via verifyPasswordResetCode (client SDK)
-    // avant d'appeler cette route. On récupère l'email depuis le body (le client
-    // l'obtient de verifyPasswordResetCode).
     const email = body?.email as string | undefined;
     if (!email) {
       return NextResponse.json({ error: 'Email requis' }, { status: 400 });
@@ -45,16 +52,13 @@ export async function POST(req: NextRequest) {
 
     const auth = getAdminAuth();
     const user = await auth.getUserByEmail(email.toLowerCase().trim());
-
     await auth.updateUser(user.uid, { password: newPassword });
     await auth.revokeRefreshTokens(user.uid);
 
     try {
       await createAuditLog({
-        userId: user.uid,
-        action: 'auth.password.reset.completed',
-        resource: 'auth',
-        severity: 'info',
+        userId: user.uid, action: 'auth.password.reset.completed',
+        resource: 'auth', severity: 'info',
       });
     } catch {}
 
@@ -62,7 +66,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('[auth/reset-password] Error:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Erreur lors de la réinitialisation' },
+      { error: error instanceof Error ? error.message : 'Erreur lors de la reinitialisation' },
       { status: 500 },
     );
   }

@@ -1,0 +1,407 @@
+// ============================================================
+// Gen3ia — Standalone Auth (fallback sans Firebase)
+// ============================================================
+// Système d'authentification autonome utilisant Node.js crypto.
+// Active automatiquement quand les variables Firebase sont absentes.
+//
+// Stockage : fichier JSON dans /tmp (Vercel serverless-compatible).
+// Pour la production, migrer vers une vraie DB (PostgreSQL, etc.)
+// ============================================================
+
+import { createHash, randomBytes, scryptSync, createHmac, timingSafeEqual } from 'crypto';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { cookies } from 'next/headers';
+
+// ============================================================
+// Types
+// ============================================================
+
+export interface StandaloneUser {
+  id: string;
+  email: string;
+  name: string;
+  passwordHash: string;
+  salt: string;
+  avatar: string | null;
+  emailVerified: boolean;
+  plan: string;
+  role: string;
+  credits: number;
+  isActive: boolean;
+  isCreator: boolean;
+  creatorEarnings: number;
+  creatorWithdrawn: number;
+  createdAt: string;
+  updatedAt: string;
+  lastActiveAt: string;
+}
+
+export interface StandaloneSession {
+  userId: string;
+  email: string;
+  name: string;
+  role: string;
+  plan: string;
+  credits: number;
+  avatar: string | null;
+  emailVerified: boolean;
+  iat: number;
+  exp: number;
+}
+
+interface UserStore {
+  users: Record<string, StandaloneUser>;
+  emailIndex: Record<string, string>; // email -> userId
+  creditIndex: Record<string, { userId: string; balance: number; totalEarned: number; totalSpent: number }>;
+}
+
+// ============================================================
+// Configuration
+// ============================================================
+
+// On genere un secret persistant dans /tmp s'il n'existe pas,
+// pour que les tokens survivent aux hot-reloads en dev.
+function getOrCreateSecret(): string {
+  const secretPath = '/tmp/gen3ia-auth/jwt-secret.txt';
+  if (existsSync(secretPath)) {
+    return readFileSync(secretPath, 'utf-8').trim();
+  }
+  const secret = process.env.VAULT_MASTER_KEY || randomBytes(32).toString('hex');
+  const dir = '/tmp/gen3ia-auth';
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(secretPath, secret, 'utf-8');
+  return secret;
+}
+
+const JWT_SECRET = getOrCreateSecret();
+const JWT_ALGORITHM = 'HS256';
+const SESSION_MAX_AGE = 60 * 60 * 24 * 14; // 14 jours
+const SESSION_MAX_AGE_SHORT = 60 * 60 * 24; // 24 heures
+export const SESSION_COOKIE_NAME = 'gen3ia_session';
+const DATA_DIR = '/tmp/gen3ia-auth';
+const DATA_FILE = join(DATA_DIR, 'users.json');
+
+// ============================================================
+// Detection Firebase
+// ============================================================
+
+/** Verifie si Firebase est configure cote serveur */
+export function isFirebaseConfigured(): boolean {
+  return !!(
+    process.env.FIREBASE_SERVICE_ACCOUNT ||
+    (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY)
+  );
+}
+
+/** Verifie si Firebase est configure cote client */
+export function isFirebaseClientConfigured(): boolean {
+  return !!(
+    process.env.NEXT_PUBLIC_FIREBASE_API_KEY &&
+    process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN &&
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID &&
+    process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+  );
+}
+
+// ============================================================
+// User Store (JSON file)
+// ============================================================
+
+function ensureDataDir(): void {
+  if (!existsSync(DATA_DIR)) {
+    mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+function loadStore(): UserStore {
+  ensureDataDir();
+  if (existsSync(DATA_FILE)) {
+    try {
+      return JSON.parse(readFileSync(DATA_FILE, 'utf-8'));
+    } catch {
+      // Corrupted file, start fresh
+    }
+  }
+  return { users: {}, emailIndex: {}, creditIndex: {} };
+}
+
+function saveStore(store: UserStore): void {
+  ensureDataDir();
+  writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
+}
+
+function generateId(): string {
+  return createHash('sha256').update(randomBytes(16).toString('hex') + Date.now().toString()).digest('hex').slice(0, 28);
+}
+
+// ============================================================
+// Password Hashing (scrypt)
+// ============================================================
+
+const SCRYPT_KEY_LENGTH = 64;
+const SCRYPT_COST = 16384;
+const SCRYPT_BLOCK_SIZE = 8;
+const SCRYPT_PARALLELIZATION = 1;
+
+export function hashPassword(password: string, salt?: string): { hash: string; salt: string } {
+  const actualSalt = salt || randomBytes(16).toString('hex');
+  const hash = scryptSync(
+    password,
+    actualSalt,
+    SCRYPT_KEY_LENGTH,
+    { N: SCRYPT_COST, r: SCRYPT_BLOCK_SIZE, p: SCRYPT_PARALLELIZATION }
+  ).toString('hex');
+  return { hash, salt: actualSalt };
+}
+
+export function verifyPassword(password: string, hash: string, salt: string): boolean {
+  const computed = scryptSync(
+    password,
+    salt,
+    SCRYPT_KEY_LENGTH,
+    { N: SCRYPT_COST, r: SCRYPT_BLOCK_SIZE, p: SCRYPT_PARALLELIZATION }
+  ).toString('hex');
+  return timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(computed, 'hex'));
+}
+
+// ============================================================
+// JWT (HMAC-SHA256)
+// ============================================================
+
+function base64urlEncode(data: string): string {
+  return Buffer.from(data, 'utf-8').toString('base64url');
+}
+
+function base64urlDecode(str: string): string {
+  return Buffer.from(str, 'base64url').toString('utf-8');
+}
+
+export function signJWT(payload: Record<string, unknown>, expiresIn: number = SESSION_MAX_AGE): string {
+  const header = { alg: JWT_ALGORITHM, typ: 'JWT' };
+  const now = Math.floor(Date.now() / 1000);
+  const fullPayload = { ...payload, iat: now, exp: now + Math.floor(expiresIn / 1000) };
+
+  const headerB64 = base64urlEncode(JSON.stringify(header));
+  const payloadB64 = base64urlEncode(JSON.stringify(fullPayload));
+  const signature = createHmac('sha256', JWT_SECRET)
+    .update(`${headerB64}.${payloadB64}`)
+    .digest('base64url');
+
+  return `${headerB64}.${payloadB64}.${signature}`;
+}
+
+export function verifyJWT(token: string): StandaloneSession | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    const [headerB64, payloadB64, signature] = parts;
+    const expectedSig = createHmac('sha256', JWT_SECRET)
+      .update(`${headerB64}.${payloadB64}`)
+      .digest('base64url');
+
+    if (!timingSafeEqual(Buffer.from(signature, 'base64url'), Buffer.from(expectedSig, 'base64url'))) {
+      return null;
+    }
+
+    const payload = JSON.parse(base64urlDecode(payloadB64));
+    if (payload.exp < Math.floor(Date.now() / 1000)) {
+      return null;
+    }
+
+    return payload as StandaloneSession;
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
+// User CRUD
+// ============================================================
+
+export function createUser(data: {
+  email: string;
+  password: string;
+  name: string;
+}): { user: StandaloneUser; token: string } {
+  const store = loadStore();
+  const email = data.email.toLowerCase().trim();
+
+  if (store.emailIndex[email]) {
+    throw Object.assign(new Error('Cet email est deja utilise.'), { status: 409 });
+  }
+
+  const id = generateId();
+  const { hash, salt } = hashPassword(data.password);
+  const now = new Date().toISOString();
+
+  const user: StandaloneUser = {
+    id,
+    email,
+    name: data.name.trim(),
+    passwordHash: hash,
+    salt,
+    avatar: null,
+    emailVerified: false,
+    plan: 'free',
+    role: 'user',
+    credits: 100,
+    isActive: true,
+    isCreator: false,
+    creatorEarnings: 0,
+    creatorWithdrawn: 0,
+    createdAt: now,
+    updatedAt: now,
+    lastActiveAt: now,
+  };
+
+  store.users[id] = user;
+  store.emailIndex[email] = id;
+  store.creditIndex[`credit_${id}`] = {
+    userId: id,
+    balance: 100,
+    totalEarned: 100,
+    totalSpent: 0,
+  };
+
+  saveStore(store);
+
+  const token = signJWT({
+    sub: id,
+    uid: id,
+    userId: id,
+ email: user.email,
+    name: user.name,
+    role: user.role,
+    plan: user.plan,
+    credits: user.credits,
+    avatar: user.avatar,
+    emailVerified: user.emailVerified,
+  });
+
+  return { user, token };
+}
+
+export function authenticateUser(email: string, password: string): { user: StandaloneUser; token: string } | null {
+  const store = loadStore();
+  const normalizedEmail = email.toLowerCase().trim();
+  const userId = store.emailIndex[normalizedEmail];
+
+  if (!userId) return null;
+
+  const user = store.users[userId];
+  if (!user) return null;
+  if (!user.isActive) return null;
+
+  if (!verifyPassword(password, user.passwordHash, user.salt)) return null;
+
+  user.lastActiveAt = new Date().toISOString();
+  user.updatedAt = new Date().toISOString();
+  store.users[userId] = user;
+  saveStore(store);
+
+  const token = signJWT({
+    sub: user.id,
+    uid: user.id,
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    plan: user.plan,
+    credits: user.credits,
+    avatar: user.avatar,
+    emailVerified: user.emailVerified,
+  });
+
+  return { user, token };
+}
+
+export function getUserById(id: string): StandaloneUser | null {
+  const store = loadStore();
+  return store.users[id] || null;
+}
+
+export function getUserByEmail(email: string): StandaloneUser | null {
+  const store = loadStore();
+  const userId = store.emailIndex[email.toLowerCase().trim()];
+  return userId ? (store.users[userId] || null) : null;
+}
+
+// ============================================================
+// Session Management
+// ============================================================
+
+export async function setStandaloneSessionCookie(token: string, rememberMe?: boolean): Promise<void> {
+  const cookieStore = await cookies();
+  const maxAge = rememberMe ? SESSION_MAX_AGE : SESSION_MAX_AGE_SHORT;
+  cookieStore.set(SESSION_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge,
+  });
+}
+
+export async function clearStandaloneSessionCookie(): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.delete(SESSION_COOKIE_NAME);
+}
+
+export async function getStandaloneSessionCookie(): Promise<string | undefined> {
+  const cookieStore = await cookies();
+  return cookieStore.get(SESSION_COOKIE_NAME)?.value;
+}
+
+// ============================================================
+// Server Session (compatible Firebase auth.ts interface)
+// ============================================================
+
+export interface ServerSession {
+  user: {
+    id: string;
+    uid: string;
+    email: string;
+    name: string;
+    role: string;
+    picture?: string | null;
+    emailVerified: boolean;
+  };
+}
+
+export async function getStandaloneServerSession(): Promise<ServerSession | null> {
+  const token = await getStandaloneSessionCookie();
+  if (!token) return null;
+
+  const session = verifyJWT(token);
+  if (!session) return null;
+
+  const user = getUserById(session.userId);
+  if (!user || !user.isActive) return null;
+
+  return {
+    user: {
+      id: user.id,
+      uid: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      picture: user.avatar,
+      emailVerified: user.emailVerified,
+    },
+  };
+}
+
+// ============================================================
+// Password validation
+// ============================================================
+
+export function validatePasswordStrength(password: string): { valid: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+  if (password.length < 8) reasons.push('Minimum 8 caracteres');
+  if (!/[A-Z]/.test(password)) reasons.push('Au moins une majuscule');
+  if (!/[a-z]/.test(password)) reasons.push('Au moins une minuscule');
+  if (!/[0-9]/.test(password)) reasons.push('Au moins un chiffre');
+  return { valid: password.length >= 8 && reasons.length <= 1, reasons };
+}

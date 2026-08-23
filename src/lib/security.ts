@@ -1,13 +1,12 @@
 // ============================================================
 // Gen3ia — Security Middleware pour les routes API
-// Authentification Firebase (session cookie + ID token) + API keys + RBAC
+// Authentification (Firebase OU Standalone) + API keys + RBAC
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAccessToken, getServerSession } from '@/lib/firebase/auth';
-import { db } from '@/lib/db';
 import { SESSION_COOKIE_NAME } from '@/lib/firebase/config';
-import { getAdminAuth } from '@/lib/firebase/admin';
+import { db } from '@/lib/db';
+import { isFirebaseConfigured, verifyJWT } from '@/lib/standalone-auth';
 import type { ResolvedOrg } from '@/lib/multi-tenant';
 
 export interface SecurityContext {
@@ -20,73 +19,101 @@ export interface SecurityContext {
   /** Legacy alias — display name (not populated, kept for backward compat). */
   name?: string;
   /**
-   * Organisation résolue du tenant courant (multi-tenant).
-   * OPTIONNEL : uniquement peuplé par `withAuth(..., { resolveOrg: true })`.
-   * `applySecurity` ne le renseigne pas (aucune lecture Firestore implicite).
+   * Organisation resolue du tenant courant (multi-tenant).
+   * OPTIONNEL : uniquement peuple par `withAuth(..., { resolveOrg: true })`.
    */
   org?: ResolvedOrg;
 }
 
 interface SecurityOptions {
   requireAuth?: boolean;
-  /** Prisma-compat alias for `roles`. */
   roles?: string[];
-  /** Prisma-compat alias for `roles` (accepts string or string[]). */
   requireRole?: string | string[];
   /** Legacy no-op field (rate limiting is enforced by middleware). */
   rateLimit?: { interval?: string | number; limit?: number } | Record<string, unknown>;
 }
 
 /**
- * Middleware de sécurité pour les routes API.
- * Supporte (par ordre de priorité) :
- *  1. Session cookie Firebase (gen3ia_session) — navigateur
- *  2. Bearer token Firebase ID token — clients API / mobile
- *  3. X-API-Key — clés API persistantes
- *  + RBAC via custom claims Firebase (role)
+ * Middleware de securite pour les routes API.
+ * Supporte (par ordre de priorite) :
+ *  1. Session cookie (Firebase OU Standalone JWT)
+ *  2. Bearer token (Firebase ID token OU Standalone JWT)
+ *  3. X-API-Key (cles persistantes)
+ *  + RBAC via role
  */
 export async function applySecurity(
   request: NextRequest,
   options: SecurityOptions = {},
 ): Promise<{ auth?: SecurityContext; error?: NextResponse }> {
-  // 1. Session cookie Firebase (principalement navigateur)
+  // 1. Session cookie (Firebase OU Standalone)
   const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
   if (sessionCookie) {
-    try {
-      const decoded = await getAdminAuth().verifySessionCookie(sessionCookie, true);
-      const user = await getAdminAuth().getUser(decoded.uid);
-      const role = (user.customClaims?.role as string) || 'user';
+    // --- Tentative Firebase (si configure) ---
+    if (isFirebaseConfigured()) {
+      try {
+        const { getAdminAuth } = await import('@/lib/firebase/admin');
+        const decoded = await getAdminAuth().verifySessionCookie(sessionCookie, true);
+        const user = await getAdminAuth().getUser(decoded.uid);
+        const role = (user.customClaims?.role as string) || 'user';
+        const auth: SecurityContext = {
+          userId: decoded.uid, uid: decoded.uid, id: decoded.uid,
+          role, email: user.email || undefined,
+        };
+        return validateRole(auth, options);
+      } catch {
+        // Cookie Firebase invalide, on tente le standalone
+      }
+    }
+
+    // --- Tentative Standalone JWT ---
+    const standaloneSession = verifyJWT(sessionCookie);
+    if (standaloneSession) {
       const auth: SecurityContext = {
-        userId: decoded.uid,
-        uid: decoded.uid,
-        id: decoded.uid,
-        role,
-        email: user.email || undefined,
+        userId: standaloneSession.userId,
+        uid: standaloneSession.userId,
+        id: standaloneSession.userId,
+        role: standaloneSession.role || 'user',
+        email: standaloneSession.email,
       };
       return validateRole(auth, options);
-    } catch {
-      // Cookie invalide ou expiré, on continue
     }
   }
 
-  // 2. Bearer token Firebase ID token
-  const authHeader = request.headers.get('authorization');
+  // 2. Bearer token
+   const authHeader = request.headers.get('authorization');
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
-    const payload = await verifyAccessToken(token);
-    if (payload) {
+
+    // --- Tentative Firebase (si configure) ---
+    if (isFirebaseConfigured()) {
+      try {
+        const { verifyAccessToken } = await import('@/lib/firebase/auth');
+        const payload = await verifyAccessToken(token);
+        if (payload) {
+          const auth: SecurityContext = {
+            userId: payload.sub, uid: payload.uid || payload.sub,
+            id: payload.sub, role: payload.role, email: payload.email,
+          };
+          return validateRole(auth, options);
+        }
+      } catch {
+        // Firebase verify failed, try standalone
+      }
+    }
+
+    // --- Tentative Standalone JWT ---
+    const standaloneSession = verifyJWT(token);
+    if (standaloneSession) {
       const auth: SecurityContext = {
-        userId: payload.sub,
-        uid: payload.uid || payload.sub,
-        id: payload.sub,
-        role: payload.role,
-        email: payload.email,
+        userId: standaloneSession.userId, uid: standaloneSession.userId,
+        id: standaloneSession.userId, role: standaloneSession.role || 'user',
+        email: standaloneSession.email,
       };
       return validateRole(auth, options);
     }
   }
 
-  // 3. API Key (clés persistantes stockées dans Firestore)
+  // 3. API Key (cles persistantes dans Firestore)
   const apiKey = request.headers.get('x-api-key');
   if (apiKey) {
     const auth = await authenticateApiKey(apiKey);
@@ -102,7 +129,7 @@ export async function applySecurity(
 }
 
 /**
- * Ajoute des en-têtes de sécurité à la réponse
+ * Ajoute des en-tetes de securite a la reponse
  */
 export function secureResponse(response: NextResponse, _request: NextRequest): NextResponse {
   response.headers.set('X-Content-Type-Options', 'nosniff');
@@ -121,19 +148,16 @@ async function authenticateApiKey(apiKey: string): Promise<SecurityContext | nul
 
     if (!key) return null;
 
-    // Récupère l'utilisateur propriétaire pour obtenir son rôle
     const userId = key.userId as string;
     const user = await db.user.findUnique({ where: { id: userId } });
     if (!user) return null;
 
-    // Met à jour lastUsed
     await db.apiKey
       .update({ where: { id: key.id as string }, data: { lastUsed: new Date() } })
       .catch(() => {});
 
     return {
-      userId,
-      uid: userId,
+      userId, uid: userId,
       role: ((user as Record<string, unknown>).role as string) || 'user',
       email: (user as Record<string, unknown>).email as string | undefined,
     };
@@ -143,7 +167,7 @@ async function authenticateApiKey(apiKey: string): Promise<SecurityContext | nul
 }
 
 /**
- * Vérifie les permissions RBAC
+ * Verifie les permissions RBAC
  */
 function validateRole(auth: SecurityContext, options: SecurityOptions): { auth: SecurityContext; error?: NextResponse } {
   const requireRole = options.requireRole;
@@ -157,25 +181,22 @@ function validateRole(auth: SecurityContext, options: SecurityOptions): { auth: 
   return { auth };
 }
 
-/** Modèle Firestore possédant un champ `userId` (ownership check). */
+/** Modele Firestore possedant un champ `userId` (ownership check). */
 type OwnedModel = {
   findUnique(args: { where: { id: string }; select?: string[] }): Promise<Record<string, unknown> | null>;
 };
 
 /**
- * Vérifie qu'une ressource appartient à l'utilisateur authentifié.
+ * Verifie qu'une ressource appartient a l'utilisateur authentifie.
  */
 export async function verifyOwnership(
-  resourceType: string,
-  resourceId: string,
-  userId: string,
+  resourceType: string, resourceId: string, userId: string,
 ): Promise<boolean> {
   try {
     const model = (db as unknown as Record<string, OwnedModel>)[resourceType];
     if (!model) return false;
     const record = await model.findUnique({
-      where: { id: resourceId },
-      select: ['userId'],
+      where: { id: resourceId }, select: ['userId'],
     });
     return record?.userId === userId;
   } catch {
@@ -184,7 +205,7 @@ export async function verifyOwnership(
 }
 
 /**
- * Origines CORS autorisées pour les endpoints SSE/streaming.
+ * Origines CORS autorisees pour les endpoints SSE/streaming.
  */
 export function getAllowedOrigins(origin?: string): string | null {
   const allowedOrigins = [
@@ -198,4 +219,11 @@ export function getAllowedOrigins(origin?: string): string | null {
 }
 
 // Re-export pour compat avec l'ancienne API
-export { getServerSession };
+export async function getServerSession() {
+  if (isFirebaseConfigured()) {
+    const { getServerSession: fbSession } = await import('@/lib/firebase/auth');
+    return fbSession();
+  }
+  const { getStandaloneServerSession } = await import('@/lib/standalone-auth');
+  return getStandaloneServerSession();
+}

@@ -1,15 +1,12 @@
 // ============================================================
-// POST /api/auth/forgot-password — Demande de reset (Firebase)
+// POST /api/auth/forgot-password — Demande de reset
 // ============================================================
-//  Body: { email }
-//  Génère un lien Firebase password reset et envoie l'email via Resend.
+// Supporte Firebase et Standalone.
+// En mode standalone : repond OK (pas de reset par email sans config email).
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-
-import { sendPasswordResetEmail } from '@/lib/firebase/auth';
-import { getUserByEmail } from '@/lib/firebase/auth';
-import { createAuditLog } from '@/lib/firebase/analytics';
+import { isFirebaseConfigured, getUserByEmail as getStandaloneUser } from '@/lib/standalone-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,7 +19,22 @@ export async function POST(req: NextRequest) {
     const email = body?.email as string | undefined;
     if (!email) return NextResponse.json({ error: 'Email manquant' }, { status: 400 });
 
-    // On vérifie d'abord si l'utilisateur existe (anti-énumération : on réponds OK dans tous les cas)
+    if (!isFirebaseConfigured()) {
+      // Mode standalone : on verifie juste que l'utilisateur existe (anti-enumeration)
+      const user = getStandaloneUser(email);
+      if (user) {
+        console.log('[auth/forgot-password] Standalone: user exists for', email, '(no email service configured)');
+      }
+      return NextResponse.json({
+        success: true,
+        message: 'Si cet email existe, un lien de reinitialisation a ete envoye.',
+      });
+    }
+
+    // Mode Firebase
+    const { sendPasswordResetEmail, getUserByEmail } = await import('@/lib/firebase/auth');
+    const { createAuditLog } = await import('@/lib/firebase/analytics');
+
     const user = await getUserByEmail(email);
     if (user) {
       await sendPasswordResetEmail(email, {
@@ -30,17 +42,14 @@ export async function POST(req: NextRequest) {
         handleCodeInApp: true,
       });
       await createAuditLog({
-        userId: user.uid,
-        action: 'auth.password.reset.requested',
-        resource: 'auth',
-        severity: 'info',
+        userId: user.uid, action: 'auth.password.reset.requested',
+        resource: 'auth', severity: 'info',
       });
     }
 
-    // Toujours répondre OK (anti-énumération)
     return NextResponse.json({
       success: true,
-      message: 'Si cet email existe, un lien de réinitialisation a été envoyé.',
+      message: 'Si cet email existe, un lien de reinitialisation a ete envoye.',
     });
   } catch (error) {
     console.error('[auth/forgot-password] Error:', error);

@@ -1,25 +1,32 @@
 // ============================================================
-// POST /api/auth/logout — Firebase Authentication
+// POST /api/auth/logout — Authentication
 // ============================================================
-//  Révoque les refresh tokens Firebase + supprime le cookie de session.
+// Supporte deux modes : Firebase et Standalone
 // ============================================================
 
 import { NextResponse } from 'next/server';
-
-import { clearSessionCookie, getSessionCookie, getServerSession } from '@/lib/firebase/auth';
-import { getAdminAuth } from '@/lib/firebase/admin';
-import { createAuditLog } from '@/lib/firebase/analytics';
+import { isFirebaseConfigured, clearStandaloneSessionCookie } from '@/lib/standalone-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST() {
   try {
+    // --- MODE STANDALONE ---
+    if (!isFirebaseConfigured()) {
+      await clearStandaloneSessionCookie();
+      return NextResponse.json({ success: true });
+    }
+
+    // --- MODE FIREBASE ---
+    const { clearSessionCookie, getSessionCookie, getServerSession } = await import('@/lib/firebase/auth');
+    const { getAdminAuth } = await import('@/lib/firebase/admin');
+    const { createAuditLog } = await import('@/lib/firebase/analytics');
+
     const session = await getServerSession();
     const cookieValue = await getSessionCookie();
 
     if (session && cookieValue) {
-      // Révoque tous les refresh tokens de l'utilisateur (invalidation côté Firebase)
       try {
         const decoded = await getAdminAuth().verifySessionCookie(cookieValue, false);
         await getAdminAuth().revokeRefreshTokens(decoded.uid);

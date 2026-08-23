@@ -1,13 +1,15 @@
 /**
  * GENOVA AI OS — Register Form
  * Name + email + password + confirm password with strength indicator.
+ * Supporte deux modes :
+ *   1. Firebase (config present) : Firebase Client SDK -> idToken -> POST serveur
+ *   2. Standalone (pas de Firebase) : POST direct email/password au serveur
  */
 
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuthStore } from '@/lib/store';
 import { apiFetch, ApiError } from '@/lib/api';
 import { AuthLayout } from './auth-layout';
 import { InputField, PasswordInput, PasswordStrengthIndicator, Alert, AuthButton, Mail, UserIcon, OAuthButtons, getStrength, PASSWORD_RULES } from './shared';
@@ -22,26 +24,45 @@ function validateEmail(email: string): string | null {
 function validatePassword(password: string): string | null {
   if (!password) return 'Le mot de passe est requis';
   for (const rule of PASSWORD_RULES) {
-    if (!rule.regex.test(password)) return `Règle non respectée : ${rule.label}`;
+    if (!rule.regex.test(password)) return `Regle non respectee : ${rule.label}`;
   }
   return null;
 }
 
 function validateName(name: string): string | null {
-  if (!name || name.trim().length < 2) return 'Minimum 2 caractères requis';
-  if (name.trim().length > 50) return 'Maximum 50 caractères';
+  if (!name || name.trim().length < 2) return 'Minimum 2 caracteres requis';
+  if (name.trim().length > 50) return 'Maximum 50 caracteres';
   return null;
+}
+
+/**
+ * Detecte si Firebase est configure cote client.
+ * On verifie si les 4 variables NEXT_PUBLIC_* sont presentes.
+ */
+function isFirebaseAvailable(): boolean {
+  return !!(
+    process.env.NEXT_PUBLIC_FIREBASE_API_KEY &&
+    process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN &&
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID &&
+    process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+  );
 }
 
 export function RegisterForm() {
   const router = useRouter();
+  const [useFirebase, setUseFirebase] = useState(true);
 
   const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '', terms: false });
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [apiError, setApiError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Capture le résultat OAuth redirect (mobile)
+  // Detecte la disponibilite de Firebase au montage
+  useEffect(() => {
+    setUseFirebase(isFirebaseAvailable());
+  }, []);
+
+  // Capture le resultat OAuth redirect (mobile) — uniquement si Firebase
   useOAuthRedirect({ onError: (msg) => setApiError(msg) });
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,34 +93,44 @@ export function RegisterForm() {
     setApiError('');
 
     try {
-      // 1. Sign-up via Firebase Client SDK -> crée le compte + obtient l'ID token
-      const { signUpWithEmail } = await import('@/lib/firebase/auth-client');
-      const authResult = await signUpWithEmail(form.email, form.password, form.name.trim());
+      if (useFirebase) {
+        // === MODE FIREBASE ===
+        const { signUpWithEmail } = await import('@/lib/firebase/auth-client');
+        const authResult = await signUpWithEmail(form.email, form.password, form.name.trim());
 
-      // 2. Envoie l'ID token au serveur qui crée le profil Firestore + le session cookie
-      await apiFetch('/api/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          idToken: authResult.idToken,
-          name: form.name.trim(),
-          email: form.email.toLowerCase().trim(),
-        }),
-      });
+        await apiFetch('/api/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({
+            idToken: authResult.idToken,
+            name: form.name.trim(),
+            email: form.email.toLowerCase().trim(),
+          }),
+        });
+      } else {
+        // === MODE STANDALONE (sans Firebase) ===
+        await apiFetch('/api/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: form.email.toLowerCase().trim(),
+            password: form.password,
+            name: form.name.trim(),
+          }),
+        });
+      }
 
-      // Le serveur a posé le cookie de session Firebase.
-      // Rechargement complet pour que le store hydrate et affiche le dashboard.
+      // Succes : le serveur a pose le cookie de session.
       window.location.href = '/';
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.status === 409) setApiError('Cet email est déjà utilisé.');
-        else if (err.status === 403) setApiError(err.message || 'Accès refusé.');
-        else if (err.status === 429) setApiError('Trop de tentatives. Réessayez dans 15 minutes.');
+        if (err.status === 409) setApiError('Cet email est deja utilise.');
+        else if (err.status === 403) setApiError(err.message || 'Acces refuse.');
+        else if (err.status === 429) setApiError('Trop de tentatives. Reessayez dans 15 minutes.');
         else if (err.status === 503) {
           console.error('[register] Session cookie failed:', err.message);
-          setApiError('Erreur de session. Veuillez recharger la page et réessayer.');
+          setApiError('Erreur de session. Veuillez recharger la page et reessayer.');
         } else if (err.status === 500) {
           console.error('[register] Server error:', err.message);
-          setApiError('Erreur serveur temporaire. Veuillez réessayer dans un instant.');
+          setApiError('Erreur serveur temporaire. Veuillez reessayer dans un instant.');
         } else setApiError(err.message || "Erreur lors de l'inscription");
       } else if (err && typeof err === 'object' && 'code' in err) {
         const firebaseErr = err as { code: string; message?: string };
@@ -107,17 +138,17 @@ export function RegisterForm() {
         console.error('[register] Firebase error:', code, firebaseErr.message);
 
         const firebaseErrorMap: Record<string, string> = {
-          'auth/email-already-in-use': 'Cet email est déjà utilisé.',
+          'auth/email-already-in-use': 'Cet email est deja utilise.',
           'auth/weak-password': 'Mot de passe trop faible.',
-          'auth/invalid-email': 'Format d\'email invalide.',
+          'auth/invalid-email': "Format d'email invalide.",
           'auth/invalid-credential': 'Identifiants invalides.',
           'auth/configuration-not-found': 'Erreur de configuration Firebase. Contactez l\'administrateur.',
           'auth/invalid-api-key': 'Erreur de configuration. Contactez l\'administrateur.',
-          'auth/app-not-authorized': 'Application non autorisée. Contactez l\'administrateur.',
-          'auth/operation-not-allowed': 'La connexion par email/mot de passe n\'est pas activée.',
-          'auth/network-request-failed': 'Erreur réseau. Vérifiez votre connexion internet.',
-          'auth/too-many-requests': 'Trop de tentatives. Réessayez plus tard.',
-          'auth/internal-error': 'Erreur interne. Veuillez réessayer.',
+          'auth/app-not-authorized': 'Application non autorisee. Contactez l\'administrateur.',
+          'auth/operation-not-allowed': 'La connexion par email/mot de passe n\'est pas activee.',
+          'auth/network-request-failed': 'Erreur reseau. Verifiez votre connexion internet.',
+          'auth/too-many-requests': 'Trop de tentatives. Reessayez plus tard.',
+          'auth/internal-error': 'Erreur interne. Veuillez reessayer.',
         };
 
         const mappedMessage = firebaseErrorMap[code];
@@ -125,41 +156,41 @@ export function RegisterForm() {
           setApiError(mappedMessage);
         } else {
           console.error('[register] Unhandled Firebase error code:', code, firebaseErr);
-          setApiError('Erreur lors de la création du compte. Si le problème persiste, contactez le support.');
+          setApiError('Erreur lors de la creation du compte. Si le probleme persiste, contactez le support.');
         }
       } else {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('[register] Unexpected error:', msg);
-        setApiError('Erreur réseau. Veuillez réessayer.');
+        setApiError('Erreur reseau. Veuillez reessayer.');
       }
     } finally {
       setLoading(false);
     }
-  }, [form]);
+  }, [form, useFirebase]);
 
   const strength = getStrength(form.password);
   const passwordOk = strength === 5;
 
   return (
-    <AuthLayout title="Créer un compte" subtitle="Rejoignez la plateforme Genova AI OS">
-      {/* OAuth — Google + GitHub via Firebase (popup) */}
-      <div className="space-y-3">
-        <OAuthButtons
-          mode="register"
-          disabled={loading}
-          onError={(msg) => setApiError(msg)}
-          onSuccess={() => {
-            // La route a posé le cookie de session Firebase.
-            // Rechargement complet pour lire le cookie et afficher le dashboard.
-            window.location.href = '/';
-          }}
-        />
-        <div className="flex items-center gap-3 my-4">
-          <div className="h-px flex-1 bg-slate-700/40"></div>
-          <span className="text-xs text-slate-500 uppercase tracking-wider">ou</span>
-          <div className="h-px flex-1 bg-slate-700/40"></div>
+    <AuthLayout title="Creer un compte" subtitle="Rejoignez la plateforme Genova AI OS">
+      {/* OAuth — uniquement si Firebase est configure */}
+      {useFirebase && (
+        <div className="space-y-3">
+          <OAuthButtons
+            mode="register"
+            disabled={loading}
+            onError={(msg) => setApiError(msg)}
+            onSuccess={() => {
+              window.location.href = '/';
+            }}
+          />
+          <div className="flex items-center gap-3 my-4">
+            <div className="h-px flex-1 bg-slate-700/40"></div>
+            <span className="text-xs text-slate-500 uppercase tracking-wider">ou</span>
+            <div className="h-px flex-1 bg-slate-700/40"></div>
+          </div>
         </div>
-      </div>
+      )}
 
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <Alert type="error" message={apiError} />
@@ -196,7 +227,7 @@ export function RegisterForm() {
             value={form.password}
             onChange={set('password')}
             error={errors.password}
-            placeholder="Créez un mot de passe fort"
+            placeholder="Creez un mot de passe fort"
             autoComplete="new-password"
             disabled={loading}
           />
@@ -209,7 +240,7 @@ export function RegisterForm() {
           value={form.confirm}
           onChange={set('confirm')}
           error={errors.confirm}
-          placeholder="Répétez votre mot de passe"
+          placeholder="Repetez votre mot de passe"
           autoComplete="new-password"
           disabled={loading}
         />
@@ -225,18 +256,18 @@ export function RegisterForm() {
             J&apos;accepte les{' '}
             <a href="/terms" target="_blank" className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2">conditions d&apos;utilisation</a>
             {' '}et la{' '}
-            <a href="/privacy" target="_blank" className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2">politique de confidentialité</a>
+            <a href="/privacy" target="_blank" className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2">politique de confidentialite</a>
           </span>
         </label>
         {errors.terms && <p className="text-xs text-red-400 -mt-2">{errors.terms}</p>}
 
         <AuthButton type="submit" loading={loading} disabled={!passwordOk && form.password.length > 0}>
-          Créer mon compte
+          Creer mon compte
         </AuthButton>
       </form>
 
       <p className="text-center text-sm text-slate-500 mt-6">
-        Déjà un compte ?{' '}
+        Pas encore de compte ?{' '}
         <button onClick={() => router.push('/login')} className="text-cyan-400 hover:text-cyan-300 font-medium transition-colors">
           Se connecter
         </button>
