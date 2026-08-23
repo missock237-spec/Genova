@@ -128,3 +128,20 @@ export function normalizeOrgStatus(value: unknown): OrgStatus {
       return 'active';
   }
 }
+
+/**
+ * Normalise un plan d'organisation arbitraire vers un OrgPlan valide.
+ * Aligné sur `normalizeOrgRole` / `normalizeOrgStatus` : toute valeur
+ * inconnue retombe sur `free` (plan par défaut, jamais plus permissif).
+ */
+export function normalizeOrgPlan(value: unknown): OrgPlan {
+  switch (value) {
+    case 'free':
+    case 'pro':
+    case 'business':
+    case 'enterprise':
+      return value;
+    default:
+      return 'free';
+  }
+}
