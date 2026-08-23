@@ -1,105 +1,88 @@
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getFirestore, Firestore, FieldValue } from 'firebase-admin/firestore';
-import { getCache, setCache, cacheKey } from './cache';
+// ============================================================
+// Gen3ia — Firestore shim (DÉPRÉCIÉ)
+// ============================================================
+//  Ce module est obsolète. Il dupliquait src/lib/firestore-extra.ts (le
+//  véritable point d'accès central) et contenait un bogue de compilation :
+//  `setCachedDoc` appelait `redis.del(...)` sans que `redis` soit importé.
+//
+//  → Utilisez désormais : import { db, FieldValue, ... } from '@/lib/firestore-extra'
+//
+//  Les anciens exports sont conservés sous forme de shims qui lèvent
+//  une erreur explicite si un code résiduel les appelle, afin de ne pas
+//  casser la structure du projet ni le build (aucun import invalide).
+// ============================================================
 
-let dbInstance: Firestore | null = null;
+const DEPRECATION =
+  '[Firestore] Ce module est déprécié — utilisez src/lib/firestore-extra.ts' +
+  '(db, FieldValue, getCachedDoc, setCachedDoc, getCachedQuery, etc.).';
 
-function initFirestore() {
-  if (!getApps().length) {
-    const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
-    if (!serviceAccount) {
-      throw new Error('FIREBASE_SERVICE_ACCOUNT env variable is required');
-    }
-    initializeApp({
-      credential: cert(JSON.parse(serviceAccount)),
-    });
-  }
-  const app = getApps()[0] || initializeApp({});
-  return getFirestore(app, process.env.FIREBASE_DATABASE_ID || 'gen3ia');
-}
-
-export function getDb(): Firestore {
-  if (!dbInstance) {
-    dbInstance = initFirestore();
-  }
-  return dbInstance;
-}
-
-export const db = getDb();
-export { FieldValue };
-
-// ------------------------------------------------------------
-// Helpers avec cache et retry
-// ------------------------------------------------------------
-
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
-  let lastError: Error;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (err: any) {
-      lastError = err;
-      // Exponential backoff : 100ms, 200ms, 400ms...
-      const delay = Math.min(100 * Math.pow(2, i), 5000);
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-  throw lastError!;
+/**
+ * @deprecated Utilisez `db` depuis '@/lib/firestore-extra'.
+ */
+export function getDb(): never {
+  throw new Error(DEPRECATION);
 }
 
 /**
- * Lecture d'un document avec cache Redis (TTL 60s par défaut)
+ * @deprecated Utilisez `db` depuis '@/lib/firestore-extra'.
+ */
+export const db = new Proxy(
+  {},
+  {
+    get() {
+      throw new Error(DEPRECATION);
+    },
+    set() {
+      throw new Error(DEPRECATION);
+    },
+  }
+) as never;
+
+/**
+ * @deprecated Utilisez `FieldValue` depuis '@/lib/firestore-extra'.
+ */
+export const FieldValue = new Proxy(
+  {},
+  {
+    get() {
+      throw new Error(DEPRECATION);
+    },
+    set() {
+      throw new Error(DEPRECATION);
+    },
+  }
+) as never;
+
+/**
+ * @deprecated Utilisez `getCachedDoc` depuis '@/lib/firestore-extra'.
  */
 export async function getCachedDoc<T>(
-  collection: string,
-  docId: string,
-  ttl = 60
+  _collection: string,
+  _docId: string,
+  _ttl?: number
 ): Promise<T | null> {
-  const key = cacheKey('firestore', collection, docId);
-  const cached = await getCache<T>(key);
-  if (cached !== null) return cached;
-
-  const doc = await withRetry(() => db.collection(collection).doc(docId).get());
-  if (!doc.exists) return null;
-  const data = doc.data() as T;
-  await setCache(key, data, ttl);
-  return data;
+  throw new Error(DEPRECATION);
 }
 
 /**
- * Écriture avec invalidation du cache
+ * @deprecated Utilisez `setCachedDoc` depuis '@/lib/firestore-extra'.
  */
 export async function setCachedDoc<T>(
-  collection: string,
-  docId: string,
-  data: T,
-  options?: { merge?: boolean }
+  _collection: string,
+  _docId: string,
+  _data: T,
+  _options?: { merge?: boolean }
 ): Promise<void> {
-  await withRetry(() =>
-// @ts-ignore — type narrowing pending, see refactor ticket
-    db.collection(collection).doc(docId).set(data, { merge: options?.merge ?? false })
-  );
-  // Invalider le cache
-  const key = cacheKey('firestore', collection, docId);
-// @ts-ignore — type narrowing pending, see refactor ticket
-  await redis.del(key); // Attention, redis importé via cache.ts
+  throw new Error(DEPRECATION);
 }
 
 /**
- * Requête avec cache (pour les listes, attention à la clé)
- * Ici on ne cache que les résultats complets d'une requête spécifique.
- * À utiliser avec précaution (ex: pour des données statiques).
+ * @deprecated Utilisez `getCachedQuery` depuis '@/lib/firestore-extra'.
  */
 export async function getCachedQuery<T>(
-  queryKey: string,
-  queryFn: () => Promise<T[]>,
-  ttl = 30
+  _queryKey: string,
+  _queryFn: () => Promise<T[]>,
+  _ttl?: number
 ): Promise<T[]> {
-  const key = cacheKey('firestore', 'query', queryKey);
-  const cached = await getCache<T[]>(key);
-  if (cached !== null) return cached;
-
-  const result = await withRetry(queryFn);
-  await setCache(key, result, ttl);
-  return result;
+  throw new Error(DEPRECATION);
 }
