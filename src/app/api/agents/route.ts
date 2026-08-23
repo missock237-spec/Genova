@@ -22,17 +22,48 @@ export async function GET(request: NextRequest) {
   const rl = await rateLimit(request, auth.userId);
   if (!rl.allowed) return NextResponse.json({ error: 'Trop de requêtes' }, { status: 429 });
 
-  try {
-    const agents = await db.agent.findMany({
-      where: [{ field: 'userId', op: '==', value: auth.userId }],
-      orderBy: [{ field: 'createdAt', direction: 'desc' }],
-    });
+  // Retry : résilience contre les cold starts Vercel (Firestore gRPC
+  // channel non encore établi, timeout réseau, etc.)
+  let agents: Record<string, unknown>[] = [];
+  let permissions: Record<string, unknown>[] = [];
+  let tasks: Record<string, unknown>[] = [];
+  let lastError: unknown = null;
 
-    // include:{ _count:{tasks}, permissions } -> calculé en mémoire via la façade
-    const [permissions, tasks] = await Promise.all([
-      db.agentPermission.findMany({ where: [{ field: 'userId', op: '==', value: auth.userId }] }),
-      db.task.findMany({ where: [{ field: 'userId', op: '==', value: auth.userId }] }),
-    ]);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      agents = await db.agent.findMany({
+        where: [{ field: 'userId', op: '==', value: auth.userId }],
+        orderBy: [{ field: 'createdAt', direction: 'desc' }],
+      });
+
+      // include:{ _count:{tasks}, permissions } -> calculé en mémoire via la façade
+      const results = await Promise.all([
+        db.agentPermission.findMany({ where: [{ field: 'userId', op: '==', value: auth.userId }] }),
+        db.task.findMany({ where: [{ field: 'userId', op: '==', value: auth.userId }] }),
+      ]);
+      permissions = results[0];
+      tasks = results[1];
+      lastError = null;
+      break; // Succès
+    } catch (err) {
+      lastError = err;
+      console.error(`[agents/GET] Firestore query attempt ${attempt}/3 failed:`, err instanceof Error ? err.message : err);
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, 1000 * attempt));
+      }
+    }
+  }
+
+  if (lastError) {
+    console.error('[agents/GET] All retry attempts failed:', lastError);
+    const res = NextResponse.json(
+      { error: 'Failed to fetch agents' },
+      { status: 500 }
+    );
+    return secureResponse(res, request);
+  }
+
+  try {
 
     const byAgentPerms = permissions.reduce<Record<string, unknown[]>>((acc, p) => {
       const agentId = String((p as Record<string, unknown>).agentId || '');
@@ -61,7 +92,8 @@ export async function GET(request: NextRequest) {
 
     const res = NextResponse.json(enriched);
     return secureResponse(res, request);
-  } catch {
+  } catch (err) {
+    console.error('[agents/GET] Error enriching agents:', err);
     const res = NextResponse.json(
       { error: 'Failed to fetch agents' },
       { status: 500 }
@@ -223,7 +255,8 @@ export async function POST(request: NextRequest) {
 
     const res = NextResponse.json(agentWithPerms, { status: 201 });
     return secureResponse(res, request);
-  } catch {
+  } catch (err) {
+    console.error('[agents/POST] Failed to create agent:', err instanceof Error ? err.message : err);
     const res = NextResponse.json(
       { error: 'Failed to create agent' },
       { status: 500 }

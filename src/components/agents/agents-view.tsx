@@ -738,14 +738,24 @@ function AgentsViewInner() {
   const fetchAgents = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
-    try {
-      const data = await apiFetch<Agent[]>('/api/agents');
-      setAgents(Array.isArray(data) ? data : []);
-    } catch (err) {
-      setAgents([]);
-      setFetchError(err instanceof Error ? err.message : 'Impossible de charger les agents');
-    } finally {
-      setLoading(false);
+    // Retry avec backoff : résilience contre les cold starts Vercel
+    // et les timeouts réseau sur mobile
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const data = await apiFetch<Agent[]>('/api/agents');
+        setAgents(Array.isArray(data) ? data : []);
+        setLoading(false);
+        return; // Succès
+      } catch (err) {
+        console.warn(`[agents-view] fetchAgents attempt ${attempt}/3 failed:`, err instanceof Error ? err.message : err);
+        if (attempt >= 3) {
+          setAgents([]);
+          setFetchError(err instanceof Error ? err.message : 'Impossible de charger les agents');
+          setLoading(false);
+        } else {
+          await new Promise(r => setTimeout(r, 1500 * attempt));
+        }
+      }
     }
   }, []);
 

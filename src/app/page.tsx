@@ -37,7 +37,6 @@ function AppContent() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const isLoading = useAuthStore((s) => s.isLoading);
   const hydrate = useAuthStore((s) => s.hydrate);
-  const validateSession = useAuthStore((s) => s.validateSession);
   const logout = useAuthStore((s) => s.logout);
 
   const currentView = useAppStore((s) => s.currentView);
@@ -67,54 +66,20 @@ function AppContent() {
     }
   }, [hydrate]);
 
-  // --- Fix 2 : validateSession avec retry (2 tentatives) ---
-  // Après inscription, le cookie Firebase est frais mais verifySessionCookie
-  // peut échouer sur un cold start Vercel (JWKS pas encore téléchargées).
-  // On retry une fois avant de déclarer la session expirée.
+  // --- Session validée : hydrate() a déjà vérifié la session via /api/auth/me ---
+  // Le validateSession() précédent faisait un DEUXIÈME appel à /api/auth/me,
+  // ce qui doublait le risque de cold start Vercel (deux instances différentes).
+  // Si hydrate() réussit et setIsAuthenticated(true), la session EST valide.
+  // On ne fait plus de second appel — on charge directement les données.
   useEffect(() => {
     if (isAuthenticated && !validatedRef.current && !loadError) {
       validatedRef.current = true;
-
-      const tryValidate = async (attempt: number): Promise<boolean> => {
-        try {
-          const valid = await validateSession();
-          if (valid) return true;
-          // Réponse serveur mais user:null — session vraiment invalide
-          if (attempt >= 2) return false;
-          // Retry après 2s (cold start Vercel)
-          console.warn(`[gen3ia] validateSession attempt ${attempt} failed (user:null), retrying...`);
-          await new Promise(r => setTimeout(r, 2000));
-          return tryValidate(attempt + 1);
-        } catch (err) {
-          // Erreur réseau/timeout — ne PAS traiter comme session expirée
-          const errMsg = err instanceof Error ? err.message : String(err);
-          const isTimeout = err instanceof Error && err.name === 'AbortError';
-          console.error(`[gen3ia] validateSession attempt ${attempt} network error:`, errMsg);
-          if (attempt >= 2) {
-            // Dernière tentative : erreur réseau, pas session expirée
-            // On ne bloque pas l'utilisateur — on laisse le dashboard se charger
-            console.warn('[gen3ia] validateSession network error after 2 attempts, allowing dashboard');
-            return true; // Allow dashboard on network errors
-          }
-          await new Promise(r => setTimeout(r, 2000));
-          return tryValidate(attempt + 1);
-        }
-      };
-
-      tryValidate(1)
-        .then((valid) => {
-          if (valid) {
-            console.log('[gen3ia] validateSession OK — session active');
-            fetchApprovalCount().catch((err) => {
-              console.warn('[gen3ia] fetchApprovalCount failed:', err);
-            });
-          } else {
-            console.warn('[gen3ia] validateSession : session expirée après retry');
-            setLoadError('Session expirée, veuillez vous reconnecter');
-          }
-        });
+      console.log('[gen3ia] session validée via hydrate — chargement des données');
+      fetchApprovalCount().catch((err) => {
+        console.warn('[gen3ia] fetchApprovalCount failed:', err);
+      });
     }
-  }, [isAuthenticated, loadError, validateSession, fetchApprovalCount]);
+  }, [isAuthenticated, loadError, fetchApprovalCount]);
 
   // --- T23 : timer stuck loading ---
   useEffect(() => {
