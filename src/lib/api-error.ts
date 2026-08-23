@@ -22,7 +22,6 @@ import { NextResponse } from 'next/server';
 import {
   ApiError as CoreApiError,
   ErrorCodes as CoreErrorCodes,
-  handleApiError as handleCoreApiError,
 } from '@/lib/errors';
 
 export type {
@@ -71,51 +70,6 @@ export interface ApiSuccessResponse<T = unknown> {
 export type ApiResponse<T = unknown> = ApiSuccessResponse<T> | ApiErrorResponse;
 
 /**
- * Convertit une réponse d'erreur canonique core en format legacy plat.
- */
-async function flattenCoreErrorResponse(
-  response: NextResponse
-): Promise<NextResponse<ApiErrorResponse>> {
-  try {
-    const payload = await response.clone().json() as {
-      success?: false;
-      error?: { code?: string; message?: string; details?: Record<string, unknown> } | string;
-      code?: string;
-    };
-
-    if (payload && typeof payload.error === 'object' && payload.error !== null) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: payload.error.message || 'Erreur interne du serveur',
-          code: payload.error.code || payload.code || ErrorCode.INTERNAL_ERROR,
-          ...(payload.error.details ? { details: payload.error.details } : {}),
-        },
-        { status: response.status },
-      );
-    }
-
-    if (payload && typeof payload.error === 'string') {
-      return NextResponse.json(
-        {
-          success: false,
-          error: payload.error,
-          code: payload.code || ErrorCode.INTERNAL_ERROR,
-        },
-        { status: response.status },
-      );
-    }
-  } catch {
-    // Si le corps core n'est pas JSON, on retombe sur une erreur legacy générique.
-  }
-
-  return NextResponse.json(
-    { success: false, error: 'Erreur interne du serveur', code: ErrorCode.INTERNAL_ERROR },
-    { status: response.status || 500 },
-  );
-}
-
-/**
  * Retourne une réponse d'erreur standardisée au format legacy.
  *
  * @deprecated Préférer '@/lib/errors' pour le contrat canonique
@@ -123,7 +77,7 @@ async function flattenCoreErrorResponse(
  */
 export function errorResponse(
   error: string,
-  code: ErrorCodeType = ErrorCode.INTERNAL_ERROR,
+  code: ErrorCodeType | string = ErrorCode.INTERNAL_ERROR,
   status: number = 500,
   details?: Record<string, unknown>
 ): NextResponse<ApiErrorResponse> {
@@ -192,9 +146,8 @@ export class ApiError extends Error {
 /**
  * Wrapper legacy pour handler les erreurs dans les routes API.
  *
- * Les ApiError legacy gardent leur ancien format plat. Les autres erreurs
- * passent par le handler canonique core puis sont aplaties pour préserver
- * le contrat historique de '@/lib/api-error'.
+ * Les ApiError legacy gardent leur ancien format plat. Les CoreApiError sont
+ * adaptés vers le même format plat pour préserver les consommateurs existants.
  *
  * @deprecated Préférer handleApiError depuis '@/lib/errors'.
  */
@@ -217,17 +170,9 @@ export function handleApiError(error: unknown): NextResponse<ApiErrorResponse> {
     ) {
       return errorResponse('Erreur de base de données', ErrorCode.INTERNAL_ERROR, 500);
     }
-  }
 
-  const coreResponse = handleCoreApiError(error);
-
-  // NextResponse.json(...) est synchrone, mais lire le body ne l'est pas.
-  // Pour préserver la signature sync legacy, on ne peut pas await ici.
-  // On conserve donc le comportement historique pour les erreurs non typées.
-  if (error instanceof Error) {
     return errorResponse(error.message, ErrorCode.INTERNAL_ERROR, 500);
   }
 
-  void flattenCoreErrorResponse(coreResponse);
   return errorResponse('Erreur interne du serveur', ErrorCode.INTERNAL_ERROR, 500);
 }
