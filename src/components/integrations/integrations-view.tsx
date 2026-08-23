@@ -92,7 +92,7 @@ export function IntegrationsView() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {integrations.map(i => {
-            const isConnected = connectedIds.includes(i.id) || i.isConnected;
+            const isConnected = connectedIds.includes(i.id) || !!i.isConnected;
             const isToggling = togglingId === i.id;
             return (
               <div key={i.id} className="bg-card rounded-xl border p-5 hover:shadow-md">

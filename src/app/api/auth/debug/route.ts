@@ -22,7 +22,7 @@ export async function GET() {
 
     // Test listUsers (minimal) to verify Admin SDK connectivity
     const start = Date.now();
-    const listResult = await auth.listUsers({ maxResults: 1 });
+    const listResult = await auth.listUsers(1);
     results.adminListUsers = {
       ok: true,
       latencyMs: Date.now() - start,
@@ -62,7 +62,7 @@ export async function GET() {
     };
     // Also check SESSION_COOKIE_MAX_AGE_SHORT (exported from auth.ts)
     const { SESSION_COOKIE_MAX_AGE_SHORT } = await import('@/lib/firebase/auth');
-    results.sessionConfig.maxAge24h = SESSION_COOKIE_MAX_AGE_SHORT;
+    (results.sessionConfig as Record<string, unknown>).maxAge24h = SESSION_COOKIE_MAX_AGE_SHORT;
   } catch (err) {
     results.sessionConfig = { error: err instanceof Error ? err.message : String(err) };
   }

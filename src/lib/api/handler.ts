@@ -290,7 +290,7 @@ export function createApiHandler<
       }
 
       // 6. Handler métier
-      const result = await handler({ request, auth, params, body, query, requestId });
+      const result = await handler({ request, auth: auth ?? null, params, body, query, requestId });
 
       // Réponse déjà construite par le handler → passthrough intégral.
       if (result instanceof Response) return result as NextResponse;

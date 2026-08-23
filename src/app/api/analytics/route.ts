@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { applySecurity, secureResponse } from '@/lib/security';
+import type { WhereInput } from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -182,7 +183,7 @@ export async function GET(request: NextRequest) {
     let totalAgents = 0;
     let totalTasks = 0;
     try {
-      const whereUser = [{ field: 'userId', op: '==', value: userId }];
+      const whereUser: WhereInput = [{ field: 'userId', op: '==', value: userId }];
       [totalAgents, totalTasks] = await Promise.all([
         db.agent.count({ where: whereUser }),
         db.task.count({ where: whereUser }),

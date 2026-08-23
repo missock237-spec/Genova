@@ -153,7 +153,7 @@ export async function getOrgForUser(userId: string): Promise<{ org: Organization
   const org = await db.organization.findUnique({ where: { id: membership.orgId } });
   if (!org) return null;
 
-  return { org: org as Organization, membership };
+  return { org: org as unknown as Organization, membership };
 }
 
 /**
@@ -181,7 +181,7 @@ export async function getOrgForUserById(
   const org = await db.organization.findUnique({ where: { id: orgId } });
   if (!org) return null;
 
-  return { org: org as Organization, membership };
+  return { org: org as unknown as Organization, membership };
 }
 
 /**
@@ -197,7 +197,7 @@ export async function listOrgMembers(orgId: string): Promise<Membership[]> {
     orderBy: [{ field: 'createdAt', direction: 'asc' }],
     limit: 200,
   });
-  return (members as Membership[]).map((m) => ({ ...m, role: normalizeOrgRole(m.role) }));
+  return (members as unknown as Membership[]).map((m) => ({ ...m, role: normalizeOrgRole(m.role) }));
 }
 
 // ============================================================
@@ -256,7 +256,7 @@ export async function updateMemberRole(userId: string, orgId: string, newRole: O
       ],
       limit: 10,
     });
-    const ownerCount = (otherOwners as Membership[]).filter((m) => m.userId !== userId).length;
+    const ownerCount = (otherOwners as unknown as Membership[]).filter((m) => m.userId !== userId).length;
     if (ownerCount === 0) {
       throw new Error('LAST_OWNER: impossible de dégrader le dernier owner');
     }
@@ -286,7 +286,7 @@ export async function removeMember(userId: string, orgId: string): Promise<void>
       ],
       limit: 10,
     });
-    const ownerCount = (otherOwners as Membership[]).filter((m) => m.userId !== userId).length;
+    const ownerCount = (otherOwners as unknown as Membership[]).filter((m) => m.userId !== userId).length;
     if (ownerCount === 0) {
       throw new Error('LAST_OWNER: impossible de retirer le dernier owner');
     }
@@ -326,7 +326,7 @@ export async function countActiveMembers(orgId: string): Promise<number> {
     ],
     limit: 1000,
   });
-  return (members as Membership[]).length;
+  return (members as unknown as Membership[]).length;
 }
 
 export { ORG_COLLECTIONS };

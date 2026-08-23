@@ -148,7 +148,7 @@ export async function checkBudget(agentId: string): Promise<BudgetCheck> {
     return {
       allowed: true,
       budget: {
-        agentId, dailyActions: 0, dailyTokens: 0, dailyCost: 0, monthlyCost: 0,
+        agentId, userId: '', plan: 'free', dailyActions: 0, dailyTokens: 0, dailyCost: 0, monthlyCost: 0,
         maxDailyActions: 100, maxDailyTokens: 50000, maxDailyCost: 0.01, maxMonthlyCost: 0.30,
       },
     };

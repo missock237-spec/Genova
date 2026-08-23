@@ -113,7 +113,13 @@ export type ViewType =
   | 'approvals'
   | 'analytics'
   | 'billing'
-  | 'developers';
+  | 'developers'
+  | 'voice'
+  | 'images'
+  | 'integrations'
+  | 'notifications'
+  | 'scheduler'
+  | 'agent-chat';
 
 interface AppState {
   currentView: ViewType;
