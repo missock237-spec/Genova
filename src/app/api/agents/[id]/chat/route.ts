@@ -50,19 +50,12 @@ export async function POST(
       });
     }
 
+    // Firestore facade ne supporte pas 'include' — requêtes séparées
     const agent = await db.agent.findUnique({
       where: { id },
-      include: {
-        permissions: true,
-        conversations: {
-          orderBy: { updatedAt: 'desc' },
-          take: 1,
-          include: { messages: { orderBy: { createdAt: 'asc' }, take: 20 } },
-        },
-      },
     });
 
-    if (!agent || agent.userId !== auth.userId) {
+    if (!agent || (agent as Record<string, unknown>).userId !== auth.userId) {
       return new Response(JSON.stringify({ error: 'Agent not found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
@@ -70,7 +63,7 @@ export async function POST(
     }
 
     // Check if agent is active
-    if (agent.status !== 'active') {
+    if ((agent as Record<string, unknown>).status !== 'active') {
       return new Response(JSON.stringify({ error: 'Agent is not active' }), {
         status: 403,
         headers: { 'Content-Type': 'application/json' },
@@ -80,9 +73,9 @@ export async function POST(
     // Check daily token limit before processing chat
     const user = await db.user.findUnique({
       where: { id: auth.userId },
-      select: { plan: true },
+      select: ['plan'],
     });
-    const plan = user?.plan || 'free';
+    const plan = (user?.plan as string) || 'free';
     const tokenCheck = await checkTokenLimit(auth.userId, plan);
 
     if (!tokenCheck.allowed) {
@@ -101,10 +94,16 @@ export async function POST(
       });
     }
 
+    // Récupérer les permissions séparément (Firestore ne supporte pas include)
+    const agentPermissions = await db.agentPermission.findMany({
+      where: [{ field: 'agentId', op: '==', value: id }],
+    }).catch(() => []);
+
     // Parse agent config for personality/instructions
+    const agentConfigStr = (agent as Record<string, unknown>).config as string || '{}';
     let agentConfig: Record<string, unknown> = {};
     try {
-      agentConfig = JSON.parse(agent.config);
+      agentConfig = JSON.parse(agentConfigStr);
     } catch {
       agentConfig = {};
     }
@@ -113,15 +112,18 @@ export async function POST(
     const instructions = (agentConfig as { instructions?: string }).instructions || '';
 
     // Build system prompt based on agent config and permissions
-    const grantedPermissions = agent.permissions
+    const grantedPermissions = (agentPermissions as Record<string, unknown>[])
       .filter((p) => p.granted)
-      .map((p) => p.permission);
+      .map((p) => p.permission as string);
 
     // Retrieve relevant memories for context injection
     const memoryContext = await getMemoryContext(id, auth.userId, message);
 
-    const systemPrompt = `You are ${agent.name}, an AI agent with the following characteristics:
-- Type: ${agent.type}
+    const agentName = (agent as Record<string, unknown>).name as string || 'Assistant';
+    const agentType = (agent as Record<string, unknown>).type as string || 'custom';
+
+    const systemPrompt = `You are ${agentName}, an AI agent with the following characteristics:
+- Type: ${agentType}
 - Personality: ${personality}
 ${instructions ? `- Special Instructions: ${instructions}` : ''}
 
@@ -162,8 +164,8 @@ Respond concisely and helpfully. If you need to perform an action, describe what
         data: {
           title: message.substring(0, 50),
           type: 'agent_chat',
-          agentId: agent.id,
-          userId: agent.userId,
+          agentId: id,
+          userId: auth.userId,
         },
       });
       convId = conv.id;

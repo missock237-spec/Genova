@@ -45,6 +45,7 @@ import {
 import { AdProvider, useAdContext } from '@/components/shared/ad-context';
 import { AdBanner } from '@/components/shared/ad-banner';
 import { AgentResponse } from '@/components/shared/agent-response';
+import { BorderBeam } from '@/components/ui/border-beam';
 import { AgentCreateDialog } from './agent-create-dialog';
 import { AgentDetailView } from './agent-detail-view';
 import { apiFetch } from '@/lib/api';
@@ -687,33 +688,35 @@ function ChatTab({ agents }: { agents: Agent[] }) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input area */}
-      <div className="border-t p-4">
-        <div className="flex gap-2">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              selectedAgent
-                ? `Écrivez votre message à ${selectedAgent.name}...`
-                : 'Sélectionnez d\'abord un agent...'
-            }
-            className="flex-1 min-h-[44px] max-h-32 rounded-xl border bg-background px-4 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#06b6d4]"
-            rows={1}
-            disabled={!selectedAgentId || selectedAgent?.status !== 'active'}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || isTyping || !selectedAgentId || selectedAgent?.status !== 'active'}
-            className="h-[44px] w-[44px] rounded-xl bg-[#06b6d4] text-white hover:bg-[#06b6d4]/90 disabled:opacity-50 flex items-center justify-center transition-colors"
-          >
-            {isTyping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          </button>
-        </div>
+      {/* Input area with BorderBeam */}
+      <div className="p-4">
+        <BorderBeam size="sm" colorVariant="colorful">
+          <div className="flex gap-2 rounded-xl border bg-background p-1">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                selectedAgent
+                  ? `Écrivez votre message à ${selectedAgent.name}...`
+                  : 'Sélectionnez d\'abord un agent...'
+              }
+              className="flex-1 min-h-[44px] max-h-32 rounded-lg bg-transparent px-3 py-2.5 text-sm resize-none focus:outline-none"
+              rows={1}
+              disabled={!selectedAgentId || selectedAgent?.status !== 'active'}
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || isTyping || !selectedAgentId || selectedAgent?.status !== 'active'}
+              className="h-[44px] w-[44px] rounded-lg bg-[#06b6d4] text-white hover:bg-[#06b6d4]/90 disabled:opacity-50 flex items-center justify-center transition-colors"
+            >
+              {isTyping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </button>
+          </div>
+        </BorderBeam>
         {selectedAgent && selectedAgent.status !== 'active' && (
-          <p className="text-[10px] text-amber-500 mt-1.5">Cet agent est inactif. Activez-le pour discuter.</p>
+          <p className="text-[10px] text-amber-500 mt-1.5 px-1">Cet agent est inactif. Activez-le pour discuter.</p>
         )}
       </div>
     </div>

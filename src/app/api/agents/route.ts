@@ -174,13 +174,26 @@ export async function POST(request: NextRequest) {
       avatar = stripNullBytes(avatar);
     }
 
-    // Check total agent limit for the user's plan
-    const user = await db.user.findUnique({
-      where: { id: auth.userId },
-      select: ['plan'],
-    });
+    // Check total agent limit for the user's plan (avec retry cold start)
+    let user: Record<string, unknown> | null = null;
+    let agentLimitCheck = { allowed: true, current: 0, limit: 0 };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        user = await db.user.findUnique({
+          where: { id: auth.userId },
+          select: ['plan'],
+        });
+        const plan = (user?.plan as string) || 'free';
+        agentLimitCheck = await checkAgentLimit(auth.userId, plan);
+        break;
+      } catch (err) {
+        console.error(`[agents/POST] Plan/limit check attempt ${attempt}/3 failed:`, err instanceof Error ? err.message : err);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+        else throw err; // re-throw on final attempt
+      }
+    }
+
     const plan = (user?.plan as string) || 'free';
-    const agentLimitCheck = await checkAgentLimit(auth.userId, plan);
 
     if (!agentLimitCheck.allowed) {
       const upgradeMessage = plan === 'free'
@@ -199,18 +212,29 @@ export async function POST(request: NextRequest) {
       return secureResponse(res, request);
     }
 
-    const agent = await db.agent.create({
-      data: {
-        name,
-        type,
-        description: description || '',
-        config: config ? JSON.stringify(config) : '{}',
-        avatar: avatar || null,
-        userId: auth.userId,
-      },
-    });
+    // Create agent avec retry (cold start Vercel)
+    let agent: Record<string, unknown> | undefined;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        agent = await db.agent.create({
+          data: {
+            name,
+            type,
+            description: description || '',
+            config: config ? JSON.stringify(config) : '{}',
+            avatar: avatar || null,
+            userId: auth.userId,
+          },
+        });
+        break;
+      } catch (err) {
+        console.error(`[agents/POST] db.agent.create attempt ${attempt}/3 failed:`, err instanceof Error ? err.message : err);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+        else throw err;
+      }
+    }
 
-    // Create default permissions for the agent
+    // Create default permissions for the agent (avec retry)
     const defaultPermissions = [
       { permission: 'browse_web', granted: false, requiresApproval: true },
       { permission: 'social_post', granted: false, requiresApproval: true },
@@ -224,32 +248,44 @@ export async function POST(request: NextRequest) {
       { permission: 'use_mvp', granted: false, requiresApproval: true },
     ];
 
-    await db.agentPermission.createMany({
-      data: defaultPermissions.map((p) => ({
-        agentId: (agent as Record<string, unknown>).id as string,
-        permission: p.permission,
-        granted: p.granted,
-        requiresApproval: p.requiresApproval,
-        userId: auth.userId,
-      })),
-    });
+    const agentId = (agent!).id as string;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await db.agentPermission.createMany({
+          data: defaultPermissions.map((p) => ({
+            agentId,
+            permission: p.permission,
+            granted: p.granted,
+            requiresApproval: p.requiresApproval,
+            userId: auth.userId,
+          })),
+        });
+        break;
+      } catch (err) {
+        console.error(`[agents/POST] createMany permissions attempt ${attempt}/3 failed:`, err instanceof Error ? err.message : err);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+        else throw err;
+      }
+    }
 
-    // activityLog n'existe plus dans la façade -> audit_logs (collection dédiée)
-    await db.auditLog.create({
+    // Audit log (fire-and-forget avec retry léger)
+    db.auditLog.create({
       data: {
         action: 'Agent Created',
         details: JSON.stringify({ agentName: name, type }),
         category: 'agent',
         userId: auth.userId,
       },
+    }).catch((err) => {
+      console.error('[agents/POST] auditLog.create failed (non-blocking):', err instanceof Error ? err.message : err);
     });
 
     // Return agent with permissions (include:{permissions} calculé en mémoire)
     const agentRow = await db.agent.findUnique({
-      where: { id: (agent as Record<string, unknown>).id as string },
+      where: { id: agentId },
     });
     const perms = await db.agentPermission.findMany({
-      where: [{ field: 'agentId', op: '==', value: (agent as Record<string, unknown>).id }],
+      where: [{ field: 'agentId', op: '==', value: agentId }],
     });
     const agentWithPerms = { ...agentRow, permissions: perms };
 
