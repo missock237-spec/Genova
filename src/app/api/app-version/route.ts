@@ -7,8 +7,10 @@
 // Retourne la version, le SHA du build, et un flag forceUpdate
 // que le client peut utiliser pour décider s'il doit recharger.
 //
-// Cache HTTP court (60s) pour ne pas surcharger le serveur tout en
-// permettant une détection rapide des nouveaux déploiements.
+// Cache HTTP STRICTEMENT désactivé (no-store) : chaque push GitHub
+// déclenche un déploiement Vercel, et le navigateur doit charger la
+// nouvelle version de façon instantanée. Toute cache (navigateur,
+// CDN, Vercel) est explicitement désactivée pour cet endpoint.
 // ============================================================
 
 import { NextResponse } from 'next/server';
@@ -99,7 +101,8 @@ export async function GET(request: Request) {
   }
 
   // 3. Si le buildId du client est différent du serveur, une mise à jour est disponible
-  const updateAvailable = clientBuildId && clientBuildId !== buildId;
+  //    Toujours un booléen strict (pas de chaîne vide), pour une API prévisible.
+  const updateAvailable = Boolean(clientBuildId && clientBuildId !== buildId);
 
   const response: AppVersionResponse = {
     version,
@@ -120,8 +123,14 @@ export async function GET(request: Request) {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        // Cache court: le client check toutes les 2min, on cache 60s côté serveur
-        'Cache-Control': 'public, max-age=60, s-maxage=60, stale-while-revalidate=30',
+        // Aucune cache nulle part : le navigateur doit voir la nouvelle
+        // version dès le déploiement Vercel terminé.
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Surrogate-Control': 'no-store',
+        'CDN-Cache-Control': 'no-store',
+        'Vercel-CDN-Cache-Control': 'no-store',
         // Version actuelle en header pour les outils de monitoring
         'X-App-Version': version,
         'X-Build-Id': buildId,
