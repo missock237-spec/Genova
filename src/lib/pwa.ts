@@ -9,6 +9,21 @@
 import { useSyncExternalStore } from 'react';
 
 /**
+ * URL du service worker, versionnée par buildId (fallback : dev).
+ * Le paramètre de version force le navigateur à re-vérifier sw.js à
+ * chaque chargement au lieu de réutiliser un sw.js en cache HTTP.
+ * NEXT_PUBLIC_BUILD_ID est injecté au build par scripts/prebuild.js
+ * et remplacé statiquement dans le bundle client par Next.js.
+ */
+function getServiceWorkerUrl(): string {
+  const buildId =
+    typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_BUILD_ID
+      ? process.env.NEXT_PUBLIC_BUILD_ID
+      : 'dev';
+  return `/sw.js?v=${encodeURIComponent(buildId)}`;
+}
+
+/**
  * Enregistre le service worker.
  */
 export function registerServiceWorker(): void {
@@ -17,9 +32,12 @@ export function registerServiceWorker(): void {
 
   window.addEventListener('load', () => {
     navigator.serviceWorker
-      .register('/sw.js?v=gen3ia-v6', { updateViaCache: 'none' })
+      .register(getServiceWorkerUrl(), { updateViaCache: 'none' })
       .then((reg) => {
         console.info('[PWA] Service Worker registered', reg.scope);
+        // Forcer une mise à jour immédiate pour capter une version
+        // déployée entre deux chargements.
+        reg.update().catch(() => {});
       })
       .catch((err) => {
         console.warn('[PWA] SW registration failed', err);
