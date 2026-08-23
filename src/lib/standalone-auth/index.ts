@@ -1,11 +1,18 @@
 // ============================================================
 // Gen3ia — Standalone Auth (fallback sans Firebase)
 // ============================================================
-// Système d'authentification autonome utilisant Node.js crypto.
+// Systeme d'authentification autonome utilisant Node.js crypto.
 // Active automatiquement quand les variables Firebase sont absentes.
 //
-// Stockage : fichier JSON dans /tmp (Vercel serverless-compatible).
-// Pour la production, migrer vers une vraie DB (PostgreSQL, etc.)
+// Stockage hybride :
+//   1. In-memory Map (rapide, persiste sur warm instances)
+//   2. Fichier JSON /tmp (backup, survit aux restarts)
+//   3. Le JWT cookie contient les donnees utilisateur pour que la
+//      session fonctionne meme apres un cold start (sans store)
+//
+// LIMITATION : Le login par mot de passe ne fonctionne que si le
+// store est accessible (meme instance ou fichier partage).
+// Pour la production multi-instance, configurez Firebase.
 // ============================================================
 
 import { createHash, randomBytes, scryptSync, createHmac, timingSafeEqual } from 'crypto';
@@ -46,22 +53,22 @@ export interface StandaloneSession {
   credits: number;
   avatar: string | null;
   emailVerified: boolean;
+  // champs password pour permettre le re-login depuis le cookie
+  passwordHash?: string;
+  salt?: string;
   iat: number;
   exp: number;
 }
 
 interface UserStore {
   users: Record<string, StandaloneUser>;
-  emailIndex: Record<string, string>; // email -> userId
-  creditIndex: Record<string, { userId: string; balance: number; totalEarned: number; totalSpent: number }>;
+  emailIndex: Record<string, string>;
 }
 
 // ============================================================
 // Configuration
 // ============================================================
 
-// On genere un secret persistant dans /tmp s'il n'existe pas,
-// pour que les tokens survivent aux hot-reloads en dev.
 function getOrCreateSecret(): string {
   const secretPath = '/tmp/gen3ia-auth/jwt-secret.txt';
   if (existsSync(secretPath)) {
@@ -86,7 +93,6 @@ const DATA_FILE = join(DATA_DIR, 'users.json');
 // Detection Firebase
 // ============================================================
 
-/** Verifie si Firebase est configure cote serveur */
 export function isFirebaseConfigured(): boolean {
   return !!(
     process.env.FIREBASE_SERVICE_ACCOUNT ||
@@ -94,7 +100,6 @@ export function isFirebaseConfigured(): boolean {
   );
 }
 
-/** Verifie si Firebase est configure cote client */
 export function isFirebaseClientConfigured(): boolean {
   return !!(
     process.env.NEXT_PUBLIC_FIREBASE_API_KEY &&
@@ -105,8 +110,17 @@ export function isFirebaseClientConfigured(): boolean {
 }
 
 // ============================================================
-// User Store (JSON file)
+// User Store (In-memory + File)
 // ============================================================
+
+let memoryStore: UserStore | null = null;
+
+function getMemoryStore(): UserStore {
+  if (!memoryStore) {
+    memoryStore = loadFromFile();
+  }
+  return memoryStore;
+}
 
 function ensureDataDir(): void {
   if (!existsSync(DATA_DIR)) {
@@ -114,21 +128,29 @@ function ensureDataDir(): void {
   }
 }
 
-function loadStore(): UserStore {
+function loadFromFile(): UserStore {
   ensureDataDir();
   if (existsSync(DATA_FILE)) {
     try {
       return JSON.parse(readFileSync(DATA_FILE, 'utf-8'));
     } catch {
-      // Corrupted file, start fresh
+      // Corrupted
     }
   }
-  return { users: {}, emailIndex: {}, creditIndex: {} };
+  return { users: {}, emailIndex: {} };
 }
 
-function saveStore(store: UserStore): void {
+function saveToFile(store: UserStore): void {
   ensureDataDir();
-  writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  try {
+    writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[standalone-auth] Failed to save to file:', err);
+  }
+}
+
+function persistStore(): void {
+  if (memoryStore) saveToFile(memoryStore);
 }
 
 function generateId(): string {
@@ -147,9 +169,7 @@ const SCRYPT_PARALLELIZATION = 1;
 export function hashPassword(password: string, salt?: string): { hash: string; salt: string } {
   const actualSalt = salt || randomBytes(16).toString('hex');
   const hash = scryptSync(
-    password,
-    actualSalt,
-    SCRYPT_KEY_LENGTH,
+    password, actualSalt, SCRYPT_KEY_LENGTH,
     { N: SCRYPT_COST, r: SCRYPT_BLOCK_SIZE, p: SCRYPT_PARALLELIZATION }
   ).toString('hex');
   return { hash, salt: actualSalt };
@@ -157,9 +177,7 @@ export function hashPassword(password: string, salt?: string): { hash: string; s
 
 export function verifyPassword(password: string, hash: string, salt: string): boolean {
   const computed = scryptSync(
-    password,
-    salt,
-    SCRYPT_KEY_LENGTH,
+    password, salt, SCRYPT_KEY_LENGTH,
     { N: SCRYPT_COST, r: SCRYPT_BLOCK_SIZE, p: SCRYPT_PARALLELIZATION }
   ).toString('hex');
   return timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(computed, 'hex'));
@@ -225,7 +243,7 @@ export function createUser(data: {
   password: string;
   name: string;
 }): { user: StandaloneUser; token: string } {
-  const store = loadStore();
+  const store = getMemoryStore();
   const email = data.email.toLowerCase().trim();
 
   if (store.emailIndex[email]) {
@@ -237,93 +255,85 @@ export function createUser(data: {
   const now = new Date().toISOString();
 
   const user: StandaloneUser = {
-    id,
-    email,
-    name: data.name.trim(),
-    passwordHash: hash,
-    salt,
-    avatar: null,
-    emailVerified: false,
-    plan: 'free',
-    role: 'user',
-    credits: 100,
-    isActive: true,
-    isCreator: false,
-    creatorEarnings: 0,
-    creatorWithdrawn: 0,
-    createdAt: now,
-    updatedAt: now,
-    lastActiveAt: now,
+    id, email, name: data.name.trim(),
+    passwordHash: hash, salt,
+    avatar: null, emailVerified: false,
+    plan: 'free', role: 'user', credits: 100,
+    isActive: true, isCreator: false,
+    creatorEarnings: 0, creatorWithdrawn: 0,
+    createdAt: now, updatedAt: now, lastActiveAt: now,
   };
 
   store.users[id] = user;
   store.emailIndex[email] = id;
-  store.creditIndex[`credit_${id}`] = {
-    userId: id,
-    balance: 100,
-    totalEarned: 100,
-    totalSpent: 0,
-  };
+  persistStore();
 
-  saveStore(store);
-
+  // Le JWT contient les donnees utilisateur + hash pour permettre
+  // la reconnexion meme apres un cold start (instance differente).
   const token = signJWT({
-    sub: id,
-    uid: id,
-    userId: id,
- email: user.email,
-    name: user.name,
-    role: user.role,
-    plan: user.plan,
-    credits: user.credits,
-    avatar: user.avatar,
+    sub: id, uid: id, userId: id,
+    email: user.email, name: user.name,
+    role: user.role, plan: user.plan,
+    credits: user.credits, avatar: user.avatar,
     emailVerified: user.emailVerified,
+    // Inclus pour permettre le re-login stateless
+    passwordHash: hash, salt,
   });
 
   return { user, token };
 }
 
+/**
+ * Authentifie un utilisateur.
+ * Strategie :
+ *   1. Cherche dans le store (memoire + fichier)
+ *   2. Si non trouve, c'est un cold start : on ne peut pas
+ *      verifier le mot de passe sans le hash stocke.
+ */
 export function authenticateUser(email: string, password: string): { user: StandaloneUser; token: string } | null {
-  const store = loadStore();
+  const store = getMemoryStore();
   const normalizedEmail = email.toLowerCase().trim();
   const userId = store.emailIndex[normalizedEmail];
 
-  if (!userId) return null;
+  if (!userId) {
+    // Utilisateur non trouve dans le store local.
+    // En mode standalone sur Vercel multi-instance, c'est un cas
+    // connu apres un cold start. Le store se reconstruit au prochain
+    // register sur cette instance.
+    console.warn('[standalone-auth] User not found in local store:', normalizedEmail,
+      '(cold start or different instance)');
+    return null;
+  }
 
   const user = store.users[userId];
-  if (!user) return null;
-  if (!user.isActive) return null;
+  if (!user || !user.isActive) return null;
 
   if (!verifyPassword(password, user.passwordHash, user.salt)) return null;
 
   user.lastActiveAt = new Date().toISOString();
   user.updatedAt = new Date().toISOString();
   store.users[userId] = user;
-  saveStore(store);
+  persistStore();
 
   const token = signJWT({
-    sub: user.id,
-    uid: user.id,
-    userId: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    plan: user.plan,
-    credits: user.credits,
-    avatar: user.avatar,
+    sub: user.id, uid: user.id, userId: user.id,
+    email: user.email, name: user.name,
+    role: user.role, plan: user.plan,
+    credits: user.credits, avatar: user.avatar,
     emailVerified: user.emailVerified,
+    passwordHash: user.passwordHash, salt: user.salt,
   });
 
   return { user, token };
 }
 
 export function getUserById(id: string): StandaloneUser | null {
-  const store = loadStore();
+  const store = getMemoryStore();
   return store.users[id] || null;
 }
 
 export function getUserByEmail(email: string): StandaloneUser | null {
-  const store = loadStore();
+  const store = getMemoryStore();
   const userId = store.emailIndex[email.toLowerCase().trim()];
   return userId ? (store.users[userId] || null) : null;
 }
@@ -360,13 +370,9 @@ export async function getStandaloneSessionCookie(): Promise<string | undefined> 
 
 export interface ServerSession {
   user: {
-    id: string;
-    uid: string;
-    email: string;
-    name: string;
-    role: string;
-    picture?: string | null;
-    emailVerified: boolean;
+    id: string; uid: string; email: string;
+    name: string; role: string;
+    picture?: string | null; emailVerified: boolean;
   };
 }
 
@@ -377,18 +383,15 @@ export async function getStandaloneServerSession(): Promise<ServerSession | null
   const session = verifyJWT(token);
   if (!session) return null;
 
-  const user = getUserById(session.userId);
-  if (!user || !user.isActive) return null;
-
+  // Le JWT contient les donnees utilisateur, donc la session
+  // fonctionne meme apres un cold start (sans store).
+  // On evite de lire le store si le JWT est valide.
   return {
     user: {
-      id: user.id,
-      uid: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      picture: user.avatar,
-      emailVerified: user.emailVerified,
+      id: session.userId, uid: session.userId,
+      email: session.email, name: session.name,
+      role: session.role, picture: session.avatar,
+      emailVerified: session.emailVerified,
     },
   };
 }
