@@ -1,66 +1,79 @@
-// @ts-ignore — type narrowing pending, see refactor ticket
-import { getStorage, Storage, bucket } from 'firebase-admin/storage';
+// ============================================================
+// Gen3ia — Storage shim (DÉPRÉCIÉ)
+// ============================================================
+//  Ce module est obsolète. Il dupliquait src/lib/firebase/storage.ts
+//  et contenait un bogue de compilation (import de `bucket` et `getApps`
+//  inexistants depuis firebase-admin/storage).
+//
+//  → Utilisez désormais : import { ... } from '@/lib/firebase/storage'
+//
+//  Les anciens exports sont conservés sous forme de shims qui lèvent
+//  une erreur explicite si un code résiduel les appelle, afin de ne pas
+//  casser la structure du projet ni le build (aucun import invalide).
+// ============================================================
 
-let storageInstance: Storage | null = null;
+const DEPRECATION =
+  '[Storage] Ce module est déprécié — utilisez src/lib/firebase/storage.ts ' +
+  '(bucket, uploadFile, deleteFile, getFileMetadata, etc.).';
 
-function initStorage() {
-// @ts-ignore — type narrowing pending, see refactor ticket
-  if (!getApps().length) {
-    // L'initialisation est déjà faite dans firestore.ts, on s'assure que l'app existe
-    throw new Error('Firebase app not initialized. Call initFirestore first.');
+/**
+ * @deprecated Utilisez l'instance exposée par '@/lib/firebase/storage'.
+ */
+export const storage = new Proxy(
+  {},
+  {
+    get() {
+      throw new Error(DEPRECATION);
+    },
+    set() {
+      throw new Error(DEPRECATION);
+    },
   }
-  return getStorage();
+) as never;
+
+/**
+ * @deprecated Utilisez `bucket()` depuis '@/lib/firebase/storage'.
+ */
+export function getStorageInstance(): never {
+  throw new Error(DEPRECATION);
 }
 
-export function getStorageInstance(): Storage {
-  if (!storageInstance) {
-    storageInstance = initStorage();
+/**
+ * @deprecated Utilisez `defaultBucket` depuis '@/lib/firebase/storage'.
+ */
+export const defaultBucket = new Proxy(
+  {},
+  {
+    get() {
+      throw new Error(DEPRECATION);
+    },
+    set() {
+      throw new Error(DEPRECATION);
+    },
   }
-  return storageInstance;
-}
+) as never;
 
-export const storage = getStorageInstance();
-export const defaultBucket = bucket();
-
-// Retry pour les opérations Storage
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
-  let lastError: Error;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (err: any) {
-      lastError = err;
-      const delay = Math.min(100 * Math.pow(2, i), 5000);
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-  throw lastError!;
-}
-
-// Upload avec retry
+/**
+ * @deprecated Utilisez `uploadFile` depuis '@/lib/firebase/storage'.
+ */
 export async function uploadFile(
-  fileBuffer: Buffer,
-  destination: string,
-  contentType?: string
+  _fileBuffer: Buffer,
+  _destination: string,
+  _contentType?: string
 ): Promise<string> {
-  const file = defaultBucket.file(destination);
-  await withRetry(() =>
-    file.save(fileBuffer, {
-      metadata: { contentType: contentType || 'application/octet-stream' },
-      public: true, // ou false selon votre besoin
-    })
-  );
-  return file.publicUrl(); // ou générer l'URL signée
+  throw new Error(DEPRECATION);
 }
 
-// Suppression avec retry
-export async function deleteFile(destination: string): Promise<void> {
-  const file = defaultBucket.file(destination);
-  await withRetry(() => file.delete());
+/**
+ * @deprecated Utilisez `deleteFile` depuis '@/lib/firebase/storage'.
+ */
+export async function deleteFile(_destination: string): Promise<void> {
+  throw new Error(DEPRECATION);
 }
 
-// Récupération des métadonnées
-export async function getFileMetadata(destination: string) {
-  const file = defaultBucket.file(destination);
-  return withRetry(() => file.getMetadata());
+/**
+ * @deprecated Utilisez `getFileMetadata` depuis '@/lib/firebase/storage'.
+ */
+export async function getFileMetadata(_destination: string): Promise<never> {
+  throw new Error(DEPRECATION);
 }
