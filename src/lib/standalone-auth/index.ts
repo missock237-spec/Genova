@@ -53,9 +53,6 @@ export interface StandaloneSession {
   credits: number;
   avatar: string | null;
   emailVerified: boolean;
-  // champs password pour permettre le re-login depuis le cookie
-  passwordHash?: string;
-  salt?: string;
   iat: number;
   exp: number;
 }
@@ -268,16 +265,15 @@ export function createUser(data: {
   store.emailIndex[email] = id;
   persistStore();
 
-  // Le JWT contient les donnees utilisateur + hash pour permettre
-  // la reconnexion meme apres un cold start (instance differente).
+  // Le JWT contient les donnees utilisateur SANS les credentials.
+  // Le login par mot de passe nécessite le store (mémoire + fichier).
+  // Pour la production multi-instance, configurez Firebase.
   const token = signJWT({
     sub: id, uid: id, userId: id,
     email: user.email, name: user.name,
     role: user.role, plan: user.plan,
     credits: user.credits, avatar: user.avatar,
     emailVerified: user.emailVerified,
-    // Inclus pour permettre le re-login stateless
-    passwordHash: hash, salt,
   });
 
   return { user, token };
@@ -321,7 +317,6 @@ export function authenticateUser(email: string, password: string): { user: Stand
     role: user.role, plan: user.plan,
     credits: user.credits, avatar: user.avatar,
     emailVerified: user.emailVerified,
-    passwordHash: user.passwordHash, salt: user.salt,
   });
 
   return { user, token };

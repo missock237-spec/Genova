@@ -67,17 +67,33 @@ export function LoginForm() {
 
     try {
       if (useFirebase) {
-        // === MODE FIREBASE ===
-        const { signInWithEmail } = await import('@/lib/firebase/auth-client');
-        const authResult = await signInWithEmail(form.email, form.password);
+        // === MODE FIREBASE (avec fallback standalone) ===
+        try {
+          const { signInWithEmail } = await import('@/lib/firebase/auth-client');
+          const authResult = await signInWithEmail(form.email, form.password);
 
-        await apiFetch<{ user: { id: string; email: string; name: string; role: string; plan: string; avatar?: string | null; emailVerified: boolean } }>('/api/auth/login', {
-          method: 'POST',
-          body: JSON.stringify({ idToken: authResult.idToken, rememberMe: form.remember }),
-          timeoutMs: 30_000,
-        });
+          await apiFetch<{ user: { id: string; email: string; name: string; role: string; plan: string; avatar?: string | null; emailVerified: boolean } }>('/api/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ idToken: authResult.idToken, rememberMe: form.remember }),
+            timeoutMs: 30_000,
+          });
+        } catch (firebaseErr: any) {
+          // Si Firebase client échoue (config manquante, réseau, etc.),
+          // fallback vers standalone
+          console.warn('[login] Firebase client failed, falling back to standalone:',
+            firebaseErr?.code || firebaseErr?.message);
+          setUseFirebase(false);
+          await apiFetch('/api/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({
+              email: form.email.toLowerCase().trim(),
+              password: form.password,
+              rememberMe: form.remember,
+            }),
+          });
+        }
       } else {
-        // === MODE STANDALONE (sans Firebase) ===
+        // === MODE STANDALONE ===
         await apiFetch('/api/auth/login', {
           method: 'POST',
           body: JSON.stringify({

@@ -94,20 +94,35 @@ export function RegisterForm() {
 
     try {
       if (useFirebase) {
-        // === MODE FIREBASE ===
-        const { signUpWithEmail } = await import('@/lib/firebase/auth-client');
-        const authResult = await signUpWithEmail(form.email, form.password, form.name.trim());
+        // === MODE FIREBASE (avec fallback standalone) ===
+        try {
+          const { signUpWithEmail } = await import('@/lib/firebase/auth-client');
+          const authResult = await signUpWithEmail(form.email, form.password, form.name.trim());
 
-        await apiFetch('/api/auth/register', {
-          method: 'POST',
-          body: JSON.stringify({
-            idToken: authResult.idToken,
-            name: form.name.trim(),
-            email: form.email.toLowerCase().trim(),
-          }),
-        });
+          await apiFetch('/api/auth/register', {
+            method: 'POST',
+            body: JSON.stringify({
+              idToken: authResult.idToken,
+              name: form.name.trim(),
+              email: form.email.toLowerCase().trim(),
+            }),
+          });
+        } catch (firebaseErr: any) {
+          // Si Firebase client échoue, fallback vers standalone
+          console.warn('[register] Firebase client failed, falling back to standalone:',
+            firebaseErr?.code || firebaseErr?.message);
+          setUseFirebase(false);
+          await apiFetch('/api/auth/register', {
+            method: 'POST',
+            body: JSON.stringify({
+              email: form.email.toLowerCase().trim(),
+              password: form.password,
+              name: form.name.trim(),
+            }),
+          });
+        }
       } else {
-        // === MODE STANDALONE (sans Firebase) ===
+        // === MODE STANDALONE ===
         await apiFetch('/api/auth/register', {
           method: 'POST',
           body: JSON.stringify({

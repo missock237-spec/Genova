@@ -57,6 +57,7 @@ const PUBLIC_PATHS = [
   '/api/auth/debug',
   '/api/health',
   '/api/health/features',
+  '/api/control-plane/health',
   '/api/register',
   '/api/webhook/stripe',
   '/api/webhook/sebpay',
@@ -79,6 +80,7 @@ const ADMIN_ROUTES = [
   '/api/metrics/',
   '/api/monitoring/',
   '/api/system/',
+  '/api/observability/',
   // Evolution Engine — privileged: only admins can trigger/rollback/approve
   '/api/evolution/',
 ];

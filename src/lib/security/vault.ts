@@ -77,17 +77,13 @@ export class SecretVault {
       // Derive a proper 32-byte key from the provided value using SHA-256
       key = crypto.createHash('sha256').update(masterKeyHex).digest();
       log.warn('VAULT_MASTER_KEY is not a 64-char hex string — deriving key via SHA-256. Use a proper 64-char hex key in production.');
-    } else if (process.env.NEXTAUTH_SECRET) {
-      // Fallback: derive from NEXTAUTH_SECRET
-      key = crypto.createHash('sha256').update('vault:' + process.env.NEXTAUTH_SECRET).digest();
-      log.warn('VAULT_MASTER_KEY not set — deriving from NEXTAUTH_SECRET. Set VAULT_MASTER_KEY for proper secret isolation.');
     } else {
-      // Last resort: deterministic key (NOT secure — development only)
+      // No master key configured
       if (process.env.NODE_ENV === 'production') {
-        throw new Error('VAULT_MASTER_KEY and NEXTAUTH_SECRET are both required in production');
+        throw new Error('VAULT_MASTER_KEY is required in production');
       }
       key = crypto.createHash('sha256').update('dev-vault-key-insecure-never-in-production').digest();
-      log.error('No VAULT_MASTER_KEY or NEXTAUTH_SECRET set — using insecure development key. NEVER use this in production!');
+      log.error('No VAULT_MASTER_KEY set — using insecure development key. NEVER use this in production!');
     }
 
     SecretVault.instance = new SecretVault(key);

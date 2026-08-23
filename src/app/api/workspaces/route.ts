@@ -1,24 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { applySecurity } from '@/lib/security';
 
 export const dynamic = "force-dynamic";
 export async function GET(r: NextRequest) {
+  const { auth, error } = await applySecurity(r, { requireAuth: true });
+  if (error) return error;
   try {
-    const a = r.headers.get('authorization');
-    if (!a?.startsWith('Bearer ')) return NextResponse.json({ error: 'Auth' }, { status: 401 });
-    const { verify } = await import('jsonwebtoken');
-    const d = verify(a.slice(7), process.env.AUTH_SECRET || 's') as any;
-    const memberships = await db.workspaceMember.findMany({ where: { userId: d.userId }, include: { workspace: true } });
+    const memberships = await db.workspaceMember.findMany({ where: { userId: auth.userId }, include: { workspace: true } });
     return NextResponse.json(memberships.map(m => ({ ...m.workspace, role: m.role, memberId: m.id })));
   } catch { return NextResponse.json({ error: 'Erreur' }, { status: 500 }); }
 }
 export async function POST(r: NextRequest) {
+  const { auth, error } = await applySecurity(r, { requireAuth: true });
+  if (error) return error;
   try {
     const b = await r.json();
-    const { name, slug, description, userId } = b;
-    if (!name || !slug || !userId) return NextResponse.json({ error: 'name, slug et userId requis' }, { status: 400 });
+    const { name, slug, description } = b;
+    if (!name || !slug) return NextResponse.json({ error: 'name et slug requis' }, { status: 400 });
     const w = await db.workspace.create({ data: { name, slug, description } });
-    await db.workspaceMember.create({ data: { workspaceId: w.id, userId, role: 'owner' } });
+    await db.workspaceMember.create({ data: { workspaceId: w.id, userId: auth.userId, role: 'owner' } });
     return NextResponse.json(w, { status: 201 });
   } catch { return NextResponse.json({ error: 'Erreur' }, { status: 500 }); }
 }

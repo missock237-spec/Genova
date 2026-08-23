@@ -9,24 +9,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteUserData } from '@/lib/data-export';
 import { withRateLimit, RATE_LIMIT_PRESETS } from '@/lib/api-rate-limit';
+import { applySecurity } from '@/lib/security';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 async function handler(req: NextRequest): Promise<NextResponse> {
   try {
-    const sessionCookie = req.cookies.get('gen3ia_session')?.value;
-    if (!sessionCookie) {
-      return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
-    }
-
-    let userId: string;
-    try {
-      const decoded = JSON.parse(Buffer.from(sessionCookie, 'base64url').toString());
-      userId = decoded.uid;
-    } catch {
-      return NextResponse.json({ error: 'Session invalide' }, { status: 401 });
-    }
+    const { auth, error } = await applySecurity(req, { requireAuth: true });
+    if (error) return error;
+    const userId = auth.userId;
 
     // Safety check : nécessite une confirmation explicite
     const body = await req.json().catch(() => null);

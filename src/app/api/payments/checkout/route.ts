@@ -5,12 +5,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verify } from 'jsonwebtoken';
+import { applySecurity } from '@/lib/security';
 import { chariow } from '@/lib/payment/chariow';
 import { createLogger } from '@/lib/logger';
 
 export const dynamic = "force-dynamic";
-const JWT_SECRET = process.env.AUTH_SECRET;
 const log = createLogger('checkout');
 
 // productId = identifiant du produit Chariow correspondant à chaque plan
@@ -29,14 +28,9 @@ const CREDIT_PACKS: Record<string, { credits: number; productId: string; name: s
 };
 
 export async function POST(request: NextRequest) {
+  const { auth, error } = await applySecurity(request, { requireAuth: true });
+  if (error) return error;
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ') || !JWT_SECRET || JWT_SECRET.length < 32) {
-      return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
-    }
-    const token = authHeader.slice(7);
-    const decoded = verify(token, JWT_SECRET) as { userId: string };
-
     const { type, id, phone } = await request.json();
 
     if (!type || !id) {
@@ -56,9 +50,9 @@ export async function POST(request: NextRequest) {
 
       // Plan gratuit - activation directe
       if (id === 'free') {
-        await db.user.update({ where: { id: decoded.userId }, data: { plan: 'free' } });
+        await db.user.update({ where: { id: auth.userId }, data: { plan: 'free' } });
         await db.creditTransaction.create({
-          data: { userId: decoded.userId, type: 'bonus', amount: plan.credits, description: `Plan ${plan.name} activé` },
+          data: { userId: auth.userId, type: 'bonus', amount: plan.credits, description: `Plan ${plan.name} activé` },
         });
         return NextResponse.json({ success: true, message: `Plan ${plan.name} activé !` });
       }
@@ -67,8 +61,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Produit Chariow non configuré pour ce plan' }, { status: 503 });
       }
 
-      const reference = `gen3ia_${decoded.userId.slice(0, 8)}_${Date.now()}`;
-      const metadata: Record<string, string> = { userId: decoded.userId, type: 'plan', planId: id, credits: String(plan.credits) };
+      const reference = `gen3ia_${auth.userId.slice(0, 8)}_${Date.now()}`;
+      const metadata: Record<string, string> = { userId: auth.userId, type: 'plan', planId: id, credits: String(plan.credits) };
       if (phone) metadata.phone = phone;
 
       const checkout = await chariow.initiateCheckout({
@@ -78,7 +72,7 @@ export async function POST(request: NextRequest) {
         cancelUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/billing`,
       });
 
-      log.info('checkout_plan_initiated', { userId: decoded.userId, plan: id, saleId: checkout.saleId });
+      log.info('checkout_plan_initiated', { userId: auth.userId, plan: id, saleId: checkout.saleId });
 
       return NextResponse.json({
         url: checkout.checkoutUrl || `/billing?checkout=plan_${id}&ref=${reference}`,
@@ -101,8 +95,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Produit Chariow non configuré pour ce pack' }, { status: 503 });
       }
 
-      const reference = `gen3ia_cred_${decoded.userId.slice(0, 8)}_${Date.now()}`;
-      const metadata: Record<string, string> = { userId: decoded.userId, type: 'credits', credits: String(pack.credits) };
+      const reference = `gen3ia_cred_${auth.userId.slice(0, 8)}_${Date.now()}`;
+      const metadata: Record<string, string> = { userId: auth.userId, type: 'credits', credits: String(pack.credits) };
       if (phone) metadata.phone = phone;
 
       const checkout = await chariow.initiateCheckout({
@@ -114,7 +108,7 @@ export async function POST(request: NextRequest) {
 
       await db.creditTransaction.create({
         data: {
-          userId: decoded.userId,
+          userId: auth.userId,
           type: 'pending',
           amount: pack.credits,
           description: `${pack.name} - En attente de confirmation Chariow`,
@@ -122,7 +116,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      log.info('checkout_credits_initiated', { userId: decoded.userId, pack: id, saleId: checkout.saleId });
+      log.info('checkout_credits_initiated', { userId: auth.userId, pack: id, saleId: checkout.saleId });
 
       return NextResponse.json({
         url: checkout.checkoutUrl || `/billing?checkout=credits_${id}&ref=${reference}`,

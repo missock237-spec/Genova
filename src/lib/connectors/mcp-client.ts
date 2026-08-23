@@ -119,13 +119,22 @@ interface JSONRPCNotification {
 // Encryption Utilities for Auth Config
 // ============================================================
 
-const ENCRYPTION_KEY = process.env.MCP_ENCRYPTION_KEY || process.env.NEXTAUTH_SECRET || 'genova-mcp-encryption-key-32ch';
+function getEncryptionKeyString(): string {
+  const key = process.env.MCP_ENCRYPTION_KEY;
+  if (key) return key;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('MCP_ENCRYPTION_KEY is required in production');
+  }
+  log.warn('MCP_ENCRYPTION_KEY not set — using insecure development key. NEVER use this in production!');
+  return 'genova-mcp-dev-key-do-not-use-in-prod-32ch';
+}
+
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
 function getEncryptionKey(): Buffer {
-  const key = ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32);
+  const key = getEncryptionKeyString().padEnd(32, '0').slice(0, 32);
   return Buffer.from(key, 'utf-8');
 }
 

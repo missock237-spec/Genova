@@ -1,21 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { verify } from 'jsonwebtoken';
+import { applySecurity } from '@/lib/security';
 
 export const dynamic = "force-dynamic";
-const JWT_SECRET = process.env.AUTH_SECRET;
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { auth, error } = await applySecurity(request, { requireAuth: true });
+  if (error) return error;
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ') || !JWT_SECRET || JWT_SECRET.length < 32) {
-      return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
-    }
-    const token = authHeader.slice(7);
-    const decoded = verify(token, JWT_SECRET) as { userId: string };
-
     const guardrail = await db.guardrail.findFirst({
-      where: { id: (await params).id, userId: decoded.userId },
+      where: { id: (await params).id, userId: auth.userId },
     });
     if (!guardrail) return NextResponse.json({ error: 'Garde-fou non trouvé' }, { status: 404 });
 
