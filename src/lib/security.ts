@@ -8,6 +8,7 @@ import { verifyAccessToken, getServerSession } from '@/lib/firebase/auth';
 import { db } from '@/lib/db';
 import { SESSION_COOKIE_NAME } from '@/lib/firebase/config';
 import { getAdminAuth } from '@/lib/firebase/admin';
+import type { ResolvedOrg } from '@/lib/multi-tenant';
 
 export interface SecurityContext {
   userId: string;
@@ -18,6 +19,12 @@ export interface SecurityContext {
   id?: string;
   /** Legacy alias — display name (not populated, kept for backward compat). */
   name?: string;
+  /**
+   * Organisation résolue du tenant courant (multi-tenant).
+   * OPTIONNEL : uniquement peuplé par `withAuth(..., { resolveOrg: true })`.
+   * `applySecurity` ne le renseigne pas (aucune lecture Firestore implicite).
+   */
+  org?: ResolvedOrg;
 }
 
 interface SecurityOptions {
