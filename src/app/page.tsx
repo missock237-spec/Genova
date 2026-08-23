@@ -20,6 +20,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
+import HardTechLanding from '@/components/landing/hardtech-landing';
 
 // T23 : délai avant d'afficher l'UI "chargement bloqué" (12s).
 const STUCK_LOADING_TIMEOUT_MS = 12_000;
