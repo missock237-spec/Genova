@@ -5,36 +5,50 @@
 // via deux mécanismes complémentaires :
 //
 // 1. Service Worker : quand le SW détecte un nouveau fichier sw.js,
-//    il notifie le client via postMessage (SW_UPDATE_AVAILABLE).
-//    Le client peut alors choisir d'activer le nouveau SW.
+//    il notifie le client via postMessage (SW_UPDATE_AVAILABLE /
+//    FORCE_RELOAD).
 //
-// 2. Polling /api/app-version : toutes les POLL_INTERVAL_MS, le client
+// 2. Polling /api/app-version : à intervalle court, le client
 //    compare son buildId avec celui du serveur. Si différent, une mise à
 //    jour est disponible.
 //
-// Deux niveaux de sévérité :
-//   - updateAvailable (soft) : nouvelle version, l'utilisateur peut recharger
-//   - forceUpdate (hard) : version trop ancienne, le rechargement est obligatoire
+// Objectif production : chaque push GitHub déclenche un déploiement
+// Vercel, et le navigateur doit charger la nouvelle version de façon
+// instantanée. Le polling est donc accéléré, la requête contourne toute
+// cache (no-store + cache-buster), et l'URL du service worker est
+// versionnée par buildId pour forcer une re-vérification à chaque
+// chargement.
 //
-// Le système de snooze permet de repousser la notification soft.
-// Les notifications forceUpdate ne sont jamais snoozables.
+// Deux niveaux de sévérité :
+//   - updateAvailable (soft) : nouvelle version détectée → rechargement auto
+//   - forceUpdate (hard) : version trop ancienne → rechargement obligatoire
 // ============================================================
 
-import { useSyncExternalStore, useCallback, useEffect, useRef, useState } from 'react';
+import { useSyncExternalStore, useCallback } from 'react';
 
 // --- Configuration ---
 
 /** Intervalle de polling de /api/app-version (ms) */
-const POLL_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
+const POLL_INTERVAL_MS = 15 * 1000; // 15 secondes (détection quasi-instantanée)
 
 /** Délai minimum entre deux polls pour éviter les bursts (ms) */
-const POLL_THROTTLE_MS = 30 * 1000; // 30 secondes
+const POLL_THROTTLE_MS = 5 * 1000; // 5 secondes
+
+/** Délai avant le premier poll (ms) — court pour capter vite un déploiement */
+const FIRST_POLL_DELAY_MS = 1 * 1000; // 1 seconde
 
 /** Délai avant de ré-afficher la notification après un snooze (ms) */
 const SNOOZE_DURATION_MS = 30 * 60 * 1000; // 30 minutes
 
 /** Délai avant de réessayer un rechargement qui a échoué (ms) */
-const RELOAD_RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+const RELOAD_RETRY_DELAY_MS = 5 * 1000; // 5 secondes (retry rapide)
+
+/**
+ * En production, recharger automatiquement dès qu'un nouveau build est
+ * détecté (sauf si l'utilisateur a explicitement snoozé). Garantit que
+ * le navigateur charge instantanément chaque nouvelle version déployée.
+ */
+const AUTO_RELOAD_ON_UPDATE = true;
 
 /** Clé localStorage pour le snooze */
 const SNOOZE_STORAGE_KEY = 'gen3ia-update-snooze';
@@ -103,6 +117,7 @@ let lastPollTime = 0;
 let isPolling = false;
 let swRegistration: ServiceWorkerRegistration | null = null;
 let waitingWorker: ServiceWorker | null = null;
+let hasReloadedForSw = false;
 
 function emitChange() {
   for (const listener of listeners) listener();
@@ -146,8 +161,13 @@ async function checkForUpdate(): Promise<void> {
     const params = new URLSearchParams();
     if (CLIENT_VERSION) params.set('v', CLIENT_VERSION);
     if (CLIENT_BUILD_ID) params.set('buildId', CLIENT_BUILD_ID);
+    // Cache-buster : empêche toute mise en cache intermédiaire
+    params.set('_t', String(Date.now()));
 
-    const response = await fetch(`/api/app-version?${params}`);
+    const response = await fetch(`/api/app-version?${params}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+    });
     if (!response.ok) return;
 
     const data: ServerVersionResponse = await response.json();
@@ -160,10 +180,11 @@ async function checkForUpdate(): Promise<void> {
         serverVersion: data.version,
         serverBuildId: data.buildId,
       });
+      performReload();
       return;
     }
 
-    // Cas 2 : Nouveau buildId détecté
+    // Cas 2 : Nouveau buildId détecté (non snoozé)
     if (data.updateAvailable && CLIENT_BUILD_ID && !isSnoozed()) {
       updateState({
         severity: 'available',
@@ -171,12 +192,15 @@ async function checkForUpdate(): Promise<void> {
         serverVersion: data.version,
         serverBuildId: data.buildId,
       });
+      // Production : recharger immédiatement pour charger le nouveau build
+      if (AUTO_RELOAD_ON_UPDATE) {
+        performReload();
+      }
       return;
     }
 
-    // Cas 3 : Le snooze a expiré et une mise à jour est toujours disponible
+    // Cas 3 : Le snooze est encore actif, on ne fait rien
     if (data.updateAvailable && CLIENT_BUILD_ID && isSnoozed()) {
-      // Le snooze est encore actif, on ne fait rien
       return;
     }
 
@@ -202,7 +226,7 @@ async function checkForUpdate(): Promise<void> {
 // --- Logique de rechargement ---
 
 async function performReload(): Promise<void> {
-  if (currentUpdateState.isReloading) return;
+  if (currentUpdateState.isReloading || hasReloadedForSw) return;
 
   updateState({ isReloading: true, reloadError: false, reloadAttempts: currentUpdateState.reloadAttempts + 1 });
 
@@ -213,26 +237,28 @@ async function performReload(): Promise<void> {
       // Attendre que le SW s'active, puis recharger
       await new Promise<void>((resolve) => {
         if (!swRegistration) { resolve(); return; }
-        const handler = (reg: ServiceWorkerRegistration) => {
-          navigator.serviceWorker.removeEventListener('controllerchange', handler as EventListener);
+        const handler = () => {
+          navigator.serviceWorker.removeEventListener('controllerchange', handler);
           resolve();
         };
-        navigator.serviceWorker.addEventListener('controllerchange', handler as EventListener);
+        navigator.serviceWorker.addEventListener('controllerchange', handler);
         // Timeout de sécurité (5s)
         setTimeout(resolve, 5000);
       });
     }
 
+    hasReloadedForSw = true;
     // Rechargement avec cache-busting pour forcer le téléchargement
     window.location.href = window.location.href.split('?')[0] + `?_v=${Date.now()}`;
   } catch (err) {
     console.error('[auto-update] Reload failed:', err);
     updateState({ isReloading: false, reloadError: true });
 
-    // Réessayer automatiquement après un délai
+    // Réessayer automatiquement après un court délai
     setTimeout(() => {
       if (currentUpdateState.reloadError) {
-        updateState({ reloadError: false });
+        updateState({ reloadError: false, isReloading: false });
+        hasReloadedForSw = false;
         performReload();
       }
     }, RELOAD_RETRY_DELAY_MS);
@@ -261,8 +287,8 @@ function setupServiceWorkerListeners(registration: ServiceWorkerRegistration): v
 
   // Quand le SW actif change (après skipWaiting)
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    // Le rechargement est géré par performReload si déclenché manuellement
-    // Si c'est un changement silencieux (ex: on navigue), on reload automatiquement
+    if (hasReloadedForSw) return;
+    hasReloadedForSw = true;
     if (!currentUpdateState.isReloading) {
       window.location.reload();
     }
@@ -271,8 +297,12 @@ function setupServiceWorkerListeners(registration: ServiceWorkerRegistration): v
   // Écouter les messages du SW
   navigator.serviceWorker.addEventListener('message', (event) => {
     if (event.data?.type === 'SW_UPDATE_AVAILABLE') {
-      // Le SW nous informe qu'une mise à jour est prête
       checkForUpdate();
+    } else if (event.data?.type === 'FORCE_RELOAD') {
+      // Le SW ordonne un rechargement forcé (nouvelle version déployée)
+      if (hasReloadedForSw) return;
+      hasReloadedForSw = true;
+      window.location.reload();
     }
   });
 
@@ -281,6 +311,10 @@ function setupServiceWorkerListeners(registration: ServiceWorkerRegistration): v
     waitingWorker = registration.waiting;
     checkForUpdate();
   }
+
+  // Forcer une mise à jour du SW à l'initialisation pour détecter
+  // immédiatement une version déployée entre deux chargements.
+  registration.update().catch(() => {});
 }
 
 // --- Initialisation ---
@@ -288,8 +322,8 @@ function setupServiceWorkerListeners(registration: ServiceWorkerRegistration): v
 function startPolling(): void {
   if (pollTimer) return;
 
-  // Première vérification immédiate (après 3s pour ne pas bloquer le load)
-  setTimeout(checkForUpdate, 3000);
+  // Première vérification quasi-immédiate (1s)
+  setTimeout(checkForUpdate, FIRST_POLL_DELAY_MS);
 
   // Puis polling régulier
   pollTimer = setInterval(checkForUpdate, POLL_INTERVAL_MS);
@@ -319,11 +353,11 @@ export function initAutoUpdate(): void {
   if (typeof window === 'undefined') return;
   if (!('serviceWorker' in navigator)) return;
 
-  // Enregistre le SW avec un paramètre de version pour forcer le navigateur
-  // à re-vérifier le fichier sw.js à chaque chargement de page.
-  // Sans ce paramètre, le navigateur peut utiliser un sw.js en cache HTTP
-  // pendant des heures, empêchant la détection des mises à jour.
-  const swUrl = '/sw.js?v=gen3ia-v6';
+  // URL du SW versionnée par buildId (et version en fallback) : le navigateur
+  // re-vérifie sw.js à chaque chargement au lieu de réutiliser un sw.js
+  // en cache HTTP HTTP pendant des heures.
+  const swVersion = CLIENT_BUILD_ID || CLIENT_VERSION || 'dev';
+  const swUrl = `/sw.js?v=${encodeURIComponent(swVersion)}`;
 
   navigator.serviceWorker
     .register(swUrl, { updateViaCache: 'none' })
@@ -370,6 +404,7 @@ export function useAutoUpdate(): UpdateState & {
   const state = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   const reload = useCallback(() => {
+    hasReloadedForSw = false;
     performReload();
   }, []);
 
