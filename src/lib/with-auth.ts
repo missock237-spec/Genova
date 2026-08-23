@@ -8,6 +8,8 @@
 //   -> Les options { limit, windowMs } de la route SONT transmises
 //      au rate limiter (politique personnalisée par route).
 // - Quota LLM : vérifie le plan + le quota utilisateur
+// - Tenant (multi-tenant) : résolution optionnelle de l'organisation
+//   courante via { resolveOrg: true }
 //
 // Usage :
 //   export const POST = withAuth(async (req, ctx, auth) => {
@@ -16,12 +18,19 @@
 //   }, { roles: ['user'], rateLimit: { limit: 20, windowMs: 60000 } });
 //
 //   export const GET = withAuth(handler, { requireAuth: false });
+//
+//   // Route tenant-scopée : résout l'org de l'utilisateur et l'injecte
+//   // dans auth.org (si membre).
+//   export const GET = withAuth(async (req, ctx, auth) => {
+//     const orgId = auth.org?.org.id;
+//   }, { resolveOrg: true });
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { applySecurity, type SecurityContext } from '@/lib/security';
 import { rateLimit, type RateLimitOptions } from '@/lib/rate-limiter';
 import { checkTokenLimit, getPlanLimits } from '@/lib/usage-limits';
+import { getOrgContext } from '@/lib/multi-tenant';
 import { db } from '@/lib/db';
 
 /**
@@ -59,6 +68,12 @@ export interface WithAuthOptions {
   };
   quota?: boolean;
   scopes?: string[];
+  /**
+   * Résout l'organisation courante de l'utilisateur et l'injecte dans
+   * `auth.org` (via `getOrgContext`). Lecture Firestore additionnelle —
+   * à n'activer QUE sur les routes tenant-scopées.
+   */
+  resolveOrg?: boolean;
 }
 
 /** Contexte brut transmis par Next (objet Next 14) ou Promise (Next 15). */
@@ -73,7 +88,7 @@ type HandlerWithAuth<P extends Record<string, unknown> = Record<string, string |
 
 /**
  * Wrapper de sécurité réutilisable pour toutes les routes API.
- * Combine auth + RBAC + rate limit + quota.
+ * Combine auth + RBAC + rate limit + quota (+ résolution tenant optionnelle).
  */
 export function withAuth<P extends Record<string, unknown> = Record<string, string | string[]>>(
   handler: HandlerWithAuth<P>,
@@ -84,6 +99,7 @@ export function withAuth<P extends Record<string, unknown> = Record<string, stri
     roles,
     rateLimit: rlOptions,
     quota = false,
+    resolveOrg = false,
   } = options;
 
   // Signature souple (type local, non-générique public) acceptant les deux
@@ -150,6 +166,16 @@ export function withAuth<P extends Record<string, unknown> = Record<string, stri
 
     // 4. Exécuter le handler avec le contexte d'auth
     if (!auth) return NextResponse.json({ error: 'Authentification requise' }, { status: 401 });
+
+    // 5. Résolution tenant (opt-in) : injecte `auth.org` si l'utilisateur
+    //    est membre actif d'une organisation. Ne lève jamais (retourne
+    //    simplement sans `org` si l'utilisateur n'a pas d'organisation).
+    if (resolveOrg && auth.userId) {
+      const orgCtx = await getOrgContext(auth.userId);
+      if (orgCtx.member && orgCtx.org) {
+        auth.org = orgCtx.org;
+      }
+    }
 
     // Normalise `params` (objet Next 14 OU Promise Next 15) en une RouteParams.
     // Toujours fourni (au pire vide) pour préserver le contrat `await ctx.params`.
