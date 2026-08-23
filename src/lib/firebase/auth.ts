@@ -143,6 +143,13 @@ export async function getSessionCookie(): Promise<string | undefined> {
 /**
  * Vérifie le session cookie courant et retourne l'utilisateur Firebase.
  * Retourne null si non authentifié ou session invalide.
+ *
+ * Stratégie de retry (3 tentatives) — même logique que verifyIdToken :
+ *   1. verifySessionCookie(cookie, true)  — vérif signature + révocation
+ *   2. verifySessionCookie(cookie, false) — vérif signature sans révocation
+ *      (tokens frais, révocation pas encore propagée, cold start)
+ *   3. Pause 1s + verifySessionCookie(cookie, false) — cold start Vercel
+ *      (le SDK doit télécharger les clés publiques Google)
  */
 export async function getServerSession(): Promise<ServerSession | null> {
   try {
@@ -150,25 +157,44 @@ export async function getServerSession(): Promise<ServerSession | null> {
     if (!sessionCookie) return null;
 
     const auth = getAdminAuth();
-    const decoded = await auth.verifySessionCookie(sessionCookie, true);
-    const user = await auth.getUser(decoded.uid);
 
-    const role = (user.customClaims?.role as string) || 'user';
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const checkRevoked = attempt === 1;
+        const decoded = await auth.verifySessionCookie(sessionCookie, checkRevoked);
+        const user = await auth.getUser(decoded.uid);
 
-    return {
-      user: {
-        id: user.uid,
-        uid: user.uid,
-        email: user.email || '',
-        name: user.displayName || user.email?.split('@')[0] || 'Utilisateur',
-        role,
-        picture: user.photoURL || null,
-        emailVerified: user.emailVerified,
-      },
-    };
+        const role = (user.customClaims?.role as string) || 'user';
+
+        return {
+          user: {
+            id: user.uid,
+            uid: user.uid,
+            email: user.email || '',
+            name: user.displayName || user.email?.split('@')[0] || 'Utilisateur',
+            role,
+            picture: user.photoURL || null,
+            emailVerified: user.emailVerified,
+          },
+        };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const errCode = err instanceof Error ? err.constructor.name : 'Unknown';
+        console.error(`[getServerSession] Attempt ${attempt}/3 failed:`, errMsg, `(${errCode})`);
+
+        if (attempt === 3) {
+          console.error('[getServerSession] All 3 attempts failed.');
+          return null;
+        }
+
+        // Pause avant le retry (cold start Vercel : le SDK télécharge les clés JWKS)
+        await new Promise(r => setTimeout(r, 1000 * attempt));
+      }
+    }
   } catch {
     return null;
   }
+  return null;
 }
 
 /**

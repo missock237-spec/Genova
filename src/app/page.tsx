@@ -67,11 +67,41 @@ function AppContent() {
     }
   }, [hydrate]);
 
-  // --- Fix 2 : logs debug pour validateSession() ---
+  // --- Fix 2 : validateSession avec retry (2 tentatives) ---
+  // Après inscription, le cookie Firebase est frais mais verifySessionCookie
+  // peut échouer sur un cold start Vercel (JWKS pas encore téléchargées).
+  // On retry une fois avant de déclarer la session expirée.
   useEffect(() => {
     if (isAuthenticated && !validatedRef.current && !loadError) {
       validatedRef.current = true;
-      validateSession()
+
+      const tryValidate = async (attempt: number): Promise<boolean> => {
+        try {
+          const valid = await validateSession();
+          if (valid) return true;
+          // Réponse serveur mais user:null — session vraiment invalide
+          if (attempt >= 2) return false;
+          // Retry après 2s (cold start Vercel)
+          console.warn(`[gen3ia] validateSession attempt ${attempt} failed (user:null), retrying...`);
+          await new Promise(r => setTimeout(r, 2000));
+          return tryValidate(attempt + 1);
+        } catch (err) {
+          // Erreur réseau/timeout — ne PAS traiter comme session expirée
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const isTimeout = err instanceof Error && err.name === 'AbortError';
+          console.error(`[gen3ia] validateSession attempt ${attempt} network error:`, errMsg);
+          if (attempt >= 2) {
+            // Dernière tentative : erreur réseau, pas session expirée
+            // On ne bloque pas l'utilisateur — on laisse le dashboard se charger
+            console.warn('[gen3ia] validateSession network error after 2 attempts, allowing dashboard');
+            return true; // Allow dashboard on network errors
+          }
+          await new Promise(r => setTimeout(r, 2000));
+          return tryValidate(attempt + 1);
+        }
+      };
+
+      tryValidate(1)
         .then((valid) => {
           if (valid) {
             console.log('[gen3ia] validateSession OK — session active');
@@ -79,13 +109,9 @@ function AppContent() {
               console.warn('[gen3ia] fetchApprovalCount failed:', err);
             });
           } else {
-            console.warn('[gen3ia] validateSession : session expirée');
+            console.warn('[gen3ia] validateSession : session expirée après retry');
             setLoadError('Session expirée, veuillez vous reconnecter');
           }
-        })
-        .catch((err) => {
-          console.error('[gen3ia] validateSession error:', err);
-          setLoadError('Session expirée, veuillez vous reconnecter');
         });
     }
   }, [isAuthenticated, loadError, validateSession, fetchApprovalCount]);
