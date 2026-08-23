@@ -107,6 +107,19 @@ export default async function RootLayout({
   // ============================================================
   const nonce = (await headers()).get('x-nonce') ?? '';
 
+  // ============================================================
+  // URL du service worker versionnée par buildId : force le
+  // navigateur à re-vérifier sw.js à chaque chargement de page
+  // (updateViaCache: 'none'). Sans ce paramètre de version, un
+  // sw.js en cache HTTP peut bloquer la détection des nouveaux
+  // déploiements pendant des heures.
+  // ============================================================
+  const swVersion =
+    process.env.NEXT_PUBLIC_BUILD_ID ||
+    process.env.NEXT_PUBLIC_GIT_SHA ||
+    'dev';
+  const swUrl = `/sw.js?v=${encodeURIComponent(swVersion)}`;
+
   return (
     <html lang="fr" nonce={nonce} suppressHydrationWarning>
       <head>
@@ -116,20 +129,22 @@ export default async function RootLayout({
         <meta name="theme-color" content="#0A0A0B" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        {/* v7 SW force-upgrade: unregister old SWs + reload on new SW */}
+        {/* SW force-upgrade: unregister old SWs + reload on new SW, URL versionnée par buildId */}
         <script
           nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: `(function(){
               if('serviceWorker' in navigator){
                 var r=false;
+                var sw='${swUrl}';
                 navigator.serviceWorker.addEventListener('controllerchange',function(){
                   if(!r){r=true;window.location.reload();}
                 });
                 navigator.serviceWorker.addEventListener('message',function(e){
                   if(e.data&&e.data.type==='FORCE_RELOAD'&&!r){r=true;window.location.reload();}
                 });
-                navigator.serviceWorker.register('/sw.js',{scope:'/'}).then(function(reg){
+                navigator.serviceWorker.register(sw,{scope:'/',updateViaCache:'none'}).then(function(reg){
+                  if(reg.update){reg.update().catch(function(){});}
                   if(reg.waiting){reg.waiting.postMessage({type:'SKIP_WAITING'});}
                   if(reg.installing){reg.installing.addEventListener('statechange',function(){
                     if(reg.waiting){reg.waiting.postMessage({type:'SKIP_WAITING'});}
