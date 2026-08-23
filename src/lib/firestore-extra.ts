@@ -33,6 +33,10 @@
 //    - kgEntity            -> 'kg_entities'
 //    - kgRelation          -> 'kg_relations'
 //    - kgChunk             -> 'kg_chunks'
+//
+//  Multi-tenant (organisations & adhésions) :
+//    - organization        -> 'organizations'
+//    - membership          -> 'memberships'
 // ============================================================
 import {
   db as baseDb,
@@ -78,12 +82,18 @@ const t28 = {
   kgChunk: makeRepo('kg_chunks'),
 } as const;
 
+const multiTenant = {
+  organization: makeRepo('organizations'),
+  membership: makeRepo('memberships'),
+} as const;
+
 export const dbExt = {
   ...baseDb,
   aiCost: baseDb.aICost,
   ...legacy,
   ...evolution,
   ...t28,
+  ...multiTenant,
 } as const;
 
 export const db = dbExt;
