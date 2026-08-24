@@ -1,3 +1,13 @@
+// ============================================================
+// @deprecated — Ce composant n'est plus utilisé.
+//  Utiliser src/components/chat/chat-panel.tsx à la place.
+//  ChatPanel unifie l'ancien ChatTab (agents-view) et ChatInterface,
+//  avec persistance des conversations et sidebar.
+//
+//  Ce fichier est conservé temporairement pour référence.
+//  Il sera supprimé dans une prochaine version.
+// ============================================================
+
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';

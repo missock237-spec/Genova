@@ -1,12 +1,12 @@
 // ============================================================
-// POST /api/agents/chat — Chat agrégé avec un agent
+// POST /api/agents/chat — @deprecated
 // ============================================================
-//  Appelé par agents-view.tsx via fetch('/api/agents/chat', { method: 'POST' })
-//  Body: { message, agentId, conversationId }
-//  Retourne: { response: string, conversationId: string }
+//  Route legacy (non-streaming). Préférer :
+//    POST /api/agents/[id]/chat  (streaming SSE, messages persistés)
 //
-//  Réplique la logique de /api/agents/[id]/chat mais utilise
-//  agentId depuis le body au lieu du paramètre d'URL.
+//  Cette route est conservée pour la rétrocompatibilité avec
+//  d'anciens hooks (use-chat-stream.ts) mais ne sera plus
+//   maintenue activement.
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';

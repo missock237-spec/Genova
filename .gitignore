@@ -96,7 +96,7 @@ prisma/migrations/
 
 # Rust
 target/
-conversations/
+/conversations/
 .agents/.env
 .npm/
 __pycache__/

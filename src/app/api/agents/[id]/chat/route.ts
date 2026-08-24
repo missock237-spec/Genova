@@ -62,7 +62,7 @@ export async function POST(
           typeof (msg as Record<string, unknown>).content === 'string' &&
           ((msg as Record<string, unknown>).role === 'user' || (msg as Record<string, unknown>).role === 'agent' || (msg as Record<string, unknown>).role === 'assistant')
         )
-        .map((msg: unknown) => ({
+        .map((msg: unknown) => {
           const m = msg as Record<string, string>;
           // Normaliser 'agent' → 'assistant' pour les modèles LLM
           return { role: m.role === 'agent' ? 'assistant' : m.role, content: m.content.substring(0, 2000) };
@@ -178,7 +178,7 @@ Respond concisely and helpfully. If you need to perform an action, describe what
       },
     ];
 
-    // Save user message
+    // Save user message — create or reuse conversation
     let convId = conversationId;
     if (!convId) {
       const conv = await db.conversation.create({
@@ -186,11 +186,22 @@ Respond concisely and helpfully. If you need to perform an action, describe what
           title: message.substring(0, 50),
           type: 'agent_chat',
           agentId: id,
+          agentName,
           userId: auth.userId,
         },
       });
-      convId = conv.id;
+      convId = (conv as Record<string, unknown>).id as string;
     }
+
+    // Persister le message utilisateur (fire-and-forget)
+    db.message.create({
+      data: {
+        role: 'user',
+        content: message,
+        conversationId: convId,
+        userId: auth.userId,
+      },
+    }).catch(() => {});
 
     // Create SSE stream using AI router's chatStream
     const encoder = new TextEncoder();
@@ -208,23 +219,39 @@ Respond concisely and helpfully. If you need to perform an action, describe what
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
 
+          // Persister la réponse de l'agent (fire-and-forget)
+          if (fullResponse && convId) {
+            db.message.create({
+              data: {
+                role: 'assistant',
+                content: fullResponse,
+                conversationId: convId,
+                userId: auth.userId,
+              },
+            }).catch(() => {});
+
+            // Mettre à jour le titre de la conversation (premier message)
+            db.conversation.update({
+              where: { id: convId },
+              data: { title: message.substring(0, 60) },
+            }).catch(() => {});
+          }
+
           // Log the chat interaction
-          await db.agentActionLog.create({
+          db.agentActionLog.create({
             data: {
               agentId: id,
               action: 'chat',
-              details: JSON.stringify({ message: message.substring(0, 500) }),
+              details: JSON.stringify({ message: message.substring(0, 500), conversationId: convId }),
               userId: auth.userId,
               status: 'completed',
               result: 'Chat response streamed',
               resolvedAt: new Date(),
             },
-          });
+          }).catch(() => {});
 
           // Learn from this interaction (fire-and-forget)
-          learnFromInteraction(id, auth.userId, message, fullResponse).catch(() => {
-            // Silently fail — learning is best-effort and shouldn't block the chat
-          });
+          learnFromInteraction(id, auth.userId, message, fullResponse).catch(() => {});
         } catch {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Stream failed' })}\n\n`));
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
