@@ -108,7 +108,10 @@ let rustSafetyModule: unknown = null;
 let rustLoadAttempted = false;
 let rustLoadFailed = false;
 
-/** Tente de charger le module Rust NAPI une seule fois. */
+/** Tente de charger le module Rust NAPI une seule fois.
+ * Utilise un require dynamique pour ne pas faire echouer le build
+ * quand le crate n'est pas compile (cas Vercel/CI).
+ */
 function tryLoadRustModule(): unknown {
   if (rustLoadAttempted) return rustSafetyModule;
   rustLoadAttempted = true;
@@ -122,12 +125,13 @@ function tryLoadRustModule(): unknown {
       log.info('rust_safety_loaded', {});
     } else {
       rustLoadFailed = true;
-      log.error('rust_safety_init_failed', { reason: 'safety_init not a function' });
+      log.warn('rust_safety_init_failed', { reason: 'safety_init not a function' });
     }
-  } catch (err) {
+  } catch {
+    // Module Rust non compile (normal sur Vercel/CI sans Docker)
     rustLoadFailed = true;
-    log.error('rust_safety_load_failed', {
-      error: err instanceof Error ? err.message : String(err),
+    log.info('rust_safety_not_available', {
+      hint: 'Using JS fallback. Compile the Rust NAPI crate for enhanced security.',
     });
   }
 

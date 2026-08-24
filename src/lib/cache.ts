@@ -1,31 +1,25 @@
-import { redis } from './redis-client';
+import { redis, safeRedisOperation } from './redis-client';
 
 const DEFAULT_TTL = 60; // secondes
 
 export async function getCache<T>(key: string): Promise<T | null> {
-  try {
-    const data = await redis.get(key);
+  return safeRedisOperation(async (client) => {
+    const data = await client.get(key);
     if (!data) return null;
     return JSON.parse(data) as T;
-  } catch {
-    return null;
-  }
+  });
 }
 
 export async function setCache<T>(key: string, value: T, ttl: number = DEFAULT_TTL): Promise<void> {
-  try {
-    await redis.set(key, JSON.stringify(value), 'EX', ttl);
-  } catch (err) {
-    console.error('[Cache] Set error:', err);
-  }
+  await safeRedisOperation(async (client) => {
+    await client.set(key, JSON.stringify(value), 'EX', ttl);
+  });
 }
 
 export async function delCache(key: string): Promise<void> {
-  try {
-    await redis.del(key);
-  } catch (err) {
-    console.error('[Cache] Del error:', err);
-  }
+  await safeRedisOperation(async (client) => {
+    await client.del(key);
+  });
 }
 
 export function cacheKey(...parts: string[]): string {

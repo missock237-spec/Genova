@@ -132,6 +132,9 @@ const nextConfig = {
     // Now: bundler resolves to node_modules/z-ai-web-dev-sdk (real ZAI SDK).
     config.resolve.alias['./agent-safety.node'] = false;
     config.resolve.alias['agent-safety.node'] = false;
+    // Rust NAPI crate — non compile sur Vercel, le try/catch dans
+    // agent-security-middleware.ts gere le fallback JS.
+    config.resolve.alias['../../crates/agent-safety'] = false;
     // Workspace package — resolve to source (avoids needing workspace:* dependency
     // which can break with npm install --legacy-peer-deps on Vercel).
     config.resolve.alias['@gen3ia/agent-safety'] = path.join(__dirname, 'packages/agent-safety/index.js');

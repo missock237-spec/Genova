@@ -29,9 +29,14 @@ class LLMCache {
   }
 
   private async tryRedis(): Promise<void> {
+    const url = process.env.REDIS_URL;
+    if (!url) {
+      log.info('LLM cache using in-memory store (no REDIS_URL)');
+      return;
+    }
     try {
       const Redis = (await import('ioredis')).default;
-      const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+      const redis = new Redis(url, {
         maxRetriesPerRequest: 1,
         retryStrategy: () => null,
         lazyConnect: true,
@@ -42,7 +47,7 @@ class LLMCache {
       redis.disconnect();
       log.info('LLM cache Redis enabled');
     } catch {
-      log.info('LLM cache using in-memory store');
+      log.info('LLM cache using in-memory store (Redis unavailable)');
     }
   }
 
@@ -53,10 +58,10 @@ class LLMCache {
   }
 
   async get(key: string): Promise<CacheEntry | null> {
-    if (this.redisEnabled) {
+    if (this.redisEnabled && process.env.REDIS_URL) {
       try {
         const Redis = (await import('ioredis')).default;
-        const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+        const redis = new Redis(process.env.REDIS_URL, {
           maxRetriesPerRequest: 1,
           retryStrategy: () => null,
           lazyConnect: true,
@@ -82,10 +87,10 @@ class LLMCache {
   }
 
   async set(key: string, entry: CacheEntry): Promise<void> {
-    if (this.redisEnabled) {
+    if (this.redisEnabled && process.env.REDIS_URL) {
       try {
         const Redis = (await import('ioredis')).default;
-        const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+        const redis = new Redis(process.env.REDIS_URL, {
           maxRetriesPerRequest: 1,
           retryStrategy: () => null,
           lazyConnect: true,
