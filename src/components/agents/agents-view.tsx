@@ -24,6 +24,7 @@ import {
   Trash2,
   Eye,
   Cpu,
+  Sparkles,
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';

@@ -248,7 +248,7 @@ Respond concisely and helpfully. If you need to perform an action, describe what
       async start(controller) {
         try {
           const aiStream = router.chatStream(messages, {
-            model: configModel,
+            model: configModel as 'default' | 'fast' | 'powerful' | undefined,
             ...(configTemperature !== undefined ? { temperature: configTemperature } : {}),
           });
 
