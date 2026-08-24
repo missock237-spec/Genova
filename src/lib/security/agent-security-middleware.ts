@@ -223,7 +223,7 @@ function jsPromptCheck(prompt: string): SecurityVerdict {
     { re: /\b(DAN|STAN|jailbreak|sudo\s+mode|developer\s+mode|unfiltered|uncensored)\b/i, cat: 'jailbreak_attempt' },
     { re: /(output|show|reveal|tell|print|display)\s+(your|the|system|initial|hidden|secret)\s+(prompt|instructions)/i, cat: 'system_prompt_leak' },
     { re: /\b(eval|Function\()|child_process|require\s*\(['"]child_process['"]\)/i, cat: 'code_injection' },
-    { re: /\b(reverse\.shell|nc\s+-|bash\s+-i|\/dev\/tcp)/i, cat: 'reverse_shell_attempt' },
+    { re: /\b(reverse.shell|nc\s+-|bash\s+-i|\/dev\/tcp)/i, cat: 'reverse_shell_attempt' },
   ];
 
   for (const { re, cat } of patterns) {

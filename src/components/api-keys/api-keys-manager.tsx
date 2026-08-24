@@ -24,8 +24,10 @@ const SCOPE_OPTIONS = [
   { value: 'agents:read', label: 'Lecture agents' },
   { value: 'agents:write', label: 'Écriture agents' },
   { value: 'agents:execute', label: 'Exécution agents' },
+  { value: 'voice:call', label: 'Appels vocaux' },
+  { value: 'messages:send', label: 'Envoi messages' },
   { value: 'billing:read', label: 'Lecture facturation' },
-  { value: 'admin', label: 'Administration' },
+  { value: 'admin:read', label: 'Administration' },
 ];
 
 export function ApiKeysManager() {

@@ -85,22 +85,10 @@ export async function GET() {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
     }
 
-    let keys: Record<string, unknown>[] = [];
-    try {
-      keys = await db.apiKey.findMany({
-        where: [{ field: 'userId', op: '==', value: session.user.id }],
-      });
-      // Sort in memory to avoid needing a composite Firestore index
-      keys.sort((a, b) => {
-        const dateA = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
-        const dateB = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
-        return dateB - dateA;
-      });
-    } catch (err) {
-      log.error('API keys query failed', { error: err instanceof Error ? err.message : String(err) });
-      // Return empty list on query failure (e.g. missing index)
-      keys = [];
-    }
+    const keys = await db.apiKey.findMany({
+      where: [{ field: 'userId', op: '==', value: session.user.id }],
+      orderBy: [{ field: 'createdAt', direction: 'desc' }],
+    });
 
     return NextResponse.json({
       success: true,
@@ -135,9 +123,18 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
     }
 
-    let body: Record<string, unknown> = {};
-    try { body = await request.json(); } catch {}
-    const keyId = typeof body.id === 'string' ? body.id : null;
+    // Accept id from either searchParams or JSON body
+    let keyId: string | null;
+    const { searchParams } = new URL(request.url);
+    keyId = searchParams.get('id');
+    if (!keyId) {
+      try {
+        const body = await request.json();
+        keyId = body?.id || null;
+      } catch {
+        // no body
+      }
+    }
 
     if (!keyId) {
       return NextResponse.json({ error: 'ID de clé requis' }, { status: 400 });
