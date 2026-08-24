@@ -10,13 +10,21 @@
 //   3. Le JWT cookie contient les donnees utilisateur pour que la
 //      session fonctionne meme apres un cold start (sans store)
 //
+// Securite du secret JWT :
+//   - Le secret est DERIVE via HMAC depuis VAULT_MASTER_KEY.
+//   - Il n'est JAMAIS ecrit sur disque (meme en /tmp partage).
+//   - Un mecanisme de rotation avec grace period est inclus :
+//     le sel temporel change toutes les 24h, mais les tokens
+//     signes avec le sel precedent restent valides pendant la
+//     periode de transition (2 x 24h).
+//
 // LIMITATION : Le login par mot de passe ne fonctionne que si le
 // store est accessible (meme instance ou fichier partage).
 // Pour la production multi-instance, configurez Firebase.
-// ============================================================
+// ===========================================================
 
 import { createHash, randomBytes, scryptSync, createHmac, timingSafeEqual } from 'crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { cookies } from 'next/headers';
 
@@ -66,19 +74,67 @@ interface UserStore {
 // Configuration
 // ============================================================
 
-function getOrCreateSecret(): string {
-  const secretPath = '/tmp/gen3ia-auth/jwt-secret.txt';
-  if (existsSync(secretPath)) {
-    return readFileSync(secretPath, 'utf-8').trim();
+// ============================================================
+// JWT Secret — Dérivation HMAC (JAMAIS sur disque)
+// ============================================================
+// Le secret est dérivé déterministiquement depuis VAULT_MASTER_KEY
+// via HMAC-SHA256. Cela signifie :
+//   - Aucun fichier à créer/lire dans /tmp (pas d'exposition)
+//   - Le secret est reproductible across instances & cold starts
+//   - Changer VAULT_MASTER_KEY invalide tous les tokens existants
+//
+// Rotation : on utilise un sel temporel (jour courant) pour dériver
+// le secret. Les tokens signés avec le sel de la période précédente
+// sont encore acceptés (grace period d'une période).
+// ============================================================
+
+const ROTATION_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 heures
+const GRACE_PERIODS = 1; // Accepter la période précédente
+
+/**
+ * Dérive un secret JWT déterministe depuis VAULT_MASTER_KEY.
+ * Jamais écrit sur disque. Résiste à la lecture de /tmp.
+ */
+function deriveJwtSecret(timeOffset: number = 0): string {
+  const masterKey = process.env.VAULT_MASTER_KEY;
+  if (!masterKey) {
+    // Fallback en mémoire uniquement — perdu au cold start.
+    // En production, VAULT_MASTER_KEY doit TOUJOURS être défini.
+    if (!memoryOnlySecret) {
+      memoryOnlySecret = randomBytes(32).toString('hex');
+    }
+    return memoryOnlySecret;
   }
-  const secret = process.env.VAULT_MASTER_KEY || randomBytes(32).toString('hex');
-  const dir = '/tmp/gen3ia-auth';
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(secretPath, secret, 'utf-8');
-  return secret;
+
+  const period = Math.floor((Date.now() + timeOffset) / ROTATION_PERIOD_MS);
+  return createHmac('sha256', masterKey)
+    .update(`gen3ia-jwt-key-v1:${period}`)
+    .digest('hex');
 }
 
-const JWT_SECRET = getOrCreateSecret();
+let memoryOnlySecret: string | null = null;
+
+/**
+ * Retourne la liste des secrets actifs (courant + grace periods).
+ * Utilisé pour la vérification : on accepte un token signé avec
+ * n'importe lequel de ces secrets.
+ */
+function getActiveSecrets(): string[] {
+  const secrets: string[] = [deriveJwtSecret(0)]; // Période courante
+  for (let i = 1; i <= GRACE_PERIODS; i++) {
+    secrets.push(deriveJwtSecret(-i * ROTATION_PERIOD_MS)); // Périodes passées
+  }
+  return secrets;
+}
+
+/**
+ * Secret principal pour la SIGNATURE des nouveaux tokens.
+ * Toujours le secret de la période courante.
+ */
+function getSigningSecret(): string {
+  return deriveJwtSecret(0);
+}
+
 const JWT_ALGORITHM = 'HS256';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 14; // 14 jours
 const SESSION_MAX_AGE_SHORT = 60 * 60 * 24; // 24 heures
@@ -199,7 +255,7 @@ export function signJWT(payload: Record<string, unknown>, expiresIn: number = SE
 
   const headerB64 = base64urlEncode(JSON.stringify(header));
   const payloadB64 = base64urlEncode(JSON.stringify(fullPayload));
-  const signature = createHmac('sha256', JWT_SECRET)
+  const signature = createHmac('sha256', getSigningSecret())
     .update(`${headerB64}.${payloadB64}`)
     .digest('base64url');
 
@@ -212,13 +268,28 @@ export function verifyJWT(token: string): StandaloneSession | null {
     if (parts.length !== 3) return null;
 
     const [headerB64, payloadB64, signature] = parts;
-    const expectedSig = createHmac('sha256', JWT_SECRET)
-      .update(`${headerB64}.${payloadB64}`)
-      .digest('base64url');
 
-    if (!timingSafeEqual(Buffer.from(signature, 'base64url'), Buffer.from(expectedSig, 'base64url'))) {
-      return null;
+    // Vérifier contre TOUS les secrets actifs (courant + grace periods)
+    const activeSecrets = getActiveSecrets();
+    let isValid = false;
+
+    for (const secret of activeSecrets) {
+      const expectedSig = createHmac('sha256', secret)
+        .update(`${headerB64}.${payloadB64}`)
+        .digest('base64url');
+
+      try {
+        if (timingSafeEqual(Buffer.from(signature, 'base64url'), Buffer.from(expectedSig, 'base64url'))) {
+          isValid = true;
+          break;
+        }
+      } catch {
+        // timingSafeEqual échoue si les buffers ont des tailles différentes
+        continue;
+      }
     }
+
+    if (!isValid) return null;
 
     const payload = JSON.parse(base64urlDecode(payloadB64));
     if (payload.exp < Math.floor(Date.now() / 1000)) {
