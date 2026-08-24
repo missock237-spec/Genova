@@ -114,7 +114,7 @@ const nextConfig = {
       '/dashboard', '/agents', '/agent-chat', '/automation', '/guardrails',
       '/coordination', '/settings', '/approvals', '/analytics', '/billing',
       '/developers', '/voice', '/images', '/integrations', '/notifications',
-      '/scheduler',
+      '/scheduler', '/prompts',
     ];
     return spaPaths.map((p) => ({
       source: p,
