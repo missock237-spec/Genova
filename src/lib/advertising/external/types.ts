@@ -44,6 +44,10 @@ export interface ExternalAdCampaignInput {
   frequencyCap?: number;
 }
 
+// Alias de rétrocompatibilité : `registry.ts` référençait historiquement
+// ce nom. Le canonique reste `ExternalAdCampaignInput`.
+export type ExternalCampaignInput = ExternalAdCampaignInput;
+
 export interface ExternalImpressionEvent {
   externalCampaignId: string;
   userId: string;
