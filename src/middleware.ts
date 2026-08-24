@@ -171,7 +171,7 @@ export async function middleware(request: NextRequest) {
       '/dashboard', '/agents', '/agent-chat', '/automation', '/guardrails',
       '/coordination', '/settings', '/approvals', '/analytics', '/billing',
       '/developers', '/voice', '/images', '/integrations', '/notifications',
-      '/scheduler',
+      '/scheduler', '/prompts',
     ];
 
     if (PUBLIC_PAGES.includes(pathname)) {
