@@ -4,15 +4,25 @@
 // ============================================================
 import { NextRequest, NextResponse } from 'next/server';
 import { applySecurity } from '@/lib/security';
-import type { WorkflowCanvas } from '@/lib/workflow-engine';
 
 export const dynamic = "force-dynamic";
 
-// Type local de secours (même shape que WorkflowCanvas) si jamais
-// l'import de type du moteur était résolu différemment par le builder.
+// Une étape de workflow (format canonique attendu par
+// l'exécuteur /api/workflows/[id]/execute et le composant WorkflowBuilder).
+type WorkflowStep = {
+  title?: string;
+  description?: string;
+  agentType?: string;
+  agentId?: string;
+  priority?: string;
+  status?: string;
+};
+
+// Canvas de type moteur (workflow-engine) — accepté en entrée par
+// compatibilité, mais normalisé en tableau d'étapes à la persistance.
 type WorkflowCanvasLike = {
-  blocks: unknown[];
-  edges: unknown[];
+  blocks?: unknown[];
+  edges?: unknown[];
   viewport?: { x: number; y: number; zoom: number };
 };
 
@@ -62,6 +72,61 @@ function toMillis(value: unknown): number {
   return 0;
 }
 
+/**
+ * Normalise n'importe quelle représentation de `steps` en tableau
+ * d'étapes WorkflowStep[].
+ *  - Tableau d'étapes -> retourné tel quel.
+ *  - Chaîne JSON (tableau ou canvas) -> parsée puis convertie.
+ *  - Canvas { blocks, edges } -> blocs convertis en étapes plates.
+ */
+function normalizeSteps(raw: unknown): WorkflowStep[] {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((s) => {
+        if (!s || typeof s !== 'object') return null;
+        const o = s as Record<string, unknown>;
+        return {
+          title: typeof o.title === 'string' ? o.title : String(o.title ?? ''),
+          description: typeof o.description === 'string' ? o.description : undefined,
+          agentType: typeof o.agentType === 'string' ? o.agentType : typeof o.type === 'string' ? o.type : undefined,
+          agentId: typeof o.agentId === 'string' ? o.agentId : undefined,
+          priority: typeof o.priority === 'string' ? o.priority : 'medium',
+          status: typeof o.status === 'string' ? o.status : 'pending',
+        };
+      })
+      .filter((s): s is WorkflowStep => Boolean(s && (s.title || s.agentId)));
+  }
+  if (value && typeof value === 'object') {
+    const canvas = value as WorkflowCanvasLike;
+    if (Array.isArray(canvas.blocks)) {
+      return canvas.blocks
+        .map((b) => {
+          if (!b || typeof b !== 'object') return null;
+          const o = b as Record<string, unknown>;
+          const config = (o.config && typeof o.config === 'object' ? o.config : {}) as Record<string, unknown>;
+          return {
+            title: typeof o.label === 'string' ? o.label : typeof config.title === 'string' ? config.title : String(o.type ?? ''),
+            description: typeof config.description === 'string' ? config.description : undefined,
+            agentType: typeof o.type === 'string' ? o.type : undefined,
+            agentId: typeof config.agentId === 'string' ? config.agentId : undefined,
+            priority: typeof config.priority === 'string' ? config.priority : 'medium',
+            status: 'pending',
+          };
+        })
+        .filter((s): s is WorkflowStep => Boolean(s && s.title));
+    }
+  }
+  return [];
+}
+
 // ============================================================
 // GET — Liste des workflows de l'utilisateur
 // Défensif : fallback sans orderBy si index composite manquant
@@ -101,7 +166,7 @@ export async function GET(request: NextRequest) {
   }
 
   // 3. Fetch workflows — défensif avec fallback
-  const selectFields = ['id', 'name', 'description', 'trigger', 'status', 'updatedAt', 'createdAt', 'activeBranchId', 'currentVersionId'];
+  const selectFields = ['id', 'name', 'description', 'trigger', 'status', 'updatedAt', 'createdAt', 'activeBranchId', 'currentVersionId', 'steps'];
 
   try {
     const prisma = await getPrisma();
@@ -110,8 +175,16 @@ export async function GET(request: NextRequest) {
       orderBy: [{ field: 'updatedAt', direction: 'desc' }],
       select: selectFields,
     });
+    // Ajout du compteur d'étapes attendu par le front (stepCount)
+    const enriched = workflows.map((w) => {
+      const rec = w as Record<string, unknown>;
+      return {
+        ...rec,
+        stepCount: normalizeSteps(rec.steps).length,
+      };
+    });
     return NextResponse.json(
-      { success: true, workflows },
+      { success: true, workflows: enriched },
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } },
     );
   } catch (err) {
@@ -129,8 +202,12 @@ export async function GET(request: NextRequest) {
         });
         // Tri côté serveur (pas idéal mais fonctionnel)
         workflows.sort((a: any, b: any) => toMillis(b.updatedAt) - toMillis(a.updatedAt));
+        const enriched = workflows.map((w) => {
+          const rec = w as Record<string, unknown>;
+          return { ...rec, stepCount: normalizeSteps(rec.steps).length };
+        });
         return NextResponse.json(
-          { success: true, workflows },
+          { success: true, workflows: enriched },
           { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } },
         );
       } catch (fallbackErr) {
@@ -163,48 +240,59 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { name, description, trigger, template } = body;
+    const { name, description, trigger, template, steps: rawSteps } = body;
 
     if (!name) return NextResponse.json({ error: 'name requis' }, { status: 400 });
 
-    // Import paresseux du versioning (le type WorkflowCanvas est importé en haut)
-    const { workflowVersioning } = await import('@/lib/workflow-versioning');
+    let steps: WorkflowStep[] = [];
 
-    let steps: WorkflowCanvas | WorkflowCanvasLike = { blocks: [], edges: [] };
-
-    if (template) {
+    // Priorité 1 : steps fournis dans le corps (front builder).
+    if (rawSteps !== undefined) {
+      steps = normalizeSteps(rawSteps);
+    } else if (template) {
+      // Priorité 2 : un template a été fourni.
       const tmpl = await prisma.workflowTemplate.findUnique({ where: { id: template } });
       if (tmpl) {
-        const parsed = JSON.parse(String(tmpl.steps || '{"blocks":[],"edges":[]}'));
-        steps = {
-          blocks: Array.isArray(parsed?.blocks) ? parsed.blocks : [],
-          edges: Array.isArray(parsed?.edges) ? parsed.edges : [],
-        };
+        steps = normalizeSteps((tmpl as Record<string, unknown>).steps);
         await prisma.workflowTemplate.update({
           where: { id: template },
-          data: { usageCount: (Number(tmpl.usageCount) || 0) + 1 },
+          data: { usageCount: (Number((tmpl as Record<string, unknown>).usageCount) || 0) + 1 },
         });
       }
     }
 
+    // Persist au format tableau d'étapes (JSON string), lisible par l'exécuteur.
+    const stepsJson = JSON.stringify(steps);
+
     const workflow = await prisma.workflow.create({
       data: {
         name, description: description || '',
-        steps: JSON.stringify(steps),
+        steps: stepsJson,
         trigger: trigger || 'manual',
         status: 'draft',
         userId: auth.userId,
       },
     });
 
-    await workflowVersioning.createWithInitialVersion(
-      workflow.id as string, auth.userId, steps, 'Version initiale'
-    );
+    // Versioning : on stocke le même tableau d'étapes (shape compatible).
+    try {
+      const { workflowVersioning } = await import('@/lib/workflow-versioning');
+      await workflowVersioning.createWithInitialVersion(
+        workflow.id as string, auth.userId, steps as unknown as never, 'Version initiale'
+      );
+    } catch (vErr) {
+      // Le versioning ne doit pas bloquer la création du workflow.
+      console.error('[api-workflows POST] versioning failed (non bloquant):', vErr);
+    }
 
     log.info('workflow_created_with_versioning', { workflowId: workflow.id });
 
     const fullWorkflow = await prisma.workflow.findUnique({ where: { id: workflow.id as string } });
-    return NextResponse.json({ success: true, workflow: fullWorkflow });
+    const out = (fullWorkflow as Record<string, unknown>) || {};
+    return NextResponse.json({
+      success: true,
+      workflow: { ...out, stepCount: steps.length },
+    });
   } catch (err) {
     log.error('workflow_create_error', { error: String(err) });
     return NextResponse.json({ error: String(err) }, { status: 500 });
@@ -240,20 +328,22 @@ export async function PUT(request: NextRequest) {
     });
     if (!workflow) return NextResponse.json({ error: 'Workflow introuvable' }, { status: 404 });
 
+    const normalizedSteps = steps !== undefined ? normalizeSteps(steps) : undefined;
+
     const updated = await prisma.workflow.update({
       where: { id },
       data: {
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
-        ...(steps !== undefined && { steps: JSON.stringify(steps) }),
+        ...(normalizedSteps !== undefined && { steps: JSON.stringify(normalizedSteps) }),
         ...(trigger !== undefined && { trigger }),
         ...(status !== undefined && { status }),
       },
     });
 
-    if (body.test && steps) {
+    if (body.test && normalizedSteps) {
       const { workflowEngine } = await import('@/lib/workflow-engine');
-      const result = await workflowEngine.execute(steps);
+      const result = await workflowEngine.execute(normalizedSteps as unknown as never);
       return NextResponse.json({ success: true, workflow: updated, test: result });
     }
 
