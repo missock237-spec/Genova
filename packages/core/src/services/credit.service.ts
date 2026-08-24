@@ -1,6 +1,13 @@
 // ============================================================
 // Credit Service — Gestion des credits utilisateurs
 // ============================================================
+//
+// Securite : deductCredits utilise une transaction Firestore atomique
+// pour eviter la race condition TOCTOU (Time-Of-Check to Time-Of-Use).
+// La verification du solde et la deduction sont executees dans une
+// seule transaction — impossible pour deux requetes paralleles de
+// passer la verification simultanement.
+// ============================================================
 
 import { userRepository, creditTransactionRepository } from '../repositories/index.js';
 import { BusinessError, NotFoundError } from '../errors.js';
@@ -12,19 +19,35 @@ class CreditService {
     return ((user as any).credits ?? 0) >= amount;
   }
 
+  /**
+   * Deduit des credits de maniere atomique via transaction Firestore.
+   * Elimine la race condition TOCTOU : la lecture du solde, la
+   * verification et la deduction sont dans une seule transaction
+   // transaction.
+   */
   async deductCredits(userId: string, amount: number, description: string) {
-    const user = await userRepository.findByIdOrThrow(userId);
-    const currentCredits = (user as any).credits ?? 0;
-    if (currentCredits < amount) {
-      throw new BusinessError('INSUFFICIENT_CREDITS', 'Credits insuffisants');
+    if (amount <= 0) {
+      throw new BusinessError('INVALID_AMOUNT', 'Le montant doit etre positif');
     }
-    const updatedUser = await userRepository.deductCredits(userId, amount);
-    await creditTransactionRepository.create({
-      userId,
-      amount: -amount,
-      type: 'usage',
-      description,
-    });
+
+    // Transaction atomique : check + decrement en une seule operation
+    const updatedUser = await userRepository.deductCreditsAtomic(userId, amount);
+
+    // Enregistrer la transaction (hors de la transaction Firestore, 
+    // echec non-critique — le credit est deja deduit)
+    try {
+      await creditTransactionRepository.create({
+        userId,
+        amount: -amount,
+        type: 'usage',
+        description,
+      });
+    } catch (logErr) {
+      // La deduction a reussi, on loggue l'echec d'enregistrement
+      // sans echouer la requete utilisateur
+      console.error('[credit-service] Failed to log transaction:', logErr);
+    }
+
     return updatedUser;
   }
 

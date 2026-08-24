@@ -11,12 +11,11 @@
 //      session fonctionne meme apres un cold start (sans store)
 //
 // Securite du secret JWT :
-//   - Le secret est DERIVE via HMAC depuis VAULT_MASTER_KEY.
-//   - Il n'est JAMAIS ecrit sur disque (meme en /tmp partage).
-//   - Un mecanisme de rotation avec grace period est inclus :
-//     le sel temporel change toutes les 24h, mais les tokens
-//     signes avec le sel precedent restent valides pendant la
-//     periode de transition (2 x 24h).
+//   - Le secret provient EXCLUSIVEMENT de la variable d'environnement
+//     STANDALONE_JWT_SECRET (64 carac. hex, obligatoire en production).
+//   - Il n'est JAMAIS ecrit sur disque, meme en /tmp partage.
+//   - En dev (NODE_ENV !== 'production'), un secret aleatoire en memoire
+//     est accepte (perdu au cold start — acceptable en local).
 //
 // LIMITATION : Le login par mot de passe ne fonctionne que si le
 // store est accessible (meme instance ou fichier partage).
@@ -27,6 +26,49 @@ import { createHash, randomBytes, scryptSync, createHmac, timingSafeEqual } from
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { cookies } from 'next/headers';
+
+// ============================================================
+// JWT Secret — Variable d'environnement obligatoire
+// ============================================================
+// Le secret N'EST JAMAIS stocke sur disque.
+// En production, STANDALONE_JWT_SECRET doit etre defini (64 hex chars).
+// En dev, un secret aleatoire en memoire est genere (perdu au restart).
+// ============================================================
+
+function resolveJwtSecret(): string {
+  const envSecret = process.env.STANDALONE_JWT_SECRET;
+
+  if (envSecret) {
+    // Valider le format : exactement 64 caracteres hexadecimaux
+    if (!/^[0-9a-f]{64}$/i.test(envSecret)) {
+      throw new Error(
+        '[standalone-auth] STANDALONE_JWT_SECRET doit contenir exactement 64 caracteres hexadecimaux. ' +
+        'Generez un avec : node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+      );
+    }
+    return envSecret;
+  }
+
+  // En production, le secret est OBLIGATOIRE
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      '[standalone-auth] STANDALONE_JWT_SECRET n\'est pas defini. ' +
+      'En production, cette variable d\'environnement est obligatoire. ' +
+      'Generez un secret avec : node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))" ' +
+      'et ajoutez-le aux variables d\'environnement Vercel.'
+    );
+  }
+
+  // En dev, secret aleatoire en memoire (perdu au cold start)
+  console.warn(
+    '[standalone-auth] STANDALONE_JWT_SECRET non defini — utilisation d\'un secret aleatoire en memoire. ' +
+    'Les sessions seront invalidees au prochain redemarrage. ' +
+    'Definissez STANDALONE_JWT_SECRET pour la persistance.'
+  );
+  return randomBytes(32).toString('hex');
+}
+
+const JWT_SECRET = resolveJwtSecret();
 
 // ============================================================
 // Types
@@ -73,67 +115,6 @@ interface UserStore {
 // ============================================================
 // Configuration
 // ============================================================
-
-// ============================================================
-// JWT Secret — Dérivation HMAC (JAMAIS sur disque)
-// ============================================================
-// Le secret est dérivé déterministiquement depuis VAULT_MASTER_KEY
-// via HMAC-SHA256. Cela signifie :
-//   - Aucun fichier à créer/lire dans /tmp (pas d'exposition)
-//   - Le secret est reproductible across instances & cold starts
-//   - Changer VAULT_MASTER_KEY invalide tous les tokens existants
-//
-// Rotation : on utilise un sel temporel (jour courant) pour dériver
-// le secret. Les tokens signés avec le sel de la période précédente
-// sont encore acceptés (grace period d'une période).
-// ============================================================
-
-const ROTATION_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 heures
-const GRACE_PERIODS = 1; // Accepter la période précédente
-
-/**
- * Dérive un secret JWT déterministe depuis VAULT_MASTER_KEY.
- * Jamais écrit sur disque. Résiste à la lecture de /tmp.
- */
-function deriveJwtSecret(timeOffset: number = 0): string {
-  const masterKey = process.env.VAULT_MASTER_KEY;
-  if (!masterKey) {
-    // Fallback en mémoire uniquement — perdu au cold start.
-    // En production, VAULT_MASTER_KEY doit TOUJOURS être défini.
-    if (!memoryOnlySecret) {
-      memoryOnlySecret = randomBytes(32).toString('hex');
-    }
-    return memoryOnlySecret;
-  }
-
-  const period = Math.floor((Date.now() + timeOffset) / ROTATION_PERIOD_MS);
-  return createHmac('sha256', masterKey)
-    .update(`gen3ia-jwt-key-v1:${period}`)
-    .digest('hex');
-}
-
-let memoryOnlySecret: string | null = null;
-
-/**
- * Retourne la liste des secrets actifs (courant + grace periods).
- * Utilisé pour la vérification : on accepte un token signé avec
- * n'importe lequel de ces secrets.
- */
-function getActiveSecrets(): string[] {
-  const secrets: string[] = [deriveJwtSecret(0)]; // Période courante
-  for (let i = 1; i <= GRACE_PERIODS; i++) {
-    secrets.push(deriveJwtSecret(-i * ROTATION_PERIOD_MS)); // Périodes passées
-  }
-  return secrets;
-}
-
-/**
- * Secret principal pour la SIGNATURE des nouveaux tokens.
- * Toujours le secret de la période courante.
- */
-function getSigningSecret(): string {
-  return deriveJwtSecret(0);
-}
 
 const JWT_ALGORITHM = 'HS256';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 14; // 14 jours
@@ -255,7 +236,7 @@ export function signJWT(payload: Record<string, unknown>, expiresIn: number = SE
 
   const headerB64 = base64urlEncode(JSON.stringify(header));
   const payloadB64 = base64urlEncode(JSON.stringify(fullPayload));
-  const signature = createHmac('sha256', getSigningSecret())
+  const signature = createHmac('sha256', JWT_SECRET)
     .update(`${headerB64}.${payloadB64}`)
     .digest('base64url');
 
@@ -269,24 +250,19 @@ export function verifyJWT(token: string): StandaloneSession | null {
 
     const [headerB64, payloadB64, signature] = parts;
 
-    // Vérifier contre TOUS les secrets actifs (courant + grace periods)
-    const activeSecrets = getActiveSecrets();
+    // Verification avec le secret JWT (env var, jamais sur disque)
+    const expectedSig = createHmac('sha256', JWT_SECRET)
+      .update(`${headerB64}.${payloadB64}`)
+      .digest('base64url');
+
     let isValid = false;
-
-    for (const secret of activeSecrets) {
-      const expectedSig = createHmac('sha256', secret)
-        .update(`${headerB64}.${payloadB64}`)
-        .digest('base64url');
-
-      try {
-        if (timingSafeEqual(Buffer.from(signature, 'base64url'), Buffer.from(expectedSig, 'base64url'))) {
-          isValid = true;
-          break;
-        }
-      } catch {
-        // timingSafeEqual échoue si les buffers ont des tailles différentes
-        continue;
-      }
+    try {
+      isValid = timingSafeEqual(
+        Buffer.from(signature, 'base64url'),
+        Buffer.from(expectedSig, 'base64url'),
+      );
+    } catch {
+      // timingSafeEqual échoue si les buffers ont des tailles différentes
     }
 
     if (!isValid) return null;
