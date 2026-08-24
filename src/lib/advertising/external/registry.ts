@@ -9,10 +9,12 @@
 //   - synchronise les events (impression/clic) vers le réseau externe
 //   - effectue le rapprochement du spend facturable externe
 //
-// IMPORTANT — intégration additive : l'AdEngine existant n'est PAS
-// modifié. Pour servir des campagnes externes, appeler
-// `externalManager.getActiveExternalCampaigns()` et fusionner le
-// résultat avec `engine.getActiveCampaigns()` (voir la doc).
+// POINT D'INTEGRATION ADDITIF :
+//   `resolveServingDecision()` combine les campagnes internes ET
+//   externes pour une décision de diffusion unique — voir
+//   `src/lib/advertising/ad-serving.ts` (wrapper non invasif).
+//   L'AdEngine (`ad-engine.ts`) n'est PAS modifié.
+//
 // En cas d'échec réseau, on retourne une liste vide → repli sur les
 // campagnes internes, sans interruption du service.
 // ============================================================
@@ -33,6 +35,7 @@ import type {
   ExternalClickEvent,
   ExternalSpendReport,
   ExternalSyncResult,
+  ExternalProviderId,
   NormalizedExternalCampaign,
 } from './types';
 
@@ -102,6 +105,24 @@ export class ExternalAdManager {
   }
 
   /**
+   * Détermine si une campagne (par son ID servi) provient du réseau externe
+   * et, le cas échéant, retourne ses identifiants de synchronisation.
+   */
+  resolveExternalRef(campaignId: string): {
+    providerId: ExternalProviderId;
+    externalCampaignId: string;
+  } | null {
+    if (!campaignId.startsWith('ext:')) return null;
+    // Format : ext:<providerId>:<externalCampaignId>
+    const parts = campaignId.split(':');
+    if (parts.length < 3) return null;
+    return {
+      providerId: parts[1],
+      externalCampaignId: parts.slice(2).join(':'),
+    };
+  }
+
+  /**
    * Normalise une campagne externe vers le format AdCampaign interne.
    * `targetPlan` par défaut 'all', placement conversation_inline.
    */
@@ -148,7 +169,7 @@ export class ExternalAdManager {
    * Fire-and-forget : n'échoue jamais la requête appelante.
    */
   async syncImpression(event: ExternalImpressionEvent): Promise<void> {
-    const provider = this.providers.find(p => p.enabled);
+    const provider = this.findProvider(event.externalCampaignId);
     if (!provider) return;
     try {
       await provider.reportImpression(event);
@@ -165,7 +186,7 @@ export class ExternalAdManager {
    * Notifie un clic au réseau externe d'origine (fire-and-forget).
    */
   async syncClick(event: ExternalClickEvent): Promise<void> {
-    const provider = this.providers.find(p => p.enabled);
+    const provider = this.findProvider(event.externalCampaignId);
     if (!provider) return;
     try {
       await provider.reportClick(event);
@@ -179,16 +200,29 @@ export class ExternalAdManager {
   }
 
   /**
+   * Retrouve le provider correspondant à une campagne externe servie.
+   * Le cas échéant, repli sur l'unique provider actif.
+   */
+  private findProvider(externalCampaignId: string): ExternalAdProvider | undefined {
+    if (this.providers.length === 1) return this.providers[0].enabled ? this.providers[0] : undefined;
+    // ID de campagne au format ext:<provider>:<id> OU id brut :
+    const ref = this.resolveExternalRef(externalCampaignId);
+    if (ref) return this.providers.find(p => p.id === ref.providerId && p.enabled);
+    return this.providers.find(p => p.enabled);
+  }
+
+  /**
    * Rapprochement du spend externe facturable (pour la facturation).
+   * Retourne UN résultat par provider configuré.
    */
   async reconcileExternalSpend(
     periodStart: Date,
     periodEnd: Date,
-  ): Promise<{
+  ): Promise<Array<{
     providerId: string;
     reports: ExternalSpendReport[];
-  }> {
-    const out: { providerId: string; reports: ExternalSpendReport[] }[] = [];
+  }>> {
+    const out: Array<{ providerId: string; reports: ExternalSpendReport[] }> = [];
     for (const provider of this.providers) {
       if (!provider.enabled) continue;
       try {
@@ -201,7 +235,7 @@ export class ExternalAdManager {
         });
       }
     }
-    return out[0] ?? { providerId: '', reports: [] };
+    return out;
   }
 
   /**
