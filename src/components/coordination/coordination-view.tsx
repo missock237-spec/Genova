@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { GitBranch, Plus, Play, Settings, Users, Loader2, Trash2, AlertCircle, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { WorkflowCreateDialog } from '@/components/coordination/workflow-create-dialog';
 
 interface Workflow {
   id: string;
@@ -21,6 +22,7 @@ export function CoordinationView() {
   const [error, setError] = useState<string | null>(null);
   const [executingId, setExecutingId] = useState<string | null>(null);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const loadWorkflows = useCallback(async () => {
     setLoading(true);
@@ -103,7 +105,7 @@ export function CoordinationView() {
           </h1>
           <p className="text-muted-foreground">Workflows multi-agents — Orchestrez vos agents IA</p>
         </div>
-        <Button className="flex items-center gap-2">
+        <Button className="flex items-center gap-2" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4" />
           Nouveau workflow
         </Button>
@@ -140,7 +142,7 @@ export function CoordinationView() {
           <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-6">
             Créez votre premier workflow multi-agents pour automatiser vos processus
           </p>
-          <Button variant="outline" className="gap-2">
+          <Button variant="outline" className="gap-2" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" />
             Créer un workflow
           </Button>
@@ -210,6 +212,12 @@ export function CoordinationView() {
           })}
         </div>
       )}
+
+      <WorkflowCreateDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={loadWorkflows}
+      />
     </div>
   );
 }
