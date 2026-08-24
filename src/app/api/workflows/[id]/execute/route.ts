@@ -3,6 +3,70 @@ import { db } from '@/lib/db';
 import { applySecurity, secureResponse } from '@/lib/security';
 
 export const dynamic = "force-dynamic";
+
+type Step = {
+  title?: string;
+  description?: string;
+  priority?: string;
+  agentId?: string;
+  agentType?: string;
+  status?: string;
+};
+
+/**
+ * Normalise `steps` persisté (chaîne JSON) en tableau d'étapes plates.
+ * Tolère à la fois :
+ *  - le format canonique : [{ title, description, priority, agentId, ... }]
+ *  - le canvas legacy      : { blocks: [{ label, type, config }], edges: [...] }
+ */
+function normalizeSteps(raw: unknown): Step[] {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((s) => {
+        if (!s || typeof s !== 'object') return null;
+        const o = s as Record<string, unknown>;
+        return {
+          title: typeof o.title === 'string' ? o.title : typeof o.label === 'string' ? o.label : `Étape`,
+          description: typeof o.description === 'string' ? o.description : undefined,
+          priority: typeof o.priority === 'string' ? o.priority : 'medium',
+          agentId: typeof o.agentId === 'string' ? o.agentId : undefined,
+          agentType: typeof o.agentType === 'string' ? o.agentType : typeof o.type === 'string' ? o.type : undefined,
+          status: typeof o.status === 'string' ? o.status : 'pending',
+        } as Step;
+      })
+      .filter((s): s is Step => Boolean(s && (s.title || s.agentId)));
+  }
+  if (value && typeof value === 'object') {
+    const canvas = value as { blocks?: unknown[]; edges?: unknown[] };
+    if (Array.isArray(canvas.blocks)) {
+      return canvas.blocks
+        .map((b) => {
+          if (!b || typeof b !== 'object') return null;
+          const o = b as Record<string, unknown>;
+          const config = (o.config && typeof o.config === 'object' ? o.config : {}) as Record<string, unknown>;
+          return {
+            title: typeof o.label === 'string' ? o.label : typeof config.title === 'string' ? config.title : String(o.type ?? 'Étape'),
+            description: typeof config.description === 'string' ? config.description : undefined,
+            priority: typeof config.priority === 'string' ? config.priority : 'medium',
+            agentId: typeof config.agentId === 'string' ? config.agentId : undefined,
+            agentType: typeof o.type === 'string' ? o.type : undefined,
+            status: 'pending',
+          } as Step;
+        })
+        .filter((s): s is Step => Boolean(s && s.title));
+    }
+  }
+  return [];
+}
+
 export async function OPTIONS(
   request: NextRequest,
   { params: _params }: { params: Promise<{ id: string }> }
@@ -61,17 +125,11 @@ export async function POST(
       );
     }
 
-    let steps: Array<{ title?: string; description?: string; priority?: string; agentId?: string }>;
-    try {
-      steps = JSON.parse(workflow.steps || '[]');
-    } catch {
-      return secureResponse(
-        NextResponse.json({ error: 'Invalid workflow steps data' }, { status: 400 }),
-        request
-      );
-    }
+    const steps = normalizeSteps(workflow.steps);
 
     if (steps.length === 0) {
+      // Restaurer le statut précédent si aucune étape exploitable.
+      await db.workflow.update({ where: { id }, data: { status: workflow.status } }).catch(() => {});
       return secureResponse(
         NextResponse.json({ error: 'Workflow ne contient aucune étape' }, { status: 400 }),
         request
