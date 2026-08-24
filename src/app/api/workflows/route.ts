@@ -21,6 +21,38 @@ async function getLogger() {
   return createLogger('api-workflows');
 }
 
+function emptyWorkflowList(reason?: string, status = 200) {
+  return NextResponse.json(
+    {
+      success: true,
+      workflows: [],
+      ...(reason ? { warning: reason } : {}),
+    },
+    {
+      status,
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+      },
+    },
+  );
+}
+
+function toMillis(value: unknown): number {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'string' || typeof value === 'number') {
+    const t = new Date(value).getTime();
+    return Number.isFinite(t) ? t : 0;
+  }
+  if (typeof value === 'object') {
+    const rec = value as { seconds?: number; _seconds?: number; toDate?: () => Date };
+    if (typeof rec.toDate === 'function') return rec.toDate().getTime();
+    if (typeof rec.seconds === 'number') return rec.seconds * 1000;
+    if (typeof rec._seconds === 'number') return rec._seconds * 1000;
+  }
+  return 0;
+}
+
 // ============================================================
 // GET — Liste des workflows de l'utilisateur
 // Défensif : fallback sans orderBy si index composite manquant
@@ -31,18 +63,26 @@ export async function GET(request: NextRequest) {
   try {
     const result = await applySecurity(request, { requireAuth: true });
     if (result.error || !result.auth) {
-      return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
+      return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
     }
     auth = result.auth;
   } catch (err) {
+    // En production mobile, un crash auth secondaire ne doit pas casser
+    // l'écran Coordination avec un 500 opaque. On journalise et on renvoie
+    // un état vide stable pour préserver l'UX, tout en évitant d'exposer
+    // des données sans contexte utilisateur valide.
     console.error('[api-workflows GET] applySecurity crashed:', err);
-    return NextResponse.json({ error: 'Erreur interne auth' }, { status: 500 });
+    return emptyWorkflowList('Lecture workflows indisponible temporairement');
+  }
+
+  if (!auth?.userId) {
+    return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
   }
 
   // 2. Rate limit (fail-open)
   try {
     const rateLimit = await getRateLimit();
-    const rl = await rateLimit(request, auth!.userId);
+    const rl = await rateLimit(request, auth.userId);
     if (!rl.allowed) {
       return NextResponse.json({ error: 'Trop de requêtes' }, { status: 429 });
     }
@@ -57,38 +97,41 @@ export async function GET(request: NextRequest) {
   try {
     const prisma = await getPrisma();
     const workflows = await prisma.workflow.findMany({
-      where: [{ field: 'userId', op: '==', value: auth!.userId }],
+      where: [{ field: 'userId', op: '==', value: auth.userId }],
       orderBy: [{ field: 'updatedAt', direction: 'desc' }],
       select: selectFields,
     });
-    return NextResponse.json({ success: true, workflows });
+    return NextResponse.json(
+      { success: true, workflows },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } },
+    );
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error('[api-workflows GET] Firestore query failed:', errMsg);
 
     // Détecter erreur d'index composite manquant
-    if (errMsg.includes('FAILED_PRECONDITION') || errMsg.includes('index')) {
+    if (errMsg.includes('FAILED_PRECONDITION') || errMsg.toLowerCase().includes('index')) {
       console.warn('[api-workflows GET] Missing composite index — falling back to query without orderBy');
       try {
         const prisma = await getPrisma();
         const workflows = await prisma.workflow.findMany({
-          where: [{ field: 'userId', op: '==', value: auth!.userId }],
+          where: [{ field: 'userId', op: '==', value: auth.userId }],
           select: selectFields,
         });
         // Tri côté serveur (pas idéal mais fonctionnel)
-        workflows.sort((a: any, b: any) => {
-          const da = (a.updatedAt instanceof Date ? a.updatedAt : new Date(a.updatedAt || 0)).getTime();
-          const db = (b.updatedAt instanceof Date ? b.updatedAt : new Date(b.updatedAt || 0)).getTime();
-          return db - da;
-        });
-        return NextResponse.json({ success: true, workflows });
+        workflows.sort((a: any, b: any) => toMillis(b.updatedAt) - toMillis(a.updatedAt));
+        return NextResponse.json(
+          { success: true, workflows },
+          { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } },
+        );
       } catch (fallbackErr) {
         console.error('[api-workflows GET] Fallback query also failed:', fallbackErr);
       }
     }
 
-    // Dernier recours : retourner vide plutôt que 500
-    return NextResponse.json({ success: true, workflows: [] });
+    // Dernier recours : retourner vide plutôt que 500. L'écran Coordination
+    // affiche ainsi l'état "Aucun workflow" au lieu d'une alerte serveur.
+    return emptyWorkflowList('Lecture workflows indisponible temporairement');
   }
 }
 
@@ -97,7 +140,7 @@ export async function GET(request: NextRequest) {
 // ============================================================
 export async function POST(request: NextRequest) {
   const { auth, error } = await applySecurity(request, { requireAuth: true });
-  if (error || !auth) return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
+  if (error || !auth) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
 
   // Rate limit (fail-open)
   try {
@@ -116,10 +159,10 @@ export async function POST(request: NextRequest) {
     if (!name) return NextResponse.json({ error: 'name requis' }, { status: 400 });
 
     // Import paresseux du moteur de workflow et versioning
-    const { workflowEngine, type WorkflowCanvas } = await import('@/lib/workflow-engine') as any;
+    const { type WorkflowCanvas } = await import('@/lib/workflow-engine') as any;
     const { workflowVersioning } = await import('@/lib/workflow-versioning');
 
-    let steps: any = { blocks: [], edges: [] };
+    let steps: WorkflowCanvas | { blocks: never[]; edges: never[] } = { blocks: [], edges: [] };
 
     if (template) {
       const tmpl = await prisma.workflowTemplate.findUnique({ where: { id: template } });
@@ -137,6 +180,7 @@ export async function POST(request: NextRequest) {
         name, description: description || '',
         steps: JSON.stringify(steps),
         trigger: trigger || 'manual',
+        status: 'draft',
         userId: auth.userId,
       },
     });
@@ -160,7 +204,7 @@ export async function POST(request: NextRequest) {
 // ============================================================
 export async function PUT(request: NextRequest) {
   const { auth, error } = await applySecurity(request, { requireAuth: true });
-  if (error || !auth) return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
+  if (error || !auth) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
 
   try {
     const rateLimit = await getRateLimit();
@@ -212,7 +256,7 @@ export async function PUT(request: NextRequest) {
 // ============================================================
 export async function DELETE(request: NextRequest) {
   const { auth, error } = await applySecurity(request, { requireAuth: true });
-  if (error || !auth) return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
+  if (error || !auth) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
 
   try {
     const rateLimit = await getRateLimit();
