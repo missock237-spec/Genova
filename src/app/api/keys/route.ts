@@ -3,21 +3,38 @@ import { createLogger } from '@/lib/logger';
 import { db } from '@/lib/db';
 import { getServerSession } from '@/lib/auth';
 import crypto from 'crypto';
+import {
+  generateApiKey,
+  hashApiKey,
+  keyPrefix,
+  normalizeExpiryDays,
+} from '@/lib/api-key';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 const log = createLogger('api-keys');
 
 const VALID_SCOPES = ['agents:read', 'agents:write', 'agents:execute', 'voice:call', 'messages:send', 'billing:read', 'admin:read'];
-const PREFIX = 'gva_';
-const KEY_BYTES = 48;
 
-function generateApiKey(): string {
-  const raw = crypto.randomBytes(KEY_BYTES).toString('base64url');
-  return `${PREFIX}${raw}`;
+/**
+ * Convertit une valeur de date Firestore/Firebase en ISO (toujours sûr).
+ * Les timestamps mal sérialisés (bug historique {_methodName}) deviennent null.
+ */
+function toIso(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  if (typeof value === 'string') {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  return null;
 }
 
-function hashKeySha256(key: string): string {
-  return crypto.scryptSync(key, 'gen3ia-api-key-salt', 64).toString('hex');
+function parseScopes(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const valid = (raw.filter((s): s is string => typeof s === 'string')
+    .filter((s) => VALID_SCOPES.includes(s)))
+    .filter((v, i, arr) => arr.indexOf(v) === i); // dédupliqué
+  return valid.length === 0 ? null : valid;
 }
 
 export async function POST(request: NextRequest) {
@@ -27,49 +44,57 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { name, scopes = ['agents:read'], expiresInDays } = body;
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Corps JSON invalide' }, { status: 400 });
+    }
 
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    if (!name) {
       return NextResponse.json({ error: 'Le nom est requis' }, { status: 400 });
     }
 
-    const validScopes = scopes.filter((s: string) => VALID_SCOPES.includes(s));
-    if (validScopes.length === 0) {
+    const scopes = parseScopes(body.scopes ?? ['agents:read']);
+    if (!scopes) {
       return NextResponse.json({
         error: 'Aucun scope valide fourni',
         validScopes: VALID_SCOPES,
       }, { status: 400 });
     }
 
+    // expiresInDays : entier borné ([1, MAX_EXPIRY_DAYS]) ou null = sans expiration.
+    const validatedExpiry = normalizeExpiryDays(body.expiresInDays);
+    if (validatedExpiry === 'invalid') {
+      return NextResponse.json({
+        error: 'expiresInDays doit être un entier positif',
+      }, { status: 400 });
+    }
+    const expiresAt = validatedExpiry ? new Date(Date.now() + validatedExpiry * 86400000) : null;
+
+    // Sécurité : on ne persiste JAMAIS la clé brute — seulement son empreinte.
     const rawKey = generateApiKey();
-    const keyHash = hashKeySha256(rawKey);
-    const expiresAt = expiresInDays
-      ? new Date(Date.now() + expiresInDays * 86400000)
-      : null;
+    const keyHash = hashApiKey(rawKey);
     const id = `key_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
-    // Collection Firestore `api_keys` — le champ `keyValue` est lu par
-    // src/lib/security.ts (authenticateApiKey) via db.apiKey.findFirst.
     await db.apiKey.createWithId(id, {
       userId: session.user.id,
-      name: name.trim(),
-      keyValue: rawKey,
+      name,
       keyHash,
-      prefix: rawKey.substring(0, 8),
-      scopes: validScopes,
+      prefix: keyPrefix(rawKey),
+      scopes,
       expiresAt: expiresAt?.toISOString() ?? null,
       isActive: true,
     });
 
-    log.info('API key created', { name: name.trim(), scopes: validScopes, userId: session.user.id });
+    log.info('API key created', { name, scopes, userId: session.user.id });
 
+    // La clé brute n'est retournée qu'ici, une seule fois.
     return NextResponse.json({
       success: true,
       key: rawKey,
-      prefix: rawKey.substring(0, 8),
-      name: name.trim(),
-      scopes: validScopes,
+      prefix: keyPrefix(rawKey),
+      name,
+      scopes,
       expiresAt: expiresAt?.toISOString() ?? null,
     });
   } catch (error) {
@@ -85,29 +110,45 @@ export async function GET() {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
     }
 
-    const keys = await db.apiKey.findMany({
-      where: [{ field: 'userId', op: '==', value: session.user.id }],
-      orderBy: [{ field: 'createdAt', direction: 'desc' }],
-    });
+    const where = [{ field: 'userId', op: '==', value: session.user.id }] as const;
+
+    // Tri DESC par createdAt. Le filtre = où + orderBy nécessite un index
+    // composite Firestore (userId ASC, createdAt DESC). Si l'index n'est pas
+    // encore déployé, la query lève une erreur : on retombe sur un tri en
+    // mémoire plutôt que d'échouer (« Failed to fetch keys »).
+    let keys: Array<Record<string, unknown>>;
+    try {
+      keys = (await db.apiKey.findMany({
+        where: where as unknown as never,
+        orderBy: [{ field: 'createdAt', direction: 'desc' }],
+      })) as Array<Record<string, unknown>>;
+    } catch {
+      keys = (await db.apiKey.findMany({
+        where: where as unknown as never,
+      })) as Array<Record<string, unknown>>;
+      keys.sort((a, b) => {
+        const ta = new Date(toIso(a.createdAt) ?? 0).getTime();
+        const tb = new Date(toIso(b.createdAt) ?? 0).getTime();
+        return tb - ta;
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      keys: keys.map((k: Record<string, unknown>) => ({
+      keys: keys.map((k) => ({
         id: k.id,
         name: k.name,
-        key: `${k.prefix}${'•'.repeat(32)}`,
-        prefix: k.prefix,
+        key: `${k.prefix ?? ''}${'•'.repeat(32)}`,
+        prefix: k.prefix ?? null,
         scopes: Array.isArray(k.scopes)
           ? k.scopes
           : typeof k.scopes === 'string'
             ? JSON.parse(k.scopes)
             : [],
-// @ts-ignore — type narrowing pending, see refactor ticket
-        lastUsed: (k.lastUsed as Date | string | null)?.toISOString?.() ?? k.lastUsed ?? null,
-        expiresAt: k.expiresAt ?? null,
+        lastUsed: toIso(k.lastUsed),
+        expiresAt: toIso(k.expiresAt),
         isActive: k.isActive ?? true,
-// @ts-ignore — type narrowing pending, see refactor ticket
-        createdAt: (k.createdAt as Date | string | null)?.toISOString?.() ?? k.createdAt ?? null,
+        createdAt: toIso(k.createdAt),
       })),
     });
   } catch (error) {
@@ -123,23 +164,18 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
     }
 
-    // Accept id from either searchParams or JSON body
-    let keyId: string | null;
-    const { searchParams } = new URL(request.url);
-    keyId = searchParams.get('id');
+    // Accepte id depuis searchParams ou corps JSON.
+    let keyId: string | null = new URL(request.url).searchParams.get('id');
     if (!keyId) {
-      try {
-        const body = await request.json();
-        keyId = body?.id || null;
-      } catch {
-        // no body
-      }
+      const body = await request.json().catch(() => null);
+      keyId = typeof body?.id === 'string' ? body.id : null;
     }
 
     if (!keyId) {
       return NextResponse.json({ error: 'ID de clé requis' }, { status: 400 });
     }
 
+    // Révocation logique (isActive=false) — la clé reste dans l'historique.
     await db.apiKey.updateMany({
       where: [
         { field: 'id', op: '==', value: keyId },
