@@ -1,33 +1,59 @@
 // ============================================================
-// POST /api/plugins/[appId]/connect — Connecter un plugin (stocke les clés chiffrées)
+// POST /api/plugins/[appId]/connect — Connecter un plugin
+// Stocke les identifiants chiffrés en Firestore (upsert)
+// Production v2 — createApiHandler + Zod + rate limit + lazy imports
 // ============================================================
-import { NextRequest, NextResponse } from 'next/server';
-import { applySecurity } from '@/lib/security';
-import { connectPlugin } from '@/lib/plugin-engine';
+
+import { z } from 'zod';
+import { createApiHandler, ApiError } from '@/lib/api/handler';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ appId: string }> }) {
-  const { auth, error } = await applySecurity(request, { requireAuth: true });
-  if (error || !auth) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
+// ─── Zod schema ───
+const ConnectBodySchema = z.object({
+  credentials: z.object({
+    apiKey: z.string().optional(),
+    apiSecret: z.string().optional(),
+    username: z.string().optional(),
+    password: z.string().optional(),
+    accessToken: z.string().optional(),
+    refreshToken: z.string().optional(),
+  }).refine(
+    (c) => c.apiKey || c.accessToken || c.username,
+    { message: 'Au moins un identifiant requis (apiKey, accessToken ou username)' },
+  ),
+  displayLabel: z.string().max(200).optional(),
+});
 
-  const { appId } = await params;
+export const POST = createApiHandler(
+  async ({ auth, params, body }) => {
+    const { appId } = params as { appId: string };
+    const b = body as z.infer<typeof ConnectBodySchema>;
 
-  try {
-    const body = await request.json();
-    if (!body.credentials) {
-      return NextResponse.json({ error: 'credentials requis' }, { status: 400 });
+    // Lazy imports pour isolation cold-start
+    const { connectPlugin, getPlugin } = await import('@/lib/plugin-engine');
+
+    // Vérifier que l'app existe dans le catalogue
+    const plugin = getPlugin(appId);
+    if (!plugin) {
+      throw ApiError.notFound(`Plugin « ${appId} » introuvable dans le catalogue.`);
     }
 
-    const result = await connectPlugin(auth!.userId, { appId, ...body }, async (data) => {
+    const result = await connectPlugin(auth!.userId, {
+      appId,
+      credentials: b.credentials,
+      displayLabel: b.displayLabel,
+    }, async (data: Record<string, unknown>) => {
       const { prisma } = await import('@/lib/prisma');
-      // upsert : créer ou mettre à jour la connexion
+
+      // Upsert : chercher une connexion existante
       const existing = await prisma.connectedIntegration.findFirst({
         where: [
           { field: 'userId', op: '==', value: data.userId },
           { field: 'appId', op: '==', value: data.appId },
         ],
       });
+
       if (existing?.id) {
         await prisma.connectedIntegration.update({
           where: { id: existing.id as string },
@@ -41,13 +67,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         });
         return existing.id as string;
       }
+
       const created = await prisma.connectedIntegration.create({
         data: {
           userId: data.userId as string,
           appId: data.appId as string,
           encryptedCredentials: data.encryptedCredentials as string,
           iv: data.iv as string,
-          displayLabel: (data.displayLabel as string) || data.appId,
+          displayLabel: (data.displayLabel as string) || (data.appId as string),
           isActive: true,
           createdAt: data.createdAt as Date,
           updatedAt: data.updatedAt as Date,
@@ -57,11 +84,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 400 });
+      throw ApiError.badRequest(result.error || 'Échec de la connexion');
     }
-    return NextResponse.json({ success: true, connectionId: result.connectionId });
-  } catch (err) {
-    console.error('[plugins/connect] error:', err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
-  }
-}
+
+    return { connectionId: result.connectionId };
+  },
+  {
+    rateLimit: { limit: 20, windowMs: 60_000 },
+    bodySchema: ConnectBodySchema,
+    envelope: false,
+  },
+);

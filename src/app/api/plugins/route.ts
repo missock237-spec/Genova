@@ -1,116 +1,142 @@
 // ============================================================
-// GET /api/plugins — Catalogue + plugins communautaires
+// GET /api/plugins — Catalogue, SDK, plugins utilisateur, scaffold
 // POST /api/plugins — Créer / exécuter / publier (SDK communautaire)
+//
+// Production v2 — createApiHandler + Zod + rate limiting + lazy imports
 // ============================================================
-import { NextRequest, NextResponse } from 'next/server';
-import { applySecurity } from '@/lib/security';
-import { listCatalog, PLUGIN_CATEGORIES, getTotalPluginCount } from '@/lib/plugin-engine';
 
-export const dynamic = 'force-dynamic';
+import { z } from 'zod';
+import { createApiHandler, ApiError } from '@/lib/api/handler';
 
-export async function GET(request: NextRequest) {
-  const { auth, error } = await applySecurity(request, { requireAuth: true });
-  if (error || !auth) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
+// ─── Schemas de validation ───
+const CatalogQuerySchema = z.object({
+  scope: z.enum(['catalog', 'sdk', 'mine', 'scaffold']).optional().default('catalog'),
+  category: z.string().optional(),
+  q: z.string().optional(),
+  type: z.string().optional(),
+  name: z.string().optional(),
+});
 
-  try {
-    const url = new URL(request.url);
-    const scope = url.searchParams.get('scope') || 'catalog';
+const CreatePluginBodySchema = z.object({
+  name: z.string().min(1).max(100),
+  version: z.string().optional(),
+  description: z.string().max(2000).optional(),
+  type: z.string().optional(),
+  icon: z.string().optional(),
+  category: z.string().optional(),
+  schema: z.record(z.unknown()).optional(),
+  permissions: z.array(z.string()).optional(),
+  hooks: z.record(z.unknown()).optional(),
+  sourceUrl: z.string().url().optional().or(z.literal('')),
+});
+
+const ExecutePluginBodySchema = z.object({
+  pluginId: z.string().min(1),
+  inputs: z.record(z.unknown()),
+  config: z.record(z.unknown()).optional(),
+  context: z.record(z.unknown()).optional(),
+  workflowId: z.string().optional(),
+});
+
+const PublishPluginBodySchema = z.object({
+  pluginId: z.string().min(1),
+});
+
+// ─── GET ───
+export const GET = createApiHandler(
+  async ({ auth, query }) => {
+    const { scope, category, q, type, name } = query as z.infer<typeof CatalogQuerySchema>;
 
     switch (scope) {
       case 'catalog': {
-        // Nouveau catalogue de proxy plugins (Slack, GitHub, Notion, Stripe...)
-        const category = url.searchParams.get('category') || undefined;
-        const query = url.searchParams.get('q') || undefined;
-        const plugins = listCatalog(category, query);
-        return NextResponse.json({
-          success: true,
+        // Lazy import pour éviter le cold-start cascade
+        const { listCatalog, PLUGIN_CATEGORIES, getTotalPluginCount } = await import('@/lib/plugin-engine');
+        const plugins = listCatalog(category, q);
+        return {
           total: getTotalPluginCount(),
           categories: PLUGIN_CATEGORIES,
           plugins,
-        });
+        };
       }
 
       case 'sdk': {
-        // Plugins communautaires (SDK existant)
-        const type = url.searchParams.get('type') || undefined;
-        const category = url.searchParams.get('category') || undefined;
         const { pluginSDK } = await import('@/lib/plugin-sdk');
         const plugins = await pluginSDK.getPlugins({ type, category });
-        return NextResponse.json({ success: true, plugins });
+        return { plugins };
       }
 
       case 'mine': {
-        // Plugins créés par l'utilisateur
         const { prisma } = await import('@/lib/prisma');
         const plugins = await prisma.plugin.findMany({
           where: [{ field: 'authorId', op: '==', value: auth!.userId }],
           orderBy: [{ field: 'createdAt', direction: 'desc' }],
         });
-        return NextResponse.json({ success: true, plugins });
+        return { plugins };
       }
 
       case 'scaffold': {
-        const name = url.searchParams.get('name') || 'MonPlugin';
-        const type = url.searchParams.get('type') || 'block';
         const { pluginSDK } = await import('@/lib/plugin-sdk');
-        const scaffold = pluginSDK.generateScaffold(name, type);
-        return NextResponse.json({ success: true, scaffold });
+        const scaffold = pluginSDK.generateScaffold(name || 'MonPlugin', 'block');
+        return { scaffold };
       }
-
-      default:
-        return NextResponse.json({ error: 'Scope inconnu. Utilisez: catalog, sdk, mine, scaffold' }, { status: 400 });
     }
-  } catch (err) {
-    console.error('[api/plugins GET] error:', err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
-  }
-}
+  },
+  {
+    rateLimit: { limit: 120, windowMs: 60_000 },
+    querySchema: CatalogQuerySchema,
+    envelope: false, // rétrocompatibilité frontend
+  },
+);
 
-export async function POST(request: NextRequest) {
-  const { auth, error } = await applySecurity(request, { requireAuth: true });
-  if (error || !auth) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
-
-  try {
-    const body = await request.json();
-    const url = new URL(request.url);
-    const action = url.searchParams.get('action') || 'create';
+// ─── POST ───
+export const POST = createApiHandler(
+  async ({ auth, body, query }) => {
+    const action = (query.action as string) || 'create';
     const { pluginSDK } = await import('@/lib/plugin-sdk');
 
     switch (action) {
       case 'create': {
+        const b = body as z.infer<typeof CreatePluginBodySchema>;
         const plugin = await pluginSDK.createPlugin({
-          name: body.name, version: body.version, description: body.description,
-          type: body.type, icon: body.icon, category: body.category,
-          authorId: auth!.userId, schema: body.schema,
-          permissions: body.permissions, hooks: body.hooks, sourceUrl: body.sourceUrl,
+          name: b.name,
+          version: b.version,
+          description: b.description,
+          type: b.type,
+          icon: b.icon,
+          category: b.category,
+          authorId: auth!.userId,
+          schema: b.schema,
+          permissions: b.permissions,
+          hooks: b.hooks as any,
+          sourceUrl: b.sourceUrl,
         });
-        return NextResponse.json({ success: true, plugin }, { status: 201 });
+        return { plugin } as any;
       }
 
       case 'execute': {
-        if (!body.pluginId || !body.inputs) {
-          return NextResponse.json({ error: 'pluginId et inputs requis' }, { status: 400 });
-        }
-        const result = await pluginSDK.executePlugin(body.pluginId, {
-          inputs: body.inputs, config: body.config || {},
-          context: body.context || {}, userId: auth!.userId, workflowId: body.workflowId,
+        const b = body as z.infer<typeof ExecutePluginBodySchema>;
+        const result = await pluginSDK.executePlugin(b.pluginId, {
+          inputs: b.inputs,
+          config: b.config || {},
+          context: b.context || {},
+          userId: auth!.userId,
+          workflowId: b.workflowId,
         });
-        return NextResponse.json({ success: true, result });
+        return { result };
       }
 
       case 'publish': {
-        if (!body.pluginId) {
-          return NextResponse.json({ error: 'pluginId requis' }, { status: 400 });
-        }
-        const plugin = await pluginSDK.publishPlugin(body.pluginId, auth!.userId);
-        return NextResponse.json({ success: true, plugin });
+        const b = body as z.infer<typeof PublishPluginBodySchema>;
+        const plugin = await pluginSDK.publishPlugin(b.pluginId, auth!.userId);
+        return { plugin } as any;
       }
 
       default:
-        return NextResponse.json({ error: 'Action inconnue. Utilisez: create, execute, publish' }, { status: 400 });
+        throw ApiError.badRequest('Action inconnue. Utilisez: create, execute, publish');
     }
-  } catch (err) {
-    console.error('[api/plugins POST] error:', err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
-  }
-}
+  },
+  {
+    rateLimit: { limit: 60, windowMs: 60_000 },
+    envelope: false,
+  },
+);

@@ -1,22 +1,30 @@
 // ============================================================
 // POST /api/plugins/[appId]/execute — Exécute une action proxy
+// Production v2 — createApiHandler + Zod + rate limit + audit log
 // ============================================================
-import { NextRequest, NextResponse } from 'next/server';
-import { applySecurity } from '@/lib/security';
-import { executeAction } from '@/lib/plugin-engine';
+
+import { z } from 'zod';
+import { createApiHandler, ApiError } from '@/lib/api/handler';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ appId: string }> }) {
-  const { auth, error } = await applySecurity(request, { requireAuth: true });
-  if (error || !auth) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
+// ─── Zod schema ───
+const ExecuteBodySchema = z.object({
+  actionId: z.string().min(1),
+  params: z.record(z.unknown()).optional().default({}),
+});
 
-  const { appId } = await params;
+export const POST = createApiHandler(
+  async ({ auth, params, body }) => {
+    const { appId } = params as { appId: string };
+    const { actionId, params: actionParams } = body as z.infer<typeof ExecuteBodySchema>;
 
-  try {
-    const body = await request.json();
-    if (!body.actionId) {
-      return NextResponse.json({ error: 'actionId requis' }, { status: 400 });
+    // Lazy imports — isolation cold-start
+    const { executeAction, getPlugin } = await import('@/lib/plugin-engine');
+
+    const plugin = getPlugin(appId);
+    if (!plugin) {
+      throw ApiError.notFound(`Plugin \u00ab ${appId} \u00bb introuvable.`);
     }
 
     // Récupérer la connexion chiffrée depuis Firestore
@@ -32,7 +40,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return conn ? (conn as Record<string, unknown>) as any : null;
     };
 
-    // Audit log
+    // Audit log (fire-and-forget)
     const logExecution = async (data: Record<string, unknown>) => {
       try {
         const { prisma } = await import('@/lib/prisma');
@@ -40,10 +48,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           data: {
             pluginId: appId,
             userId: auth!.userId,
-            inputs: JSON.stringify(body.params || {}),
+            inputs: JSON.stringify(actionParams || {}),
             output: JSON.stringify(data),
-            durationMs: data.durationMs as number || 0,
-            status: data.status as string || 'unknown',
+            durationMs: (data.durationMs as number) || 0,
+            status: (data.status as string) || 'unknown',
             error: (data.error as string) || null,
           },
         });
@@ -52,23 +60,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const result = await executeAction(
       auth!.userId,
-      { appId, actionId: body.actionId, params: body.params || {} },
+      { appId, actionId, params: actionParams },
       getStoredConnection,
       logExecution,
     );
 
     if (!result.success) {
       const status = result.status && result.status >= 400 && result.status < 500 ? 400 : 422;
-      return NextResponse.json({ success: false, error: result.error, durationMs: result.durationMs }, { status });
+      throw new ApiError(status, 'PLUGIN_EXECUTION_FAILED', result.error || 'Erreur d\'exécution');
     }
 
-    return NextResponse.json({
-      success: true,
+    return {
       data: result.data,
       durationMs: result.durationMs,
-    });
-  } catch (err) {
-    console.error('[plugins/execute] error:', err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
-  }
-}
+    };
+  },
+  {
+    rateLimit: { limit: 60, windowMs: 60_000 },
+    bodySchema: ExecuteBodySchema,
+    envelope: false,
+  },
+);

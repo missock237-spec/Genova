@@ -3,12 +3,12 @@
 // Proxy API sécurisé avec retry, audit, SSRF protection
 // ============================================================
 
-import type {
-  PluginCatalogEntry,
+import type {  PluginCatalogEntry,
   PluginAction,
   ExecuteActionRequest,
   ExecuteActionResult,
   PluginConnectRequest,
+  UserPluginConnection,
 } from './types';
 import { PLUGIN_CATALOG } from './catalog';
 import { encryptCredentials, decryptCredentials, buildAuthHeaders } from './credentials';
@@ -16,30 +16,34 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('plugin-engine');
 
-// ─── SSRF Protection ───
+// ─── SSRF Protection v2 — couvre 43+ APIs du catalogue ───
 const ALLOWED_HOSTNAME_PATTERNS = [
-  /^api\./, /^www\./, /^app\./, /^cdn\./,
-  /\.googleapis\.com$/,
-  /\.google\.com$/,
-  /\.slack\.com$/,
-  /\.github\.com$/,
-  /\.stripe\.com$/,
-  /\.openai\.com$/,
-  /\.anthropic\.com$/,
-  /\.notion\.so$/,
-  /\.twilio\.com$/,
-  /\.sendgrid\.com$/,
-  /\.shopify\.com$/,
-  /\.hubapi\.com$/,
-  /\.mailchimp\.com$/,
-  /\.atlassian\.net$/,
-  /\.trello\.com$/,
-  /\.asana\.com$/,
-  /\.dropboxapi\.com$/,
-  /\.vercel\.com$/,
-  /\.amazonaws\.com$/,
-  /\.gitlab\.com$/,
-  /discord\.com$/,
+  /^api\./, /^www\./, /^app\./, /^cdn\./, /^hooks\./,
+  // Google
+  /\.googleapis\.com$/, /\.google\.com$/,
+  // Communication
+  /\.slack\.com$/, /discord\.com$/, /\.twitter\.com$/, /\.x\.com$/,
+  /graph\.facebook\.com$/, /api\.linkedin\.com$/, /api\.intercom\.io$/,
+  /graph\.microsoft\.com$/, /api\.zoom\.us$/,
+  // DevOps
+  /\.github\.com$/, /\.gitlab\.com$/, /api\.linear\.app$/,
+  /circleci\.com$/, /api\.datadoghq\.com$/, /api\.pagerduty\.com$/,
+  // Productivité
+  /\.notion\.so$/, /api\.airtable\.com$/, /api\.figma\.com$/,
+  /api\.typeform\.com$/,
+  // Paiement & Finance
+  /\.stripe\.com$/, /quickbooks\.api\.intuit\.com$/,
+  // Email & Notification
+  /\.sendgrid\.com$/, /\.twilio\.com$/, /api\.pushover\.net$/,
+  // Marketing & CRM
+  /\.hubapi\.com$/, /\.mailchimp\.com$/,
+  // Stockage & Cloud
+  /\.dropboxapi\.com$/, /\.vercel\.com$/, /\.amazonaws\.com$/,
+  /\.myshopify\.com$/, /\.supabase\.co$/,
+  // Project Management
+  /\.atlassian\.net$/, /\.trello\.com$/, /\.asana\.com$/,
+  // IA
+  /\.openai\.com$/, /\.anthropic\.com$/,
 ];
 
 const BLOCKED_HOSTNAMES = ['localhost', '127.0.0.1', '0.0.0.0', '169.254.169.254', 'metadata.google.internal'];

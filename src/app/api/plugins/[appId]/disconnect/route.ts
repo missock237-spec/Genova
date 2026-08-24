@@ -1,20 +1,25 @@
 // ============================================================
 // POST /api/plugins/[appId]/disconnect — Déconnecte un plugin
+// Production v2 — createApiHandler + rate limit + lazy imports
 // ============================================================
-import { NextRequest, NextResponse } from 'next/server';
-import { applySecurity } from '@/lib/security';
-import { disconnectPlugin } from '@/lib/plugin-engine';
+
+import { createApiHandler, ApiError } from '@/lib/api/handler';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ appId: string }> }) {
-  const { auth, error } = await applySecurity(request, { requireAuth: true });
-  if (error || !auth) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
+export const POST = createApiHandler(
+  async ({ auth, params }) => {
+    const { appId } = params as { appId: string };
 
-  const { appId } = await params;
+    // Lazy imports
+    const { disconnectPlugin, getPlugin } = await import('@/lib/plugin-engine');
 
-  try {
-    const result = await disconnectPlugin(auth!.userId, appId, async (aid) => {
+    const plugin = getPlugin(appId);
+    if (!plugin) {
+      throw ApiError.notFound(`Plugin « ${appId} » introuvable.`);
+    }
+
+    const result = await disconnectPlugin(auth!.userId, appId, async (aid: string) => {
       const { prisma } = await import('@/lib/prisma');
       const existing = await prisma.connectedIntegration.findFirst({
         where: [
@@ -31,11 +36,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 400 });
+      throw ApiError.badRequest(result.error || 'Échec de la déconnexion');
     }
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error('[plugins/disconnect] error:', err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
-  }
-}
+
+    return { disconnected: true };
+  },
+  {
+    rateLimit: { limit: 20, windowMs: 60_000 },
+    envelope: false,
+  },
+);

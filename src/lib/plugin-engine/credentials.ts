@@ -90,8 +90,12 @@ export function buildAuthHeaders(
     case 'token':
       return { Authorization: `token ${credentials.accessToken || credentials.apiKey || ''}` };
 
-    case 'api_key_header':
-      return { 'x-api-key': credentials.apiKey || '', 'anthropic-version': '2023-06-01' };
+    case 'api_key_header': {
+      const hdrs: Record<string, string> = { 'x-api-key': credentials.apiKey || '' };
+      if (appId === 'anthropic') hdrs['anthropic-version'] = '2023-06-01';
+      if (appId === 'datadog') { hdrs['DD-API-KEY'] = credentials.apiKey || ''; hdrs['DD-APPLICATION-KEY'] = credentials.apiSecret || ''; delete hdrs['x-api-key']; }
+      return hdrs;
+    }
 
     case 'oauth2':
       return { Authorization: `Bearer ${credentials.accessToken || ''}` };
