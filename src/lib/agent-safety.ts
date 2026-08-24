@@ -1,6 +1,11 @@
 // ============================================================
 // agent-safety.ts — TypeScript bindings pour le moteur Rust
 // Appelle le module NAPI compilé depuis Rust
+//
+// ⚠️ FAIL-CLOSED: Le fallback JS est DÉSACTIVÉ en production.
+//    Si le module Rust n'est pas compilé, les fonctions
+//    lèveront une AgentSafetyError au lieu de retourner safe:true.
+//    Pour le développement uniquement: NEXT_PUBLIC_UNSAFE_ALLOW_JS_SAFETY=1
 // ============================================================
 
 // Interface du module Rust NAPI
@@ -57,16 +62,26 @@ interface JsExecutionStatus {
 }
 
 // ============================================================
-// Fallback JS (utilisé quand le module Rust n'est pas compilé)
-// Garantit que l'application fonctionne sans Rust
+// Fallback JS (DÉSACTIVÉ en production — FAIL-CLOSED)
+// Ne s'active QUE si NEXT_PUBLIC_UNSAFE_ALLOW_JS_SAFETY=1
 // ============================================================
+
+const JS_FALLBACK_ENABLED = process.env.NEXT_PUBLIC_UNSAFE_ALLOW_JS_SAFETY === '1';
 
 class FallbackSafety {
   safety_init(): boolean {
+    if (!JS_FALLBACK_ENABLED) throw new AgentSafetyError('JS fallback is disabled in production');
     return true;
   }
 
   validate_agent_prompt(prompt: string, maxTokens: number): JsPromptVerdict {
+    if (!JS_FALLBACK_ENABLED) {
+      throw new AgentSafetyError(
+        'Rust NAPI module not available. Agent execution is BLOCKED. ' +
+        'Compile the crate (cd crates/agent-safety && npm run build) ' +
+        'or set NEXT_PUBLIC_UNSAFE_ALLOW_JS_SAFETY=1 for development only.'
+      );
+    }
     const tokenCount = Math.ceil(prompt.length / 4);
     const flagged: string[] = [];
     const lowerPrompt = prompt.toLowerCase();
@@ -99,6 +114,11 @@ class FallbackSafety {
   }
 
   validate_agent_tools(tools: string[], allowedList: string[]): JsToolValidation {
+    if (!JS_FALLBACK_ENABLED) {
+      throw new AgentSafetyError(
+        'Rust NAPI module not available. Tool validation is BLOCKED.'
+      );
+    }
     const blocked: string[] = [];
     const allowed: string[] = [];
     const blockedSystemTools = [
@@ -207,8 +227,17 @@ const rustModule = require('../../crates/agent-safety') as RustSafetyModule;
     console.log('[agent-safety] Rust engine loaded successfully');
     return rustModule;
   } catch {
-    console.warn('[agent-safety] Rust engine not available, using JS fallback');
-    return new FallbackSafety();
+    if (JS_FALLBACK_ENABLED) {
+      console.warn('[agent-safety] Rust engine not available, using JS fallback (UNSAFE — dev only)');
+      return new FallbackSafety();
+    }
+    // FAIL-CLOSED: pas de Rust, pas de fallback = erreur au chargement
+    console.error('[agent-safety] Rust engine not available and JS fallback is DISABLED (production mode). Agent execution is BLOCKED.');
+    throw new AgentSafetyError(
+      'Rust NAPI safety module not compiled and JS fallback disabled. ' +
+      'Run: cd crates/agent-safety && npm run build. ' +
+      'For dev only: set NEXT_PUBLIC_UNSAFE_ALLOW_JS_SAFETY=1'
+    );
   }
 }
 

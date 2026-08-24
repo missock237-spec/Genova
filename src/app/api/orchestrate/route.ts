@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { applySecurity } from '@/lib/security';
+import { enforceSecurity, AgentSecurityBlockError } from '@/lib/security/agent-security-middleware';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,6 +20,21 @@ export async function POST(request: NextRequest) {
         { erreur: 'Le champ « objective » est requis et doit être une chaîne non vide' },
         { status: 400 },
       );
+    }
+
+    // FAIL-CLOSED: valider l'objectif d'orchestration
+    try {
+      await enforceSecurity(body.objective, {
+        agentId: body.agentIds?.[0] || 'orchestration',
+        userId: auth.userId,
+        allowedTools: [],
+        source: 'api_orchestrate',
+      });
+    } catch (secErr) {
+      if (secErr instanceof AgentSecurityBlockError) {
+        return NextResponse.json({ erreur: `Sécurité: ${secErr.message}` }, { status: 403 });
+      }
+      throw secErr;
     }
 
     const { orchestrate } = await import('@/lib/orchestration');

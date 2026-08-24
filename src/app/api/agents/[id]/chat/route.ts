@@ -118,7 +118,7 @@ export async function POST(
       where: [{ field: 'agentId', op: '==', value: id }],
     }).catch(() => []);
 
-    // Parse agent config for personality/instructions
+    // Parse agent config — use ALL config fields (systemPrompt, skills, knowledge, model, temperature)
     const agentConfigStr = (agent as Record<string, unknown>).config as string || '{}';
     let agentConfig: Record<string, unknown> = {};
     try {
@@ -127,10 +127,27 @@ export async function POST(
       agentConfig = {};
     }
 
-    const personality = (agentConfig as { personality?: string }).personality || 'helpful and professional';
-    const instructions = (agentConfig as { instructions?: string }).instructions || '';
+    const configSystemPrompt = (agentConfig.systemPrompt as string) || '';
+    const configKnowledge = (agentConfig.knowledge as string) || '';
+    const configSkills = Array.isArray(agentConfig.skills) ? (agentConfig.skills as string[]) : [];
+    const configModel = (agentConfig.model as string) || 'default';
+    const configTemperature = typeof agentConfig.temperature === 'number' ? (agentConfig.temperature as number) : undefined;
+    const personality = (agentConfig.personality as string) || '';
+    const instructions = (agentConfig.instructions as string) || '';
 
-    // Build system prompt based on agent config and permissions
+    // Skill descriptions for system prompt
+    const SKILL_DESCRIPTIONS: Record<string, string> = {
+      web_search: 'Recherche d\'informations en temps réel sur le web',
+      code_generation: 'Écriture, débogage et optimisation de code dans différents langages',
+      data_analysis: 'Analyse statistique, interprétation de données et création de rapports',
+      writing: 'Rédaction professionnelle de contenus, articles, emails et documents',
+      translation: 'Traduction multilingue professionnelle avec adaptation culturelle',
+      image_generation: 'Création et description d\'images et de visuels',
+      email: 'Rédaction et gestion de courriels professionnels',
+      document_analysis: 'Extraction, synthèse et analyse de contenus documentaires',
+    };
+
+    // Build system prompt from config
     const grantedPermissions = (agentPermissions as Record<string, unknown>[])
       .filter((p) => p.granted)
       .map((p) => p.permission as string);
@@ -141,10 +158,32 @@ export async function POST(
     const agentName = (agent as Record<string, unknown>).name as string || 'Assistant';
     const agentType = (agent as Record<string, unknown>).type as string || 'custom';
 
-    const systemPrompt = `You are ${agentName}, an AI agent with the following characteristics:
+    // Build skill block
+    const activeSkills = configSkills.filter((s) => SKILL_DESCRIPTIONS[s]);
+    const skillBlock = activeSkills.length > 0
+      ? `\nYour activated skills:\n${activeSkills.map((s) => `- ${s}: ${SKILL_DESCRIPTIONS[s]}`).join('\n')}`
+      : '';
+
+    // Build knowledge block
+    const knowledgeBlock = configKnowledge
+      ? `\n\nUser-provided knowledge context:\n${configKnowledge}`
+      : '';
+
+    // Use the user's system prompt if provided, otherwise build a default one
+    let systemPrompt: string;
+    if (configSystemPrompt) {
+      // User provided a custom system prompt — enhance it with skills and knowledge
+      systemPrompt = `${configSystemPrompt}${skillBlock}${knowledgeBlock}`;
+      if (grantedPermissions.length > 0) {
+        systemPrompt += `\n\nYour granted permissions are: ${grantedPermissions.join(', ')}`;
+      }
+    } else {
+      // Legacy fallback: build from personality + instructions
+      const pers = personality || 'helpful and professional';
+      systemPrompt = `You are ${agentName}, an AI agent with the following characteristics:
 - Type: ${agentType}
-- Personality: ${personality}
-${instructions ? `- Special Instructions: ${instructions}` : ''}
+- Personality: ${pers}${instructions ? `\n- Special Instructions: ${instructions}` : ''}
+${skillBlock}${knowledgeBlock}
 
 Your granted permissions are: ${grantedPermissions.length > 0 ? grantedPermissions.join(', ') : 'none'}
 
@@ -156,12 +195,11 @@ Available tools/permissions:
 - use_cpu: Use CPU resources
 - use_mvp: Use MVP resources
 
-When a user asks you to do something that requires a permission you don't have, politely inform them that you lack that capability.
-When a user asks you to do something that requires approval, let them know it will need approval before execution.
-
+When a user asks you to do something that requires a permission you don\'t have, politely inform them that you lack that capability.\nWhen a user asks you to do something that requires approval, let them know it will need approval before execution.\n
 ${memoryContext ? memoryContext + '\n\n' : ''}${context ? `Additional context: ${context}` : ''}
 
 Respond concisely and helpfully. If you need to perform an action, describe what you would do.`;
+    }
 
     const router = createAIRouter(auth.userId);
 
@@ -209,7 +247,10 @@ Respond concisely and helpfully. If you need to perform an action, describe what
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const aiStream = router.chatStream(messages, { model: 'default' });
+          const aiStream = router.chatStream(messages, {
+            model: configModel,
+            ...(configTemperature !== undefined ? { temperature: configTemperature } : {}),
+          });
 
           for await (const chunk of aiStream) {
             if (chunk.delta) fullResponse += chunk.delta;

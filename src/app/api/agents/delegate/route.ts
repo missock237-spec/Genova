@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { applySecurity } from '@/lib/security';
 import { agentDelegation } from '@/lib/agent-delegation';
+import { enforceSecurity, AgentSecurityBlockError } from '@/lib/security/agent-security-middleware';
 
 export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
@@ -16,6 +17,22 @@ export async function POST(request: NextRequest) {
         if (!body.sourceAgentId || !body.targetAgentId || !body.task) {
           return NextResponse.json({ error: 'sourceAgentId, targetAgentId et task requis' }, { status: 400 });
         }
+
+        // FAIL-CLOSED: valider la tâche de délégation
+        try {
+          await enforceSecurity(String(body.task), {
+            agentId: body.sourceAgentId,
+            userId: auth.userId,
+            allowedTools: [],
+            source: 'api_delegate',
+          });
+        } catch (secErr) {
+          if (secErr instanceof AgentSecurityBlockError) {
+            return NextResponse.json({ error: `Securite: ${secErr.message}` }, { status: 403 });
+          }
+          throw secErr;
+        }
+
         const wait = body.wait !== false;
         if (wait) {
           const result = await agentDelegation.delegateAndWait({

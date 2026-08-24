@@ -5,6 +5,8 @@ import type { SecurityContext } from '@/lib/security';
 import { checkAgentLimit } from '@/lib/usage-limits';
 import { sanitizeHtml, sanitizeJson, stripNullBytes, escapeForDb } from '@/lib/input-sanitizer';
 import { rateLimit } from '@/lib/rate-limiter';
+import { VALID_AGENT_TYPE_IDS } from '@/lib/skills-sh';
+import { matchSkillsLocal, triggerSkillsShDiscovery } from '@/lib/skills-sh/skill-matcher';
 
 export const dynamic = "force-dynamic";
 export async function OPTIONS(request: NextRequest) {
@@ -150,11 +152,15 @@ export async function POST(request: NextRequest) {
       return secureResponse(res, request);
     }
 
-    // Validate agent type
-    const VALID_TYPES = ['sales', 'support', 'marketing', 'research', 'rh', 'accounting', 'custom', 'social_media', 'browser'];
-    if (!VALID_TYPES.includes(type)) {
+    // Validate agent type — supports both new 20 types and legacy types
+    const ALL_VALID_TYPES = [
+      ...VALID_AGENT_TYPE_IDS,
+      // Legacy types for backward compatibility
+      'sales', 'support', 'marketing', 'research', 'rh', 'accounting', 'custom', 'social_media', 'browser',
+    ];
+    if (!ALL_VALID_TYPES.includes(type)) {
       const res = NextResponse.json(
-        { error: `Invalid type. Allowed: ${VALID_TYPES.join(', ')}` },
+        { error: `Invalid type. Must be one of the 20 agent types.` },
         { status: 400 }
       );
       return secureResponse(res, request);
@@ -237,6 +243,15 @@ export async function POST(request: NextRequest) {
       return secureResponse(res, request);
     }
 
+    // Auto-select skills based on agent type and system prompt (zero-latency local matching)
+    let configObj = config || {};
+    const systemPrompt = (configObj as Record<string, unknown>).systemPrompt as string || '';
+    if (VALID_AGENT_TYPE_IDS.includes(type) && systemPrompt) {
+      const { localSkills } = matchSkillsLocal({ agentTypeId: type, systemPrompt });
+      configObj = { ...configObj, skills: localSkills };
+      config = configObj;
+    }
+
     // Create agent avec retry (cold start Vercel)
     let agent: Record<string, unknown> | undefined;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -291,6 +306,11 @@ export async function POST(request: NextRequest) {
         if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
         else throw err;
       }
+    }
+
+    // Trigger async skills.sh discovery (fire-and-forget, non-blocking)
+    if (VALID_AGENT_TYPE_IDS.includes(type) && systemPrompt) {
+      triggerSkillsShDiscovery(agentId, type, systemPrompt);
     }
 
     // Audit log (fire-and-forget avec retry léger)

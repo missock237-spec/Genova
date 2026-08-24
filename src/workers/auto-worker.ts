@@ -11,11 +11,25 @@ import { LLMMessage } from '@/lib/llm/provider';
 import { getWorkerConfig, desiredWorkers } from '@/lib/worker-dynamic-config';
 // P2 — Initialisation OpenTelemetry au démarrage du worker (contexte serveur).
 import { initTelemetry } from '@/lib/observability/otel-config';
+// P0 — Sécurité fail-closed pour le worker
+import { enforceSecurity, AgentSecurityBlockError, isRustSafetyAvailable } from '@/lib/security/agent-security-middleware';
 
 // Démarre le SDK OpenTelemetry (si OTEL_ENABLED=1). No-op sinon.
 initTelemetry();
 
 const log = createLogger('auto-worker');
+
+// FAIL-CLOSED: vérifier que le moteur Rust est disponible au démarrage du worker
+if (!isRustSafetyAvailable() && process.env.NEXT_PUBLIC_UNSAFE_ALLOW_JS_SAFETY !== '1') {
+  log.error('auto_worker_rust_not_available', {
+    fatal: true,
+    hint: 'Le worker auto ne peut PAS démarrer sans le module Rust NAPI compilé.',
+  });
+  // Ne pas lancer le worker — les jobs resteront en file d'attente
+  throw new Error('[FATAL] auto-worker: Rust NAPI safety module not available. Worker will not start. Compile the crate or set NEXT_PUBLIC_UNSAFE_ALLOW_JS_SAFETY=1 for dev only.');
+} else {
+  log.info('auto_worker_safety_check', { rustAvailable: isRustSafetyAvailable(), jsFallback: process.env.NEXT_PUBLIC_UNSAFE_ALLOW_JS_SAFETY === '1' });
+}
 
 const connection = new Redis(
   process.env.REDIS_URL ?? 'redis://localhost:6379',
@@ -109,9 +123,26 @@ const autoWorker = new Worker<AutoJobData>('agent-execution', async (job: Job<Au
   const startTime = Date.now();
 
   try {
+    // P0 FAIL-CLOSED: valider le prompt système de l'agent
+    const promptToValidate = agent.systemPrompt || `Tu es ${agent.name}, un assistant Gen3ia.`;
+    try {
+      await enforceSecurity(promptToValidate, {
+        agentId,
+        userId,
+        allowedTools: [],
+        source: 'worker_auto',
+      });
+    } catch (secErr) {
+      if (secErr instanceof AgentSecurityBlockError) {
+        log.error('auto_worker_prompt_blocked', { agentId, jobId: job.id, reason: secErr.message });
+        throw new Error(`Sécurité: ${secErr.message}`);
+      }
+      throw secErr;
+    }
+
     // Vrai appel LLM via le gateway (au lieu d'un setTimeout + Math.random).
     const messages: LLMMessage[] = [
-      { role: 'system', content: agent.systemPrompt || `Tu es ${agent.name}, un assistant Gen3ia.` },
+      { role: 'system', content: promptToValidate },
       { role: 'user', content: `${agent.name} — exécution périodique (${new Date().toISOString()}).` },
     ];
 

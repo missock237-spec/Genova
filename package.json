@@ -94,6 +94,7 @@
     "@radix-ui/react-tooltip": "^1.2.16",
     "@sentry/nextjs": "^8.55.2",
     "@tanstack/react-query": "^5.82.0",
+    "@vercel/oidc": "^3.8.5",
     "argon2": "^0.45.1",
     "border-beam": "^1.3.0",
     "bullmq": "^5.81.3",

@@ -3,6 +3,7 @@ import { getAgentEngine } from '@/lib/agent-engine';
 import { db } from '@/lib/db';
 import { applySecurity } from '@/lib/security';
 import { validateBody, multiAgentExecuteSchema } from '@/lib/validation';
+import { enforceSecurity, AgentSecurityBlockError } from '@/lib/security/agent-security-middleware';
 
 export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
@@ -16,6 +17,21 @@ export async function POST(request: NextRequest) {
     if (!validation.success) return validation.error;
 
     const { objective, agentIds } = validation.data;
+
+    // FAIL-CLOSED: valider l'objectif multi-agent
+    try {
+      await enforceSecurity(String(objective), {
+        agentId: agentIds[0] || 'multi-agent',
+        userId: auth.userId,
+        allowedTools: [],
+        source: 'api_multi_agent',
+      });
+    } catch (secErr) {
+      if (secErr instanceof AgentSecurityBlockError) {
+        return NextResponse.json({ error: `Securite: ${secErr.message}` }, { status: 403 });
+      }
+      throw secErr;
+    }
     const userId = auth.userId;
     const engine = getAgentEngine();
 

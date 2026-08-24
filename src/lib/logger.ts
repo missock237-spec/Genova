@@ -361,44 +361,34 @@ class Logger {
 export function createLogger(service: string): Logger {
   return new Logger(service);
 }
-import pino from 'pino';
-
-const level = process.env.LOG_LEVEL || 'info';
-
-// Détection du contexte de build Next.js — pendant "Collecting page data",
-// Next.js évalue les routes à la compilation avec NODE_ENV=production, ce qui
-// déclencherait la résolution du transport pino-loki (non installé en dev).
-// On désactive donc le transport si on détecte le build Next.js.
-const isNextBuildPhase =
-  process.env.NEXT_BUILD === '1' ||
-  process.env.NEXT_PHASE === 'phase-production-build';
-
-const enableLokiTransport =
-  process.env.NODE_ENV === 'production' &&
-  !isNextBuildPhase &&
-  !!process.env.LOKI_HOST;  // Ne configurer que si LOKI_HOST est réellement défini
+// ============================================================
+// Pino logger (legacy) — usage limité.
+// La classe Logger ci-dessus est le logger principal.
+// Ce pino logger est gardé pour rétrocompatibilité mais le transport
+// pino-loki est DÉSACTIVÉ car le package n'est pas installé.
+// Les logs Loki sont gérés par la classe LokiTransport ci-dessus via fetch.
+// ============================================================
+let _pinoInstance: ReturnType<typeof import('pino').default> | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const pinoMod = require('pino');
+  const level = process.env.LOG_LEVEL || 'info';
+  _pinoInstance = pinoMod({
+    level,
+    formatters: {
+      level: (label: string) => ({ level: label }),
+    },
+    timestamp: pinoMod.stdTimeFunctions?.isoTime,
+    // TRANSPORT LOKI SUPPRIMÉ — pino-loki n'est pas dans les dépendances.
+    // Si LOKI_HOST est défini, la classe LokiTransport ci-dessus s'en charge.
+  });
+} catch {
+  // pino non disponible — on utilisera le noop
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const logger: any = pino({
-  level,
-  formatters: {
-    level: (label) => ({ level: label }),
-  },
-  timestamp: pino.stdTimeFunctions.isoTime,
-  // En production runtime (pas pendant le build), on ajoute un transport pour Loki.
-  // Note: pino-loki doit être installé en prod (bun add pino-loki) si LOKI_HOST est défini.
-  ...(enableLokiTransport
-    ? {
-        transport: {
-          target: 'pino-loki',
-          options: {
-            host: process.env.LOKI_HOST || 'http://loki:3100',
-            labels: { app: 'gen3ia' },
-            batching: true,
-          },
-        },
-      }
-    : {}),
-});
-
+export const logger: any = _pinoInstance || {
+  info: () => {}, error: () => {}, warn: () => {}, debug: () => {},
+  child: function() { return this; },
+};
 export default logger;

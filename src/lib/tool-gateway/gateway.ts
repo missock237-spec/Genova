@@ -248,10 +248,12 @@ export async function checkToolPermission(
   agentId?: string,
 ): Promise<boolean> {
   try {
-    const db = await import('@/lib/db').catch(() => null);
-    if (!db || !db.toolPermission) {
-      // Base de données non disponible — autoriser par défaut
-      return true;
+    const dbMod = await import('@/lib/db').catch(() => null);
+    if (!dbMod || !dbMod.toolPermission) {
+      // FAIL-CLOSED: base de données non disponible = REFUS
+      // Ne jamais autoriser un outil sans pouvoir vérifier les permissions.
+      console.error('[tool-gateway] DB non disponible — permission REFUSÉE (fail-closed)');
+      return false;
     }
 
     // Rechercher une permission explicite pour cet utilisateur/outil/agent
@@ -265,14 +267,15 @@ export async function checkToolPermission(
     }
 
     // @ts-expect-error — accès dynamique au modèle Prisma
-    const permission = await db.toolPermission.findFirst({
+    const permission = await dbMod.toolPermission.findFirst({
       where: whereClause,
       orderBy: { grantedAt: 'desc' },
     });
 
-    // Si aucune permission n'est enregistrée → autoriser par défaut
+    // FAIL-CLOSED: si aucune permission n'est enregistrée → REFUS
+    // L'utilisateur doit explicitement autoriser chaque outil.
     if (!permission) {
-      return true;
+      return false;
     }
 
     // Vérifier l'expiration
@@ -280,11 +283,16 @@ export async function checkToolPermission(
       return false;
     }
 
+    // Vérifier explicitement que la permission est accordée
+    if (permission.granted === false) {
+      return false;
+    }
+
     return true;
-  } catch {
-    // En cas d'erreur de base de données, autoriser par défaut
-    // (ne pas bloquer l'exécution à cause d'un problème de permissions)
-    return true;
+  } catch (err) {
+    // FAIL-CLOSED: erreur de base de données = REFUS
+    console.error('[tool-gateway] erreur de vérification de permission — REFUS (fail-closed):', err);
+    return false;
   }
 }
 

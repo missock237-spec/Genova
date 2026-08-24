@@ -6,7 +6,7 @@
 //    2. Chargement de la mémoire de l'agent
 //    3. Préparation du prompt
 //    4. Appel au modèle LLM (router ou OpenAI direct)
-//    5. Exécution des outils si nécessaire
+//    5. Exécution des outils si nécessaire (avec validation Zod + allowlist)
 //    6. Mise à jour de l'enregistrement d'exécution
 //    7. Retour du résultat
 // ============================================================
@@ -19,6 +19,12 @@ import type {
   AgentMemory,
   ExecutionState,
 } from './types';
+import {
+  validateOpenAIToolCall,
+  validateToolArguments,
+  isToolAllowed,
+  AgentSecurityBlockError,
+} from '@/lib/security/agent-security-middleware';
 
 // ---------------------------------------------------------------
 // Constantes
@@ -471,21 +477,59 @@ export async function executeAgent(
 
         // Exécuter chaque appel d'outil.
         for (const tc of toolCalls) {
-          const toolName = tc?.function?.name ?? 'unknown';
-          const toolArgs = tc?.function?.arguments ?? '{}';
-          const toolCallId = tc?.id ?? `call_${Date.now()}`;
+          // P0-3: Validation Zod stricte du tool_call OpenAI
+          const validated = validateOpenAIToolCall(tc);
+          if (!validated) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[agent-runtime] tool_call Zod validation failed, skipping:`,
+              JSON.stringify(tc).slice(0, 200),
+            );
+            currentMessages.push({
+              role: 'tool',
+              content: JSON.stringify({ error: 'Format d\'appel d\'outil invalide (validation Zod)' }),
+            });
+            continue;
+          }
 
-          const toolResult = await executeTool(toolName, toolArgs);
+          // P0-4: Vérifier l'allowlist positive
+          if (!isToolAllowed(validated.name, context.tools || [])) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[agent-runtime] outil non autorisé (allowlist): ${validated.name}`,
+            );
+            currentMessages.push({
+              role: 'tool',
+              content: JSON.stringify({ error: `Outil non autorisé: ${validated.name}` }),
+            });
+            continue;
+          }
+
+          // P0-3: Valider les arguments JSON
+          const parsedArgs = validateToolArguments(validated.arguments);
+          if (parsedArgs === null) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[agent-runtime] tool args validation failed for: ${validated.name}`,
+            );
+            currentMessages.push({
+              role: 'tool',
+              content: JSON.stringify({ error: 'Arguments d\'outil invalides (validation Zod)' }),
+            });
+            continue;
+          }
+
+          const toolResult = await executeTool(validated.name, JSON.stringify(parsedArgs));
 
           // Enregistrer l'appel d'outil dans les artéfacts.
           artifacts.push({
             type: 'tool_call',
             content: JSON.stringify({
-              tool: toolName,
-              args: JSON.parse(toolArgs),
+              tool: validated.name,
+              args: parsedArgs,
               result: JSON.parse(toolResult),
             }),
-            name: toolName,
+            name: validated.name,
           });
 
           currentMessages.push({

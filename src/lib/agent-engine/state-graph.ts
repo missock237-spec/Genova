@@ -1169,8 +1169,29 @@ async function actNode(state: AgentState, toolRegistry: ToolRegistry): Promise<A
           return state;
         }
       }
-    } catch {
-      // Guardrail check failed, continue anyway
+    } catch (guardrailErr) {
+      // FAIL-CLOSED: si la vérification des garde-fous échoue, BLOQUER l'outil dangereux
+      log.error('guardrail_check_failed_blocking', {
+        toolName,
+        error: guardrailErr instanceof Error ? guardrailErr.message : String(guardrailErr),
+      });
+      const obsStep: ExecutionStep = {
+        id: generateGraphStepId(),
+        type: 'observation',
+        content: `Action BLOQUÉE : vérification des garde-fous échouée (${guardrailErr instanceof Error ? guardrailErr.message : 'erreur inconnue'}). Outil dangereux non autorisé sans garde-fou actif.`,
+        toolName,
+        timestamp: new Date().toISOString(),
+        duration: Date.now() - startTime,
+        confidence: 0.0,
+        needsRetry: false,
+        alternativeApproach: 'Vérifiez la configuration des garde-fous et réessayez.',
+      };
+      state.steps.push(obsStep);
+      state.lastObservation = obsStep;
+      state.status = 'error';
+      state.pendingAction = undefined;
+      state.metadata.durationMs += Date.now() - startTime;
+      return state;
     }
   }
 

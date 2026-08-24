@@ -1,4 +1,4 @@
-// Agent Execution Loop — avec ResourceGuard anti-epuisement
+// Agent Execution Loop — avec ResourceGuard anti-epuisement + Validation Zod (P0-3)
 
 import { chatCompletion } from '@/lib/ai-router';
 import { ToolRegistry } from '@/lib/tools/registry';
@@ -8,6 +8,16 @@ import { db } from '@/lib/db';
 import { checkpointManager, CheckpointState } from '@/lib/agent-engine/checkpoint-manager';
 import { Tracer } from '@/lib/observability/tracer';
 import { ResourceGuard, limitString } from '@/lib/resource-guard';
+import { z } from 'zod';
+
+// P0-3: Zod schema pour la sortie LLM dans le cycle think/act
+const LLMThinkOutputSchema = z.object({
+  thought: z.string().max(8000),
+  action: z.string().max(256),
+  actionInput: z.record(z.string(), z.unknown()).optional().default({}),
+  isFinal: z.boolean().optional().default(false),
+  confidence: z.number().min(0).max(1).optional().default(0.5),
+});
 
 const guard = new ResourceGuard({ timeoutMs: 60000, maxIterations: 25, maxStringLength: 100000 });
 
@@ -88,10 +98,20 @@ async function thinkStep(context: ExecutionContext, toolRegistry: ToolRegistry):
       ];
       const result = await chatCompletion(messages, 'reasoning');
       const duration = Date.now() - startTime;
-      let parsed: { thought: string; action: string; actionInput: Record<string, unknown>; isFinal: boolean; confidence: number };
+      // P0-3: Validation Zod stricte de la sortie LLM
+      let parsed: z.infer<typeof LLMThinkOutputSchema>;
       try {
         const content = result.content.trim().replace(/```json?\n?/g, '').replace(/```/g, '').trim();
-        parsed = JSON.parse(content);
+        const raw = JSON.parse(content);
+        const zodResult = LLMThinkOutputSchema.safeParse(raw);
+        if (!zodResult.success) {
+          // FAIL-CLOSED: sortie LLM invalide → erreur
+          const errorStep: ExecutionStep = { id: generateStepId(), type: 'error', content: `Sortie LLM invalide (Zod): ${zodResult.error.issues.map(i => i.message).join(', ')}`, timestamp: new Date().toISOString(), duration, confidence: 0 };
+          context.steps.push(errorStep);
+          context.status = 'error';
+          return errorStep;
+        }
+        parsed = zodResult.data;
       } catch {
         parsed = { thought: result.content, action: 'respond', actionInput: { message: result.content }, isFinal: true, confidence: 0.5 };
       }

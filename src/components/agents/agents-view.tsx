@@ -165,6 +165,29 @@ export function getAgentSkills(agent: Agent): string[] {
 }
 
 const typeLabels: Record<string, string> = {
+  // New 20 agent types
+  developer: 'Développeur Full-Stack',
+  data_analyst: 'Analyste de Données',
+  devops: 'Ingénieur DevOps',
+  security_expert: 'Expert Cybersécurité',
+  copywriter: 'Copywriter',
+  social_media_manager: 'Community Manager',
+  seo_specialist: 'Spécialiste SEO',
+  business_advisor: 'Conseiller Business',
+  sales_agent: 'Agent Commercial',
+  project_manager: 'Chef de Projet',
+  content_creator: 'Créateur de Contenu',
+  translator: 'Traducteur Multilingue',
+  graphic_designer: 'Designer Graphique',
+  customer_support: 'Support Client',
+  email_assistant: 'Assistant Email',
+  researcher: 'Chercheur Académique',
+  legal_advisor: 'Assistant Juridique',
+  financial_analyst: 'Analyste Financier',
+  hr_assistant: 'Assistant RH',
+  general_assistant: 'Assistant Général',
+  tutor: 'Tuteur Éducatif',
+  // Legacy types (backward compat)
   social_media: 'Social Media',
   browser: 'Navigateur',
   sales: 'Commercial',

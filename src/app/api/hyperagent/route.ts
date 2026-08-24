@@ -3,13 +3,14 @@
 // Architecture à 4 Piliers: Smart Router → Context Optimizer →
 //   Parallel Executor → Response Enhancer
 // Target: < 750ms total latency
-// SECURITE: withAuth() + quota LLM + rate limiting
+// SECURITE: withAuth() + quota LLM + rate limiting + agent-security-middleware FAIL-CLOSED
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getHyperAgent } from '@/lib/hyperagent';
 import { withAuth, type RouteParams } from '@/lib/with-auth';
 import { createLogger } from '@/lib/logger';
+import { enforceSecurity, AgentSecurityBlockError } from '@/lib/security/agent-security-middleware';
 
 const log = createLogger('hyperagent-api');
 
@@ -32,6 +33,21 @@ export const POST = withAuth(async (request: NextRequest, ctx: { params?: RouteP
       return NextResponse.json({
         error: `Query trop longue (max ${MAX_QUERY_LENGTH} caracteres)`,
       }, { status: 400 });
+    }
+
+    // FAIL-CLOSED: valider le query via le middleware de sécurité unifié
+    try {
+      await enforceSecurity(query, {
+        agentId: 'hyperagent',
+        userId: auth.userId,
+        allowedTools: [],
+        source: 'api_hyperagent',
+      });
+    } catch (secErr) {
+      if (secErr instanceof AgentSecurityBlockError) {
+        return NextResponse.json({ error: `Securite: ${secErr.message}` }, { status: 403 });
+      }
+      throw secErr;
     }
 
     // Validate context
