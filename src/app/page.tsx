@@ -18,6 +18,7 @@ import { IntegrationsView } from '@/components/integrations/integrations-view';
 import { SchedulerView } from '@/components/scheduler/scheduler-view';
 import { VoiceView } from '@/components/voice/voice-view';
 import { MediaView } from '@/components/media/media-view';
+import { PromptsView } from '@/components/prompts/prompts-view';
 import { ThemeProvider } from 'next-themes';
 import { Loader2, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -71,10 +72,6 @@ function AppContent() {
   }, [hydrate]);
 
   // --- Session validée : hydrate() a déjà vérifié la session via /api/auth/me ---
-  // Le validateSession() précédent faisait un DEUXIÈME appel à /api/auth/me,
-  // ce qui doublait le risque de cold start Vercel (deux instances différentes).
-  // Si hydrate() réussit et setIsAuthenticated(true), la session EST valide.
-  // On ne fait plus de second appel — on charge directement les données.
   useEffect(() => {
     if (isAuthenticated && !validatedRef.current && !loadError) {
       validatedRef.current = true;
@@ -95,7 +92,7 @@ function AppContent() {
       settings: 'settings', approvals: 'approvals', analytics: 'analytics',
       billing: 'billing', developers: 'developers', voice: 'voice',
       images: 'images', integrations: 'integrations', notifications: 'notifications',
-      scheduler: 'scheduler',
+      scheduler: 'scheduler', prompts: 'prompts',
     };
     if (path && validViews[path] && currentView === 'dashboard') {
       setCurrentView(validViews[path] as any);
@@ -262,6 +259,7 @@ function AppContent() {
       case 'integrations': return <IntegrationsView />;
       case 'notifications': return <DashboardView />; // TODO: NotificationsView
       case 'scheduler': return <SchedulerView />;
+      case 'prompts': return <PromptsView />;
       case 'agent-chat': return <AgentsView />;
       default: return <DashboardView />;
   };
