@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { SESSION_COOKIE_NAME } from '@/lib/firebase/config';
 import { db } from '@/lib/db';
 import { isFirebaseConfigured, verifyJWT } from '@/lib/standalone-auth';
+import { hashApiKey } from '@/lib/api-key';
 import type { ResolvedOrg } from '@/lib/multi-tenant';
 
 export interface SecurityContext {
@@ -31,6 +32,17 @@ interface SecurityOptions {
   requireRole?: string | string[];
   /** Legacy no-op field (rate limiting is enforced by middleware). */
   rateLimit?: { interval?: string | number; limit?: number } | Record<string, unknown>;
+}
+
+/** @returns true si la clé (avec expiresAt) est encore valide. */
+function isKeyActive(key: Record<string, unknown>): boolean {
+  if (key.isActive === false || key.isActive === 'false') return false;
+  const expiresAt = key.expiresAt;
+  if (expiresAt == null) return true; // sans expiration → toujours valide
+  const t = expiresAt instanceof Date
+    ? expiresAt.getTime()
+    : new Date(expiresAt as string).getTime();
+  return Number.isFinite(t) && t > Date.now();
 }
 
 /**
@@ -154,14 +166,20 @@ export function secureResponse(response: NextResponse, _request: NextRequest): N
 
 /**
  * Authentifie via API Key (Firestore collection `api_keys`)
+ *
+ * La clé brute n'est PAS persistée : on compare l'empreinte scrypt de la
+ * clé reçue (via X-API-Key) à celle stockée dans `keyHash`. Voir
+ * src/lib/api-key.ts. On vérifie aussi isActive et expiresAt.
  */
 async function authenticateApiKey(apiKey: string): Promise<SecurityContext | null> {
   try {
+    const keyHash = hashApiKey(apiKey);
     const key = (await db.apiKey.findFirst({
-      where: [{ field: 'keyValue', op: '==', value: apiKey }, { field: 'isActive', op: '==', value: true }],
+      where: [{ field: 'keyHash', op: '==', value: keyHash }],
     })) as Record<string, unknown> | null;
 
     if (!key) return null;
+    if (!isKeyActive(key)) return null;
 
     const userId = key.userId as string;
     const user = await db.user.findUnique({ where: { id: userId } });
