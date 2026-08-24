@@ -14,6 +14,10 @@ import { SettingsView } from '@/components/settings/settings-view';
 import { AnalyticsView } from '@/components/analytics/analytics-view';
 import BillingPage from '@/components/billing/billing-page';
 import DevelopersPage from '@/components/developers/developers-page';
+import { IntegrationsView } from '@/components/integrations/integrations-view';
+import { SchedulerView } from '@/components/scheduler/scheduler-view';
+import { VoiceView } from '@/components/voice/voice-view';
+import { MediaView } from '@/components/media/media-view';
 import { ThemeProvider } from 'next-themes';
 import { Loader2, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -236,15 +240,13 @@ function AppContent() {
       case 'analytics': return <AnalyticsView />;
       case 'billing': return <BillingPage />;
       case 'developers': return <DevelopersPage />;
-      // New v2 views: fall back to dashboard if component doesn't exist yet
-      case 'voice':
-      case 'images':
-      case 'integrations':
-      case 'notifications':
-      case 'scheduler':
-      case 'agent-chat':
+      case 'voice': return <VoiceView />;
+      case 'images': return <MediaView />;
+      case 'integrations': return <IntegrationsView />;
+      case 'notifications': return <DashboardView />; // TODO: NotificationsView
+      case 'scheduler': return <SchedulerView />;
+      case 'agent-chat': return <AgentsView />;
       default: return <DashboardView />;
-    }
   };
 
   return (
