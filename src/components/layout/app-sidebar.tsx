@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { useAppStore, useAuthStore, useModernStore } from '@/lib/store';
 import {
   LayoutDashboard, Bot, Radio, Shield, GitBranch, Settings,
-  BarChart3, ChevronLeft, LogOut, Sparkles,
+  BarChart3, ChevronLeft, LogOut, Sparkles, Type,
   Wallet, Mic, ImageIcon, Puzzle, Clock, Bell, Code2,
 } from 'lucide-react';
 import type { ModernViewType } from '@/lib/store';
@@ -45,6 +45,7 @@ export function AppSidebar({ mobileOpen = false, onCloseMobile }: AppSidebarProp
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { id: 'agents', label: 'Agents IA', icon: Bot },
+        { id: 'prompts', label: 'Prompts', icon: Type },
         { id: 'automation', label: 'Automation', icon: Radio },
       ],
     },
