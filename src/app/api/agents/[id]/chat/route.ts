@@ -25,7 +25,7 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { message, context, conversationId, _taskType = 'quick_chat' } = body;
+    const { message, context, conversationId, history, _taskType = 'quick_chat' } = body;
 
     if (!message) {
       return new Response(JSON.stringify({ error: 'Message is required' }), {
@@ -48,6 +48,25 @@ export async function POST(
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+
+    // History validation — tableau de { role, content }
+    let validatedHistory: Array<{ role: string; content: string }> = [];
+    if (Array.isArray(history)) {
+      validatedHistory = history
+        .slice(-12) // Garder les 12 derniers messages max
+        .filter((msg: unknown) =>
+          msg !== null &&
+          typeof msg === 'object' &&
+          typeof (msg as Record<string, unknown>).role === 'string' &&
+          typeof (msg as Record<string, unknown>).content === 'string' &&
+          ((msg as Record<string, unknown>).role === 'user' || (msg as Record<string, unknown>).role === 'agent' || (msg as Record<string, unknown>).role === 'assistant')
+        )
+        .map((msg: unknown) => ({
+          const m = msg as Record<string, string>;
+          // Normaliser 'agent' → 'assistant' pour les modèles LLM
+          return { role: m.role === 'agent' ? 'assistant' : m.role, content: m.content.substring(0, 2000) };
+        });
     }
 
     // Firestore facade ne supporte pas 'include' — requêtes séparées
@@ -151,6 +170,8 @@ Respond concisely and helpfully. If you need to perform an action, describe what
         role: 'system' as const,
         content: systemPrompt,
       },
+      // Injecter l'historique de conversation (normalisé)
+      ...validatedHistory.map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content })),
       {
         role: 'user' as const,
         content: message,
