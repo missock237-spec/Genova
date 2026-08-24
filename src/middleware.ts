@@ -76,7 +76,7 @@ const ADMIN_ROUTES = [
   '/api/admin/',
   '/api/terminal/execute',
   '/api/services/',
-  '/api/keys/',
+  // NOTE: '/api/keys/' is NOT here — it's a user route (manage own API keys), not admin.
   '/api/metrics/',
   '/api/monitoring/',
   '/api/system/',
