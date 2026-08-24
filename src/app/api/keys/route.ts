@@ -110,7 +110,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
     }
 
-    const where = [{ field: 'userId', op: '==', value: session.user.id }] as const;
+    const where: never = [{ field: 'userId', op: '==', value: session.user.id }] as never;
 
     // Tri DESC par createdAt. Le filtre = où + orderBy nécessite un index
     // composite Firestore (userId ASC, createdAt DESC). Si l'index n'est pas
@@ -119,13 +119,11 @@ export async function GET() {
     let keys: Array<Record<string, unknown>>;
     try {
       keys = (await db.apiKey.findMany({
-        where: where as unknown as never,
+        where,
         orderBy: [{ field: 'createdAt', direction: 'desc' }],
       })) as Array<Record<string, unknown>>;
     } catch {
-      keys = (await db.apiKey.findMany({
-        where: where as unknown as never,
-      })) as Array<Record<string, unknown>>;
+      keys = (await db.apiKey.findMany({ where })) as Array<Record<string, unknown>>;
       keys.sort((a, b) => {
         const ta = new Date(toIso(a.createdAt) ?? 0).getTime();
         const tb = new Date(toIso(b.createdAt) ?? 0).getTime();
@@ -175,12 +173,25 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'ID de clé requis' }, { status: 400 });
     }
 
-    // Révocation logique (isActive=false) — la clé reste dans l'historique.
-    await db.apiKey.updateMany({
-      where: [
-        { field: 'id', op: '==', value: keyId },
-        { field: 'userId', op: '==', value: session.user.id },
-      ],
+    // Piège façade Firestore : on ne filtre JAMAIS sur le champ `id` dans
+    // `where` (les docs n'ont pas de champ id en données — il est injecté
+    // côté client et un filtre où: id == x ne matche rien). On passe donc
+    // par findUnique (rappel : traite id comme clé du document), on vérifie
+    // l'appartenance, puis on met à jour via l'id résolu.
+    const existing = await db.apiKey.findUnique({
+      where: { id: keyId },
+      select: ['userId', 'isActive'],
+    }) as Record<string, unknown> | null;
+
+    if (!existing) {
+      return NextResponse.json({ error: 'Clé introuvable' }, { status: 404 });
+    }
+    if (existing.userId !== session.user.id) {
+      return NextResponse.json({ error: 'Accès refusé' }, { status: 403 });
+    }
+
+    await db.apiKey.update({
+      where: { id: keyId },
       data: { isActive: false },
     });
 
