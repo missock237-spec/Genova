@@ -19,8 +19,9 @@ export async function GET(request: NextRequest) {
     const sessionId = searchParams.get('sessionId') || undefined;
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!, 10) : 20;
 
-    const { recallMemories } = await import('@/lib/memory');
-    const memories = await recallMemories({
+    // Import direct — evite le barrel @/lib/memory qui pose probleme sur Vercel
+    const { recall } = await import('@/lib/memory-system/manager');
+    const memories = await recall({
       userId: auth.userId,
       type,
       query,
@@ -68,8 +69,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { storeMemory } = await import('@/lib/memory');
-    const memory = await storeMemory({
+    // Import direct — evite le barrel @/lib/memory qui pose probleme sur Vercel
+    const { remember } = await import('@/lib/memory-system/manager');
+    const memoryId = await remember({
       userId: auth.userId,
       type: body.type,
       key: body.key,
@@ -80,7 +82,7 @@ export async function POST(request: NextRequest) {
       expiresAt: body.expiresAt,
     });
 
-    return NextResponse.json({ memory }, { status: 201 });
+    return NextResponse.json({ memoryId }, { status: 201 });
   } catch (err) {
     console.error('[memory POST] Erreur :', err);
     const message = err instanceof Error ? err.message : 'Erreur lors du stockage de la mémoire';
@@ -106,11 +108,9 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const { forgetMemories } = await import('@/lib/memory');
-    const deleted = await forgetMemories({
-      userId: auth.userId,
-      type,
-    });
+    // Import direct — evite le barrel @/lib/memory qui pose probleme sur Vercel
+    const { forget } = await import('@/lib/memory-system/manager');
+    const deleted = await forget(auth.userId, type);
 
     return NextResponse.json({ succès: true, supprimées: deleted });
   } catch (err) {

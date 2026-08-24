@@ -23,18 +23,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { getAgentContext } = await import('@/lib/memory');
-    const context = await getAgentContext({
-      userId: auth.userId,
+    // Import direct — evite le barrel @/lib/memory qui pose probleme sur Vercel
+    const { getAgentContext } = await import('@/lib/memory-system/manager');
+    const context = await getAgentContext(
+      auth.userId,
       agentId,
       sessionId,
-    });
+    );
 
     return NextResponse.json({ context });
   } catch (err) {
     console.error('[memory/context GET] Erreur :', err);
     return NextResponse.json(
-      { erreur: 'Impossible de récupérer le contexte de l\'agent' },
+      { erreur: "Impossible de récupérer le contexte de l'agent" },
       { status: 500 },
     );
   }

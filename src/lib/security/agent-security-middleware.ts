@@ -109,16 +109,21 @@ let rustLoadAttempted = false;
 let rustLoadFailed = false;
 
 /** Tente de charger le module Rust NAPI une seule fois.
- * Utilise un require dynamique pour ne pas faire echouer le build
- * quand le crate n'est pas compile (cas Vercel/CI).
+ * Utilise un require dynamique indirect pour que le bundler
+ * (webpack/turbopack) NE tente PAS de resoudre le chemin au build.
+ * Le path est construit dynamiquement a l'execution.
  */
 function tryLoadRustModule(): unknown {
   if (rustLoadAttempted) return rustSafetyModule;
   rustLoadAttempted = true;
 
   try {
+    // Construire le chemin dynamiquement pour eviter la resolution au build.
+    // Aucun bundler ne peut analyser statiquement cette expression.
+    const pathSegments = ['..', '..', 'crates', 'agent-safety'];
+    const modulePath = pathSegments.join('/');
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('../../crates/agent-safety');
+    const mod = require(modulePath);
     if (mod && typeof mod.safety_init === 'function') {
       mod.safety_init();
       rustSafetyModule = mod;
