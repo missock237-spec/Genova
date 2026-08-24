@@ -741,22 +741,24 @@ function AgentsViewInner() {
   const fetchAgents = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
-    // Retry avec backoff : résilience contre les cold starts Vercel
-    // et les timeouts réseau sur mobile
+    // Retry rapide — backoff court pour ne pas bloquer l'UI mobile
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const data = await apiFetch<Agent[]>('/api/agents');
+        const data = await apiFetch<Agent[]>('/api/agents', {
+          timeoutMs: attempt === 1 ? 15000 : 10000, // 15s puis 10s
+        });
         setAgents(Array.isArray(data) ? data : []);
         setLoading(false);
-        return; // Succès
+        return;
       } catch (err) {
-        console.warn(`[agents-view] fetchAgents attempt ${attempt}/3 failed:`, err instanceof Error ? err.message : err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[agents-view] fetchAgents attempt ${attempt}/3 failed:`, msg);
         if (attempt >= 3) {
           setAgents([]);
-          setFetchError(err instanceof Error ? err.message : 'Impossible de charger les agents');
+          setFetchError(msg.includes('fetch') ? 'Erreur réseau — vérifiez votre connexion' : msg);
           setLoading(false);
         } else {
-          await new Promise(r => setTimeout(r, 1500 * attempt));
+          await new Promise(r => setTimeout(r, 1000 * attempt));
         }
       }
     }

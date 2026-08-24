@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { applySecurity, secureResponse } from '@/lib/security';
+import type { SecurityContext } from '@/lib/security';
 import { checkAgentLimit } from '@/lib/usage-limits';
 import { sanitizeHtml, sanitizeJson, stripNullBytes, escapeForDb } from '@/lib/input-sanitizer';
 import { rateLimit } from '@/lib/rate-limiter';
@@ -13,58 +14,82 @@ export async function OPTIONS(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const { auth, error: secError } = await applySecurity(request, {
-    requireAuth: true,
-  });
+  let auth: SecurityContext | undefined;
+  let secError: NextResponse | undefined;
+
+  try {
+    const result = await applySecurity(request, { requireAuth: true });
+    auth = result.auth;
+    secError = result.error;
+  } catch (err) {
+    console.error('[agents/GET] applySecurity threw:', err instanceof Error ? err.message : err);
+    return NextResponse.json({ error: 'Erreur d\'authentification' }, { status: 401 });
+  }
   if (secError || !auth) return secError || NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
-  // Rate limit distribué (Redis)
-  const rl = await rateLimit(request, auth.userId);
-  if (!rl.allowed) return NextResponse.json({ error: 'Trop de requêtes' }, { status: 429 });
+  // Rate limit distribué (Redis) — fail-open
+  try {
+    const rl = await rateLimit(request, auth.userId);
+    if (!rl.allowed) return NextResponse.json({ error: 'Trop de requêtes' }, { status: 429 });
+  } catch {
+    // fail-open — ne pas bloquer sur une erreur de rate limiting
+  }
 
-  // Retry : résilience contre les cold starts Vercel (Firestore gRPC
-  // channel non encore établi, timeout réseau, etc.)
+  // Requêtes Firestore avec retry individuel
+  // Chaque requête est indépendante — une failure sur permissions/tasks
+  // ne doit pas empêcher le retour des agents.
+  const uid = auth.userId;
+
+  // 1. Agents (requête principale) — SANS orderBy pour éviter le besoin
+  //    d'index composite Firestore. Tri fait en mémoire.
   let agents: Record<string, unknown>[] = [];
-  let permissions: Record<string, unknown>[] = [];
-  let tasks: Record<string, unknown>[] = [];
-  let lastError: unknown = null;
-
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       agents = await db.agent.findMany({
-        where: [{ field: 'userId', op: '==', value: auth.userId }],
-        orderBy: [{ field: 'createdAt', direction: 'desc' }],
+        where: [{ field: 'userId', op: '==', value: uid }],
       });
-
-      // include:{ _count:{tasks}, permissions } -> calculé en mémoire via la façade
-      const results = await Promise.all([
-        db.agentPermission.findMany({ where: [{ field: 'userId', op: '==', value: auth.userId }] }),
-        db.task.findMany({ where: [{ field: 'userId', op: '==', value: auth.userId }] }),
-      ]);
-      permissions = results[0];
-      tasks = results[1];
-      lastError = null;
-      break; // Succès
+      break;
     } catch (err) {
-      lastError = err;
-      console.error(`[agents/GET] Firestore query attempt ${attempt}/3 failed:`, err instanceof Error ? err.message : err);
-      if (attempt < 3) {
-        await new Promise(r => setTimeout(r, 1000 * attempt));
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[agents/GET] agents query attempt ${attempt}/3:`, msg);
+      // Détecter l'erreur d'index manquant Firestore
+      if (msg.includes('FAILED_PRECONDITION') || msg.includes('index')) {
+        console.error('[agents/GET] ⚠ Missing Firestore composite index! Create index on: agents (userId ASC, createdAt DESC)');
+        break; // Ne pas retry — l'index manquant est un problème permanent
       }
+      if (attempt < 3) await new Promise(r => setTimeout(r, 800 * attempt));
     }
   }
 
-  if (lastError) {
-    console.error('[agents/GET] All retry attempts failed:', lastError);
-    const res = NextResponse.json(
-      { error: 'Failed to fetch agents' },
-      { status: 500 }
-    );
-    return secureResponse(res, request);
+  // 2. Permissions (non-bloquant — échec silencieux)
+  let permissions: Record<string, unknown>[] = [];
+  try {
+    permissions = await db.agentPermission.findMany({
+      where: [{ field: 'userId', op: '==', value: uid }],
+    });
+  } catch (err) {
+    console.warn('[agents/GET] permissions query failed (non-blocking):', err instanceof Error ? err.message : err);
   }
 
+  // 3. Tasks count (non-bloquant — échec silencieux)
+  let tasks: Record<string, unknown>[] = [];
   try {
+    tasks = await db.task.findMany({
+      where: [{ field: 'userId', op: '==', value: uid }],
+    });
+  } catch (err) {
+    console.warn('[agents/GET] tasks query failed (non-blocking):', err instanceof Error ? err.message : err);
+  }
 
+  // Tri en mémoire par createdAt desc (évite le besoin d'index composite)
+  agents.sort((a, b) => {
+    const dateA = (a.createdAt instanceof Date ? a.createdAt.getTime() : 0);
+    const dateB = (b.createdAt instanceof Date ? b.createdAt.getTime() : 0);
+    return dateB - dateA;
+  });
+
+  // Construction de la réponse enrichie
+  try {
     const byAgentPerms = permissions.reduce<Record<string, unknown[]>>((acc, p) => {
       const agentId = String((p as Record<string, unknown>).agentId || '');
       if (!acc[agentId]) acc[agentId] = [];
@@ -93,7 +118,7 @@ export async function GET(request: NextRequest) {
     const res = NextResponse.json(enriched);
     return secureResponse(res, request);
   } catch (err) {
-    console.error('[agents/GET] Error enriching agents:', err);
+    console.error('[agents/GET] Error enriching agents:', err instanceof Error ? err.message : err);
     const res = NextResponse.json(
       { error: 'Failed to fetch agents' },
       { status: 500 }
