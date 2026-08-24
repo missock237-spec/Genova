@@ -4,8 +4,17 @@
 // ============================================================
 import { NextRequest, NextResponse } from 'next/server';
 import { applySecurity } from '@/lib/security';
+import type { WorkflowCanvas } from '@/lib/workflow-engine';
 
 export const dynamic = "force-dynamic";
+
+// Type local de secours (même shape que WorkflowCanvas) si jamais
+// l'import de type du moteur était résolu différemment par le builder.
+type WorkflowCanvasLike = {
+  blocks: unknown[];
+  edges: unknown[];
+  viewport?: { x: number; y: number; zoom: number };
+};
 
 // Imports paresseux pour éviter qu'un import cassé ne tue le handler GET
 async function getPrisma() {
@@ -158,16 +167,19 @@ export async function POST(request: NextRequest) {
 
     if (!name) return NextResponse.json({ error: 'name requis' }, { status: 400 });
 
-    // Import paresseux du moteur de workflow et versioning
-    const { type WorkflowCanvas } = await import('@/lib/workflow-engine') as any;
+    // Import paresseux du versioning (le type WorkflowCanvas est importé en haut)
     const { workflowVersioning } = await import('@/lib/workflow-versioning');
 
-    let steps: WorkflowCanvas | { blocks: never[]; edges: never[] } = { blocks: [], edges: [] };
+    let steps: WorkflowCanvas | WorkflowCanvasLike = { blocks: [], edges: [] };
 
     if (template) {
       const tmpl = await prisma.workflowTemplate.findUnique({ where: { id: template } });
       if (tmpl) {
-        steps = JSON.parse(tmpl.steps as string);
+        const parsed = JSON.parse(String(tmpl.steps || '{"blocks":[],"edges":[]}'));
+        steps = {
+          blocks: Array.isArray(parsed?.blocks) ? parsed.blocks : [],
+          edges: Array.isArray(parsed?.edges) ? parsed.edges : [],
+        };
         await prisma.workflowTemplate.update({
           where: { id: template },
           data: { usageCount: (Number(tmpl.usageCount) || 0) + 1 },
