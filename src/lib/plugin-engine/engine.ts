@@ -127,7 +127,19 @@ export function listCatalog(category?: string, query?: string) {
       docsUrl: e.docsUrl,
       website: e.website,
       actionCount: Object.keys(e.actions).length,
-      actions: Object.keys(e.actions),
+      actions: Object.fromEntries(
+        Object.entries(e.actions).map(([key, action]) => [
+          key,
+          {
+            id: key,
+            name: action.name,
+            description: action.description,
+            method: action.method,
+            endpoint: action.endpoint,
+            params: action.params,
+          },
+        ])
+      ),
     }));
 }
 

@@ -107,6 +107,21 @@ const nextConfig = {
     ];
   },
 
+  async rewrites() {
+    // SPA routes — toutes ces URLs servent src/app/page.tsx (SPA).
+    // page.tsx lit window.location.pathname pour setter currentView.
+    const spaPaths = [
+      '/dashboard', '/agents', '/agent-chat', '/automation', '/guardrails',
+      '/coordination', '/settings', '/approvals', '/analytics', '/billing',
+      '/developers', '/voice', '/images', '/integrations', '/notifications',
+      '/scheduler',
+    ];
+    return spaPaths.map((p) => ({
+      source: p,
+      destination: '/',
+    }));
+  },
+
   async redirects() {
     return redirects();
   },

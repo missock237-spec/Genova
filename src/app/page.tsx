@@ -85,6 +85,23 @@ function AppContent() {
     }
   }, [isAuthenticated, loadError, fetchApprovalCount]);
 
+  // --- SPA deep-linking : lire le pathname pour restaurer la vue ---
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const path = window.location.pathname.replace(/^\//, '');
+    const validViews: Record<string, string> = {
+      dashboard: 'dashboard', agents: 'agents', 'agent-chat': 'agent-chat',
+      automation: 'automation', guardrails: 'guardrails', coordination: 'coordination',
+      settings: 'settings', approvals: 'approvals', analytics: 'analytics',
+      billing: 'billing', developers: 'developers', voice: 'voice',
+      images: 'images', integrations: 'integrations', notifications: 'notifications',
+      scheduler: 'scheduler',
+    };
+    if (path && validViews[path] && currentView === 'dashboard') {
+      setCurrentView(validViews[path] as any);
+    }
+  }, [isAuthenticated, currentView, setCurrentView]);
+
   // --- T23 : timer stuck loading ---
   useEffect(() => {
     if (!isLoading) {

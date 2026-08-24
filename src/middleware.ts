@@ -158,6 +158,7 @@ export async function middleware(request: NextRequest) {
   // 2. Routes non-API : protection des pages
   if (!pathname.startsWith('/api/')) {
     // Pages publiques (auth) : accessibles sans session
+    // + vues SPA (toutes servies par / via zustand currentView)
     const PUBLIC_PAGES = [
       '/',
       '/login',
@@ -165,6 +166,12 @@ export async function middleware(request: NextRequest) {
       '/forgot-password',
       '/reset-password',
       '/verify-email',
+      // Vues SPA — toutes gérées côté client par le switch renderView()
+      // Le middleware doit les laisser passer pour éviter une 307 vers /
+      '/dashboard', '/agents', '/agent-chat', '/automation', '/guardrails',
+      '/coordination', '/settings', '/approvals', '/analytics', '/billing',
+      '/developers', '/voice', '/images', '/integrations', '/notifications',
+      '/scheduler',
     ];
 
     if (PUBLIC_PAGES.includes(pathname)) {
