@@ -41,6 +41,12 @@
 //  Place de Prompts (marketplace de templates de prompts) :
 //    - prompt             -> 'prompts'            (templates publiés/brouillons)
 //    - promptFavorite     -> 'prompt_favorites'   (association userId × promptId)
+//
+//  Facturation publicitaire (annonceurs) :
+//    - adBillingSetting   -> 'ad_billing_settings'
+//    - adBillingLine      -> 'ad_billing_lines'
+//    - adInvoice          -> 'ad_invoices'
+//    - adPaymentMethod    -> 'ad_payment_methods'
 // ============================================================
 import {
   db as baseDb,
@@ -99,6 +105,16 @@ const promptStore = {
   promptFavorite: makeRepo('prompt_favorites'),
 } as const;
 
+// ============================================================
+// Facturation publicitaire (annonceurs) — collections dédiées
+// ============================================================
+const adBilling = {
+  adBillingSetting: makeRepo('ad_billing_settings'),
+  adBillingLine: makeRepo('ad_billing_lines'),
+  adInvoice: makeRepo('ad_invoices'),
+  adPaymentMethod: makeRepo('ad_payment_methods'),
+} as const;
+
 export const dbExt = {
   ...baseDb,
   aiCost: baseDb.aICost,
@@ -107,6 +123,7 @@ export const dbExt = {
   ...t28,
   ...multiTenant,
   ...promptStore,
+  ...adBilling,
 } as const;
 
 export const db = dbExt;
