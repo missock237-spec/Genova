@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { createLogger } from '@/lib/logger';
 import { applySecurity } from '@/lib/security';
 import { agentAutonomous } from '@/lib/agent-autonomous';
+import { enforceSecurity, AgentSecurityBlockError } from '@/lib/security/agent-security-middleware';
 
 export const dynamic = "force-dynamic";
 const log = createLogger('api-agents-autonomous');
@@ -22,6 +23,22 @@ export async function POST(request: NextRequest) {
         if (!body.agentId || !body.goal) {
           return NextResponse.json({ error: 'agentId et goal requis' }, { status: 400 });
         }
+
+        // FAIL-CLOSED: valider le goal de l'exécution autonome
+        try {
+          await enforceSecurity(String(body.goal), {
+            agentId: body.agentId,
+            userId: auth.userId,
+            allowedTools: [],
+            source: 'api_autonomous',
+          });
+        } catch (secErr) {
+          if (secErr instanceof AgentSecurityBlockError) {
+            return NextResponse.json({ error: `Securite: ${secErr.message}` }, { status: 403 });
+          }
+          throw secErr;
+        }
+
         const run = await agentAutonomous.startRun({
           agentId: body.agentId,
           userId: auth.userId,
@@ -88,6 +105,11 @@ export async function GET(request: NextRequest) {
     }
 
     if (agentId) {
+      // Ownership check : vérifier que l'utilisateur possède l'agent
+      const agent = await db.agent.findUnique({ where: { id: agentId }, select: ['userId'] });
+      if (!agent || (agent as Record<string, unknown>).userId !== auth.userId) {
+        return NextResponse.json({ error: 'Agent non autorise' }, { status: 403 });
+      }
       const runs = await agentAutonomous.getAgentRuns(agentId);
       return NextResponse.json({ success: true, runs });
     }

@@ -2,8 +2,12 @@
 // SECURITE: POST = user authentifié (logique), GET stats = admin uniquement
 import { NextRequest, NextResponse } from "next/server";
 import { withAuth } from "@/lib/with-auth";
+import { db } from "@/lib/db";
+import { createLogger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
+const log = createLogger('ad-event');
+
 interface AdEvent {
   adId: string;
   type: 'view' | 'click' | 'dismiss';
@@ -11,15 +15,32 @@ interface AdEvent {
   plan: string;
 }
 
-// Stockage en mémoire (fallback dev). Utiliser DB en production.
-const rewardStore: Map<string, { credits: number; lastReward: number; dailyCount: number; lastResetDate: string }> = new Map();
+// Cache léger en mémoire pour le cooldown (seconde-resolu)
+const cooldownMap: Map<string, number> = new Map();
 
 function getTodayKey(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+// Compter les rewards du jour pour un utilisateur (DB)
+async function getDailyRewardCount(userId: string): Promise<number> {
+  try {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const count = await db.adReward.count({
+      where: [
+        { field: 'userId', op: '==', value: userId },
+        { field: 'createdAt', op: '>=', value: todayStart.toISOString() },
+      ],
+    });
+    return count as number;
+  } catch {
+    return 0;
+  }
+}
+
 // POST — Tracking des events (utilisateur authentifié)
-export const POST = withAuth(async (request: NextRequest, ctx: { params?: Promise<any> }, auth) => {
+export const POST = withAuth(async (request: NextRequest, _ctx: { params?: Promise<any> }, auth) => {
   try {
     const body = await request.json();
     const events: AdEvent[] = body.events || [body];
@@ -31,67 +52,61 @@ export const POST = withAuth(async (request: NextRequest, ctx: { params?: Promis
       const { adId, type, timestamp, plan } = event;
 
       if (!adId || !type || !plan) {
-// @ts-ignore — type narrowing pending, see refactor ticket
         results.push({ adId, status: 'ignored', reason: 'Données incomplètes' });
         continue;
       }
 
-      // Logger avec l'identité authentifiée (le token, pas le body)
-      console.log(`[AdEvent] ${type.toUpperCase()} | Ad:${adId} | User:${auth.userId} | Plan:${plan} | ${timestamp}`);
-
       if (plan !== 'free' && (type === 'view' || type === 'click')) {
-        // Clé unique par utilisateur authentifié (pas global "plan_X")
-        const userKey = `user_${auth.userId}`;
         const now = Date.now();
-        const today = getTodayKey();
-
-        const userRewards = rewardStore.get(userKey) || {
-          credits: 0,
-          lastReward: 0,
-          dailyCount: 0,
-          lastResetDate: today,
-        };
-
-        if (userRewards.lastResetDate !== today) {
-          userRewards.dailyCount = 0;
-          userRewards.lastResetDate = today;
-        }
+        const cooldownKey = `cooldown_${auth.userId}_${adId}`;
+        const lastReward = cooldownMap.get(cooldownKey) || 0;
 
         // Anti-abuse : cooldown 30s
-        const elapsed = (now - userRewards.lastReward) / 1000;
+        const elapsed = (now - lastReward) / 1000;
         if (elapsed < 30 && !isSync) {
-// @ts-ignore — type narrowing pending, see refactor ticket
           results.push({ adId, status: 'cooldown', reason: `Encore ${Math.ceil(30 - elapsed)}s` });
           continue;
         }
 
-        // Anti-abuse : max 50/jour
-        if (userRewards.dailyCount >= 50) {
-// @ts-ignore — type narrowing pending, see refactor ticket
+        // Anti-abuse : max 50/jour (vérifié en DB)
+        const dailyCount = await getDailyRewardCount(auth.userId);
+        if (dailyCount >= 50) {
           results.push({ adId, status: 'limit_reached', reason: 'Limite journalière atteinte (50/jour)' });
           continue;
         }
 
         const credits = type === 'click' ? 2 : 1;
 
-        userRewards.credits += credits;
-        userRewards.lastReward = now;
-        userRewards.dailyCount += 1;
+        // Persister le reward en DB (fire-and-forget)
+        db.adReward.create({
+          data: {
+            userId: auth.userId,
+            adId,
+            type,
+            credits,
+            plan,
+          },
+        }).catch((err) => {
+          log.warn('Failed to persist ad reward', { userId: auth.userId, adId, error: String(err) });
+        });
 
-        rewardStore.set(userKey, userRewards);
+        // Créditer l'utilisateur
+        db.user.update({
+          where: { id: auth.userId },
+          data: { credits: { increment: credits } },
+        }).catch(() => {});
 
-// @ts-ignore — type narrowing pending, see refactor ticket
+        // Mettre à jour le cooldown en mémoire
+        cooldownMap.set(cooldownKey, now);
+
         results.push({
           adId,
           status: 'rewarded',
           credits,
-          totalCredits: userRewards.credits,
-          dailyCount: userRewards.dailyCount,
+          dailyCount: dailyCount + 1,
           message: `+${credits} crédit${credits > 1 ? 's' : ''}`,
         });
       } else {
-        // Plan free : créditer seulement si configuré par l'admin
-// @ts-ignore — type narrowing pending, see refactor ticket
         results.push({ adId, status: 'logged', plan });
       }
     }
@@ -99,14 +114,11 @@ export const POST = withAuth(async (request: NextRequest, ctx: { params?: Promis
     return NextResponse.json({
       success: true,
       results,
-      stats: {
-        totalRewarded: Array.from(rewardStore.values()).reduce((sum, u) => sum + u.credits, 0),
-      },
     });
   } catch (err) {
     return NextResponse.json(
       { success: false, error: err instanceof Error ? err.message : 'Erreur serveur' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }, {
@@ -114,19 +126,30 @@ export const POST = withAuth(async (request: NextRequest, ctx: { params?: Promis
   rateLimit: { limit: 100, windowMs: 60000 },
 });
 
-// GET — Stats du dashboard (ADMIN UNIQUEMENT — ne pas exposer les récompenses en public)
-export const GET = withAuth(async () => {
-  const stats = Array.from(rewardStore.entries()).map(([key, value]) => ({
-    user: key,
-    ...value,
-  }));
+// GET — Stats du dashboard (ADMIN UNIQUEMENT)
+export const GET = withAuth(async (_request, _ctx, auth) => {
+  // Seuls les admins peuvent voir les stats globales
+  if (auth.role !== 'admin') {
+    return NextResponse.json({ error: 'Admin uniquement' }, { status: 403 });
+  }
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const todayRewards = await db.adReward.count({
+    where: [
+      { field: 'createdAt', op: '>=', value: todayStart.toISOString() },
+    ],
+  });
+
+  const totalRewards = await db.adReward.count({});
 
   return NextResponse.json({
-    stats,
-    totalRewards: rewardStore.size,
+    todayRewards,
+    totalRewards,
+    period: 'today',
   });
 }, {
   requireAuth: true,
-  roles: ['admin'],
   rateLimit: { limit: 30, windowMs: 60000 },
 });

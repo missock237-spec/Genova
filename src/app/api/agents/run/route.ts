@@ -7,28 +7,14 @@ import { rateLimiter } from "@/lib/rate-limiter";
 import { executeAgentSchema } from "@/lib/validation";
 import { handleApiError } from "@/lib/errors";
 import { callLLM } from "@/lib/llm";
+import { applySecurity } from "@/lib/security";
 import { ZodError } from "zod";
-
-// Agent Safety — detection d'injections et jailbreak (Rust natif + fallback JS)
-// Dynamic import with fallback
-type SafetyResult = { safe: boolean; score: number; reason: string };
-let checkPromptInjection: (input: string) => Promise<SafetyResult> | SafetyResult;
-let checkJailbreak: (input: string) => Promise<SafetyResult> | SafetyResult;
-try {
-  const safety = await import("@gen3ia/agent-safety");
-  // Adapt the module's return shape {detected,score,patterns} to {safe,score,reason}
-  checkPromptInjection = async (input: string) => {
-    const r = await safety.checkPromptInjection(input);
-    return { safe: !r.detected, score: r.score, reason: (r.patterns || []).join(', ') || 'clean' };
-  };
-  checkJailbreak = async (input: string) => {
-    const r = await safety.checkJailbreak(input);
-    return { safe: !r.detected, score: r.score, reason: (r.patterns || []).join(', ') || 'clean' };
-  };
-} catch {
-  checkPromptInjection = (_input: string) => ({ safe: true, score: 0, reason: "safety-module-not-available" });
-  checkJailbreak = (_input: string) => ({ safe: true, score: 0, reason: "safety-module-not-available" });
-}
+import {
+  enforceSecurity,
+  validateThinkActOutput,
+  enforceToolSecurity,
+  AgentSecurityBlockError,
+} from "@/lib/security/agent-security-middleware";
 
 export const dynamic = "force-dynamic";
 const log = createLogger('agent-run');
@@ -49,11 +35,12 @@ interface ReActStep {
 
 export async function POST(request: NextRequest) {
   try {
-    const identifier = request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip") ?? "127.0.0.1";
-    const { allowed, resetIn } = await rateLimiter.check(identifier, "/api/agents/run");
-    if (!allowed) {
-      return NextResponse.json({ error: "Trop de requetes", retryAfter: resetIn }, { status: 429 });
-    }
+    // AUTH + Rate limit — fix critique : l'ancien code n'avait AUCUNE auth
+    const { auth, error: secError } = await applySecurity(request, {
+      requireAuth: true,
+      rateLimit: { limit: 10, windowMs: 60000 },
+    });
+    if (secError || !auth) return secError || NextResponse.json({ error: 'Auth requis' }, { status: 401 });
 
     let body: { agentId: string; input: string; sessionId?: string; resume?: boolean };
     try {
@@ -68,25 +55,29 @@ export async function POST(request: NextRequest) {
     const { agentId, input, sessionId: existingSessionId, resume } = body;
 
     // ============================================================
-    // SECURITE: Detection d'injections et jailbreak
+    // SECURITE FAIL-CLOSED: Middleware de sécurité unifié
+    // Si le moteur Rust n'est pas compilé, l'exécution est BLOQUÉE.
     // ============================================================
-    const injectionCheck = await checkPromptInjection(input);
-    if (!injectionCheck.safe) {
-      log.warn('prompt_injection_detected', { agentId, score: injectionCheck.score, reason: injectionCheck.reason });
-      await db.agentActionLog.create({
-        data: {
-          agentId, action: 'prompt_injection_blocked',
-          details: JSON.stringify({ score: injectionCheck.score, reason: injectionCheck.reason }),
-          status: 'blocked', userId: '', resolvedAt: new Date(),
-        },
-      }).catch(() => {});
-      return NextResponse.json({ error: "Entree bloque par le securite", reason: injectionCheck.reason }, { status: 400 });
-    }
-
-    const jailbreakCheck = await checkJailbreak(input);
-    if (!jailbreakCheck.safe) {
-      log.warn('jailbreak_attempt_detected', { agentId, score: jailbreakCheck.score });
-      return NextResponse.json({ error: "Tentative de jailback detectee" }, { status: 400 });
+    try {
+      await enforceSecurity(input, {
+        agentId,
+        userId: auth.userId,
+        allowedTools: [],
+        source: 'api_run',
+      });
+    } catch (secErr) {
+      if (secErr instanceof AgentSecurityBlockError) {
+        log.warn('agent_execution_security_blocked', { agentId, reason: secErr.message, engine: secErr.engine });
+        await db.agentActionLog.create({
+          data: {
+            agentId, action: 'security_blocked',
+            details: JSON.stringify({ reason: secErr.message, engine: secErr.engine }),
+            status: 'blocked', userId: auth.userId, resolvedAt: new Date(),
+          },
+        }).catch(() => {});
+        return NextResponse.json({ error: "Execution bloquee par la securite", reason: secErr.message }, { status: 403 });
+      }
+      throw secErr;
     }
 
     const agent = await db.agent.findUnique({
@@ -97,6 +88,10 @@ export async function POST(request: NextRequest) {
       },
     });
     if (!agent) return NextResponse.json({ error: "Agent introuvable" }, { status: 404 });
+    // OWNERSHIP CHECK — l'utilisateur doit être le propriétaire de l'agent
+    if ((agent as Record<string, unknown>).userId !== auth.userId) {
+      return NextResponse.json({ error: "Agent non autorise" }, { status: 403 });
+    }
 
     const sessionId = existingSessionId ?? `session_${agentId}_${Date.now()}`;
 
@@ -172,20 +167,30 @@ export async function POST(request: NextRequest) {
       totalCost += CREDIT_COST_PER_STEP;
       totalTokens += llmResponse.tokens;
 
-      // Securite: verifier la reponse du LLM aussi
-      const llmInjectionCheck = await checkPromptInjection(llmResponse.content);
-      if (!llmInjectionCheck.safe) {
-        log.warn('llm_output_injection', { agentId, score: llmInjectionCheck.score });
+      // Sécurité FAIL-CLOSED: valider la sortie LLM avec Zod strict
+      const parsed = validateThinkActOutput(llmResponse.content);
+      if (!parsed) {
+        log.warn('llm_output_validation_failed', { agentId, iteration });
+        steps.push({ thought: 'Sortie LLM invalide (validation Zod)', action: 'error', actionInput: input, observation: 'Format de sortie invalide', cost: 0, tokens: 0, timestamp: new Date().toISOString() });
         break;
       }
 
-      const thoughtMatch = llmResponse.content.match(/THOUGHT:\s*(.+?)(?:ACTION:|$)/s);
-      const actionMatch = llmResponse.content.match(/ACTION:\s*(.+?)(?:OBSERVATION:|$)/s);
-      const obsMatch = llmResponse.content.match(/OBSERVATION:\s*(.+?)$/s);
+      // Sécurité : vérifier que l'action demandée est dans l'allowlist
+      if (parsed.action && parsed.action !== 'respond' && parsed.action !== 'process_input') {
+        try {
+          enforceToolSecurity(parsed.action, parsed.actionInput || '{}', []);
+        } catch (toolErr) {
+          if (toolErr instanceof AgentSecurityBlockError) {
+            log.warn('llm_tool_blocked', { agentId, action: parsed.action, reason: toolErr.message });
+            steps.push({ thought: parsed.thought, action: 'blocked', actionInput: input, observation: `Action bloquee: ${toolErr.message}`, cost: 0, tokens: llmResponse.tokens, timestamp: new Date().toISOString() });
+            break;
+          }
+        }
+      }
 
-      const thought = thoughtMatch?.[1]?.trim() || llmResponse.content.slice(0, 200);
-      const action = actionMatch?.[1]?.trim() || 'process_input';
-      const observation = obsMatch?.[1]?.trim() || `Etape ${iteration}: traitee.`;
+      const thought = parsed.thought;
+      const action = parsed.action;
+      const observation = `Etape ${iteration}: traitee.`;
 
       const step: ReActStep = { thought, action, actionInput: input, observation, cost: CREDIT_COST_PER_STEP, tokens: llmResponse.tokens, timestamp: new Date().toISOString() };
       steps.push(step);

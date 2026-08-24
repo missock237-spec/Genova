@@ -121,12 +121,15 @@ interface JSONRPCNotification {
 
 function getEncryptionKeyString(): string {
   const key = process.env.MCP_ENCRYPTION_KEY;
-  if (key) return key;
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('MCP_ENCRYPTION_KEY is required in production');
+  if (key && key.length >= 16) return key;
+  // En production, refuser de démarrer sans clé valide
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+    throw new Error('MCP_ENCRYPTION_KEY is required in production (min 16 chars)');
   }
-  log.warn('MCP_ENCRYPTION_KEY not set — using insecure development key. NEVER use this in production!');
-  return 'genova-mcp-dev-key-do-not-use-in-prod-32ch';
+  // En dev seulement : générer une clé déterministe mais unique au projet
+  const devKey = `gen3ia-dev-mcp-${process.env.npm_package_name || 'local'}-32c`;
+  log.warn('MCP_ENCRYPTION_KEY not set — using development-only key. NEVER ship to production!');
+  return devKey;
 }
 
 const ALGORITHM = 'aes-256-gcm';
@@ -436,7 +439,7 @@ export class MCPClient {
           prompts: { listChanged: true },
         },
         clientInfo: {
-          name: 'Genova Genova',
+          name: 'Gen3ia',
           version: '1.0.0',
         },
       });

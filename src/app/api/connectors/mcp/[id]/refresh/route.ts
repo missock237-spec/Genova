@@ -18,6 +18,13 @@ export async function POST(
   const { id } = await params;
 
   try {
+    // Ownership check : vérifier que le connecteur appartient à l'utilisateur
+    const connector = await db.mCPConnector.findUnique({ where: { id }, select: ['userId'] });
+    if (!connector || (connector as Record<string, unknown>).userId !== auth.userId) {
+      const res = NextResponse.json({ error: 'Connector non autorise' }, { status: 403 });
+      return secureResponse(res, request);
+    }
+
     const client = getMCPClientManager().getConnectedClient(id);
     if (!client) {
       const res = NextResponse.json({ error: 'Connector not connected. Connect first.' }, { status: 400 });

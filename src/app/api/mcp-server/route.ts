@@ -13,7 +13,7 @@ import type { FirestoreWhereOp } from '@/lib/firebase/firestore';
 export const dynamic = "force-dynamic";
 const log = createLogger('mcp-server');
 
-const MCP_SERVER_INFO = { name: 'Genova AI OS', version: '1.0.0' };
+const MCP_SERVER_INFO = { name: 'Gen3ia AI OS', version: '1.0.0' };
 const MCP_CAPABILITIES = { tools: { listChanged: true }, resources: { listChanged: true }, prompts: { listChanged: true } };
 const SUPPORTED_PROTOCOL_VERSIONS = ['2025-03-26', '2024-11-05'];
 
@@ -40,11 +40,11 @@ async function handleMCPRequest(method: string, params: Record<string, unknown> 
         select: ['name', 'tools'],
       });
       const tools: any[] = [
-        { name: 'genova_list_agents', description: 'Liste tous les agents Genova', inputSchema: { type: 'object', properties: { status: { type: 'string' } } } },
-        { name: 'genova_execute_agent', description: 'Exxe9cute un agent', inputSchema: { type: 'object', properties: { agent_id: { type: 'string' }, message: { type: 'string' } }, required: ['agent_id', 'message'] } },
-        { name: 'genova_get_credits', description: 'Solde de crxe9dits', inputSchema: { type: 'object', properties: {} } },
-        { name: 'genova_search_memory', description: 'Recherche mxe9moire', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
-        { name: 'genova_create_agent', description: 'Crxe9e un agent', inputSchema: { type: 'object', properties: { name: { type: 'string' }, instructions: { type: 'string' } }, required: ['name', 'instructions'] } },
+        { name: 'genova_list_agents', description: 'Liste tous les agents Gen3ia', inputSchema: { type: 'object', properties: { status: { type: 'string' } } } },
+        { name: 'genova_execute_agent', description: 'Exécute un agent', inputSchema: { type: 'object', properties: { agent_id: { type: 'string' }, message: { type: 'string' } }, required: ['agent_id', 'message'] } },
+        { name: 'genova_get_credits', description: 'Solde de crédits', inputSchema: { type: 'object', properties: {} } },
+        { name: 'genova_search_memory', description: 'Recherche mémoire', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
+        { name: 'genova_create_agent', description: 'Crée un agent', inputSchema: { type: 'object', properties: { name: { type: 'string' }, instructions: { type: 'string' } }, required: ['name', 'instructions'] } },
       ];
       for (const c of connectors) {
         if (c.tools) try {
@@ -94,11 +94,33 @@ async function handleMCPRequest(method: string, params: Record<string, unknown> 
           const agentId = args.agent_id as string;
           const message = args.message as string;
           if (!agentId || !message) return { error: { code: -32602, message: 'agent_id and message required' } };
-          const agent = await db.agent.findUnique({ where: { id: agentId }, select: ['id', 'userId', 'name'] });
+          const agent = await db.agent.findUnique({ where: { id: agentId }, select: ['id', 'userId', 'name', 'status'] });
           if (!agent || agent.userId !== userId) return { error: { code: -32602, message: 'Agent not found' } };
-          return { result: { content: [{ type: 'text', text: JSON.stringify({ status: 'queued', agent: agent.name, message: message.substring(0, 200) }) }] } };
+          if (agent.status !== 'active') return { error: { code: -32602, message: 'Agent is not active' } };
+          // Exécution réelle via le chat interne (fire-and-forget avec réponse rapide)
+          try {
+            const { createAIRouter } = await import('@/lib/ai-router');
+            const agentConfig = JSON.parse((await db.agent.findUnique({
+              where: { id: agentId }, select: ['config'],
+            }) as Record<string, unknown> | null)?.config as string || '{}');
+            const personality = (agentConfig as { personality?: string }).personality || 'helpful';
+            const router = createAIRouter(userId);
+            const systemPrompt = `You are ${agent.name}. Personality: ${personality}. Respond concisely.`;
+            const result = await router.chat([
+              { role: 'system' as const, content: systemPrompt },
+              { role: 'user' as const, content: message },
+            ], { model: 'default' });
+            // Log l'exécution
+            db.agentActionLog.create({
+              data: { agentId, action: 'mcp_execute', details: JSON.stringify({ source: 'mcp-server', message: message.substring(0, 200) }), userId, status: 'completed', result: 'Executed via MCP', resolvedAt: new Date() },
+            }).catch(() => {});
+            return { result: { content: [{ type: 'text', text: JSON.stringify({ status: 'completed', agent: agent.name, response: result.content, model: result.model, provider: result.provider }) }] } };
+          } catch (execErr) {
+            log.error('MCP agent execution failed', { agentId, error: execErr instanceof Error ? execErr.message : String(execErr) });
+            return { error: { code: -32000, message: `Agent execution failed: ${execErr instanceof Error ? execErr.message : 'Unknown error'}` } };
+          }
         }
-        default: return { result: { content: [{ type: 'text', text: JSON.stringify({ message: `Tool ${name} dispatched` }) }] } };
+        default: return { error: { code: -32601, message: `Tool not found: ${name}` } };
       }
     }
 
@@ -107,7 +129,7 @@ async function handleMCPRequest(method: string, params: Record<string, unknown> 
         { uri: 'genova://agents', name: 'Agents', mimeType: 'application/json' },
         { uri: 'genova://conversations', name: 'Conversations', mimeType: 'application/json' },
         { uri: 'genova://usage', name: 'Usage', mimeType: 'application/json' },
-        { uri: 'genova://credits', name: 'Crxe9dits', mimeType: 'application/json' },
+        { uri: 'genova://credits', name: 'Crédits', mimeType: 'application/json' },
       ] } };
 
     case 'resources/read': {
@@ -152,7 +174,7 @@ async function handleMCPRequest(method: string, params: Record<string, unknown> 
     case 'prompts/list':
       return { result: { prompts: [
         { name: 'analyze_agent_performance', description: 'Analyse performance', arguments: [{ name: 'agent_id', required: true }] },
-        { name: 'debug_agent_conversation', description: 'Dxe9bogue conversation', arguments: [{ name: 'conversation_id', required: true }] },
+        { name: 'debug_agent_conversation', description: 'Débogue conversation', arguments: [{ name: 'conversation_id', required: true }] },
       ] } };
 
     case 'prompts/get': {
@@ -161,7 +183,7 @@ async function handleMCPRequest(method: string, params: Record<string, unknown> 
       if (p.name === 'analyze_agent_performance')
         return { result: { messages: [{ role: 'system', content: { type: 'text', text: 'Analyse de performance.' } }, { role: 'user', content: { type: 'text', text: `Agent ${p.arguments?.agent_id || '?'}` } }] } };
       if (p.name === 'debug_agent_conversation')
-        return { result: { messages: [{ role: 'system', content: { type: 'text', text: 'Dxe9bogage conversation.' } }, { role: 'user', content: { type: 'text', text: `ID: ${p.arguments?.conversation_id || '?'}` } }] } };
+        return { result: { messages: [{ role: 'system', content: { type: 'text', text: 'Débogage conversation.' } }, { role: 'user', content: { type: 'text', text: `ID: ${p.arguments?.conversation_id || '?'}` } }] } };
       return { error: { code: -32602, message: `Prompt not found: ${p.name}` } };
     }
 
