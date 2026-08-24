@@ -344,7 +344,8 @@ export function IntegrationsView() {
                     </div>
                   )}
                 </div>
-              );
+              </div>
+            );
           })}
         </div>
       )}

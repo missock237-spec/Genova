@@ -45,6 +45,7 @@ function AppContent() {
   const logout = useAuthStore((s) => s.logout);
 
   const currentView = useAppStore((s) => s.currentView);
+  const setCurrentView = useAppStore((s) => s.setCurrentView);
   const fetchApprovalCount = useAppStore((s) => s.fetchApprovalCount);
 
   const hydratedRef = useRef(false);
@@ -262,6 +263,7 @@ function AppContent() {
       case 'prompts': return <PromptsView />;
       case 'agent-chat': return <AgentsView />;
       default: return <DashboardView />;
+    }
   };
 
   return (
