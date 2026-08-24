@@ -612,24 +612,31 @@ function ChatTab({ agents }: { agents: Agent[] }) {
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && (
+        {messages.length === 0 && !selectedAgentId && (
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <div className="p-3 rounded-2xl bg-[#06b6d4]/10 mb-3 animate-pulse">
+              <Bot className="h-10 w-10 text-[#06b6d4]/60" />
+            </div>
+            <p className="text-sm font-medium">Sélectionnez un agent</p>
+            <p className="text-xs mt-1 text-center max-w-xs">
+              Choisissez un agent dans le menu ci-dessus pour démarrer une conversation.
+            </p>
+            <div className="mt-4 flex items-center gap-1 text-[10px] text-muted-foreground/60">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#06b6d4]/40 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#06b6d4]/40 animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#06b6d4]/40 animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+          </div>
+        )}
+        {messages.length === 0 && selectedAgent && (
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
             <div className="p-3 rounded-2xl bg-[#06b6d4]/10 mb-3">
               <Bot className="h-10 w-10 text-[#06b6d4]/60" />
             </div>
-            {selectedAgent ? (
-              <>
-                <p className="text-sm font-medium">Conversation avec {selectedAgent.name}</p>
-                <p className="text-xs mt-1 text-center max-w-xs">
-                  {selectedAgent.description || 'Envoyez un message pour commencer la conversation.'}
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-sm font-medium">Sélectionnez un agent</p>
-                <p className="text-xs mt-1">Choisissez un agent dans le menu déroulant ci-dessus pour commencer.</p>
-              </>
-            )}
+            <p className="text-sm font-medium">Conversation avec {selectedAgent.name}</p>
+            <p className="text-xs mt-1 text-center max-w-xs">
+              {selectedAgent.description || 'Envoyez un message pour commencer.'}
+            </p>
           </div>
         )}
 
@@ -698,18 +705,20 @@ function ChatTab({ agents }: { agents: Agent[] }) {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={
-                selectedAgent
+                selectedAgent?.status === 'active'
                   ? `Écrivez votre message à ${selectedAgent.name}...`
-                  : 'Sélectionnez d\'abord un agent...'
+                  : selectedAgent
+                    ? 'Cet agent est inactif'
+                    : ''
               }
-              className="flex-1 min-h-[44px] max-h-32 rounded-lg bg-transparent px-3 py-2.5 text-sm resize-none focus:outline-none"
+              className="flex-1 min-h-[44px] max-h-32 rounded-lg bg-transparent px-3 py-2.5 text-sm resize-none focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
               rows={1}
               disabled={!selectedAgentId || selectedAgent?.status !== 'active'}
             />
             <button
               onClick={handleSend}
               disabled={!input.trim() || isTyping || !selectedAgentId || selectedAgent?.status !== 'active'}
-              className="h-[44px] w-[44px] rounded-lg bg-[#06b6d4] text-white hover:bg-[#06b6d4]/90 disabled:opacity-50 flex items-center justify-center transition-colors"
+              className="h-[44px] w-[44px] rounded-lg bg-[#06b6d4] text-white hover:bg-[#06b6d4]/90 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all duration-200 shrink-0"
             >
               {isTyping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </button>

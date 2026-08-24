@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { GitBranch, Plus, Play, Settings, Users, Loader2, Trash2, AlertCircle } from 'lucide-react';
+import { GitBranch, Plus, Play, Settings, Users, Loader2, Trash2, AlertCircle, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 
 interface Workflow {
   id: string;
@@ -19,24 +20,52 @@ export function CoordinationView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [executingId, setExecutingId] = useState<string | null>(null);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const loadWorkflows = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try {
-      const res = await fetch('/api/workflows');
-      if (!res.ok) throw new Error(`Erreur ${res.status}`);
-      const data = await res.json();
-      setWorkflows(Array.isArray(data) ? data : data?.workflows || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erreur de chargement');
-      setWorkflows([]);
-    } finally {
-      setLoading(false);
+    let lastErr: string | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch('/api/workflows');
+        if (res.status === 401) { lastErr = 'Session expirée — reconnectez-vous'; break; }
+        if (!res.ok) {
+          let serverMsg = `Erreur ${res.status}`;
+          try {
+            const errBody = await res.json();
+            if (errBody?.error) serverMsg = `${res.status}: ${errBody.error}`;
+          } catch { /* ignore parse error */ }
+          throw new Error(serverMsg);
+        }
+        const data = await res.json();
+        const wfList = Array.isArray(data?.workflows) ? data.workflows : (Array.isArray(data) ? data : []);
+        setWorkflows(wfList);
+        lastErr = null;
+        setHasLoadedOnce(true);
+        break;
+      } catch (err) {
+        lastErr = err instanceof Error ? err.message : 'Erreur de chargement';
+        if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+      }
     }
+    if (lastErr) {
+      setError(lastErr);
+      setWorkflows([]);
+      setHasLoadedOnce(true);
+    }
+    setLoading(false);
   }, []);
 
-  useEffect(() => { let _cancelled = false; (async () => { if (!_cancelled) { try { await loadWorkflows(); } catch {} } })(); return () => { _cancelled = true; }; }, [loadWorkflows]);
+  useEffect(() => {
+    let _cancelled = false;
+    (async () => {
+      if (!_cancelled) {
+        try { await loadWorkflows(); } catch { /* handled inside */ }
+      }
+    })();
+    return () => { _cancelled = true; };
+  }, [loadWorkflows]);
 
   const handleExecute = async (id: string) => {
     setExecutingId(id);
@@ -74,34 +103,47 @@ export function CoordinationView() {
           </h1>
           <p className="text-muted-foreground">Workflows multi-agents — Orchestrez vos agents IA</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium">
+        <Button className="flex items-center gap-2">
           <Plus className="h-4 w-4" />
           Nouveau workflow
-        </button>
+        </Button>
       </div>
 
-      {error && (
-        <Alert variant="destructive">
+      {/* Erreur — distinct de l'état vide */}
+      {error && hasLoadedOnce && (
+        <Alert variant="destructive" className="relative">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="text-sm pr-20">
+            {error}
+          </AlertDescription>
+          <Button
+            variant="outline" size="sm"
+            className="absolute right-3 top-1/2 -translate-y-1/2 h-8 gap-1.5 text-xs"
+            onClick={loadWorkflows}
+            disabled={loading}
+          >
+            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+            Réessayer
+          </Button>
         </Alert>
       )}
 
-      {loading ? (
+      {loading && !hasLoadedOnce ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
-      ) : workflows.length === 0 ? (
+      ) : !error && workflows.length === 0 ? (
+        /* État vide — seulement si PAS d'erreur */
         <div className="text-center py-16 bg-card rounded-xl border border-border">
-          <GitBranch className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+          <GitBranch className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
           <h3 className="text-lg font-medium mb-2">Aucun workflow</h3>
           <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-6">
             Créez votre premier workflow multi-agents pour automatiser vos processus
           </p>
-          <button className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 text-sm font-medium transition-colors">
-            <Plus className="h-4 w-4 inline mr-1" />
+          <Button variant="outline" className="gap-2">
+            <Plus className="h-4 w-4" />
             Créer un workflow
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -119,7 +161,7 @@ export function CoordinationView() {
                     </div>
                     <div className="min-w-0">
                       <h3 className="font-semibold truncate">{wf.name}</h3>
-                      <p className="text-xs text-muted-foreground">{wf.stepCount} étape{'é'}{wf.stepCount > 1 ? 's' : ''}</p>
+                      <p className="text-xs text-muted-foreground">{wf.stepCount || 0} étape{(wf.stepCount || 0) > 1 ? 's' : ''}</p>
                     </div>
                   </div>
                   <span className={`text-xs px-2 py-1 rounded-full font-medium ${status.class}`}>
