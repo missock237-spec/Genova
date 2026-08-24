@@ -37,6 +37,10 @@
 //  Multi-tenant (organisations & adhésions) :
 //    - organization        -> 'organizations'
 //    - membership          -> 'memberships'
+//
+//  Place de Prompts (marketplace de templates de prompts) :
+//    - prompt             -> 'prompts'            (templates publiés/brouillons)
+//    - promptFavorite     -> 'prompt_favorites'   (association userId × promptId)
 // ============================================================
 import {
   db as baseDb,
@@ -87,6 +91,14 @@ const multiTenant = {
   membership: makeRepo('memberships'),
 } as const;
 
+// ============================================================
+// Place de Prompts — templates de prompts + favoris
+// ============================================================
+const promptStore = {
+  prompt: makeRepo('prompts'),
+  promptFavorite: makeRepo('prompt_favorites'),
+} as const;
+
 export const dbExt = {
   ...baseDb,
   aiCost: baseDb.aICost,
@@ -94,6 +106,7 @@ export const dbExt = {
   ...evolution,
   ...t28,
   ...multiTenant,
+  ...promptStore,
 } as const;
 
 export const db = dbExt;
