@@ -19,6 +19,7 @@ import { SchedulerView } from '@/components/scheduler/scheduler-view';
 import { VoiceView } from '@/components/voice/voice-view';
 import { MediaView } from '@/components/media/media-view';
 import { PromptsView } from '@/components/prompts/prompts-view';
+import { AdBar } from '@/components/advertising/ad-bar';
 import { ThemeProvider } from 'next-themes';
 import { Loader2, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -282,6 +283,9 @@ function AppContent() {
     );
   }
 
+  // Vues où la barre pub est masquée (le chat a ConversationAd intégré)
+  const hideAdBar = currentView === 'agent-chat';
+
   const renderView = () => {
     switch (currentView) {
       case 'dashboard': return <DashboardView />;
@@ -322,7 +326,7 @@ function AppContent() {
 
       <main className="flex-1 flex flex-col min-w-0">
         <AppHeader onMenuClick={() => setSidebarOpen(true)} />
-        <div className="flex-1 p-3 sm:p-4 md:p-6 overflow-auto">
+        <div className="flex-1 p-3 sm:p-4 md:p-6 overflow-auto pb-12">
           <ErrorBoundary>
             <AnimatePresence mode="wait">
               <motion.div
@@ -338,6 +342,9 @@ function AppContent() {
           </ErrorBoundary>
         </div>
       </main>
+
+      {/* Barre publicitaire — visible sur toutes les vues sauf le chat */}
+      <AdBar sessionId="main-session" hidden={hideAdBar} />
     </div>
   );
 }
