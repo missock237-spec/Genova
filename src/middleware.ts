@@ -50,6 +50,8 @@ const PUBLIC_PATHS = [
   '/api/auth/debug',
   '/api/health',
   '/api/health/features',
+  '/api/health/ready',
+  '/api/metrics/system',
   '/api/control-plane/health',
   '/api/register',
   '/api/webhook/stripe',

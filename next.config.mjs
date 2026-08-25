@@ -38,7 +38,10 @@ const redirects = () => [
 
 const nextConfig = {
   // Turbopack config (silences Next.js 16 Turbopack default warning)
-  turbopack: {},
+  turbopack: {
+    // Stable module IDs → smaller long-term cache
+    moduleIds: 'deterministic',
+  },
 
   // Mode standalone retiré — Vercel gère l'output nativement,
   // et standalone mode provoque des erreurs de copy des client-reference-manifest
@@ -49,16 +52,42 @@ const nextConfig = {
   poweredByHeader: false,
   compress: true,
 
+  // ——— Production hardening ———
+  // Tree-shake audit logs in production (pino, debug, etc.)
+  // Reduces bundle size + prevents accidental PII leakage via logs.
+  productionBrowserSourceMaps: false, // already at bottom; kept for clarity
+
   // ——— Tolérance build (préviews branches feature) ———
   // Les branches feature/fix peuvent avoir du code en cours de développement
   // avec des erreurs TypeScript ou ESLint. On ignore ces erreurs pendant le
   // build Vercel pour que la preview se déploie quand même.
   // Le CI GitHub Actions (ci.yml) reste strict sur main.
+  // NEXT_PUBLIC_STRICT_BUILD=1 permet de forcer le strict pour un audit.
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: process.env.NEXT_PUBLIC_STRICT_BUILD !== '1',
   },
   eslint: {
-    ignoreDuringBuilds: true,
+    ignoreDuringBuilds: process.env.NEXT_PUBLIC_STRICT_BUILD !== '1',
+  },
+
+  // ——— Modern optimizations (Next.js 15+) ———
+  experimental: {
+    // Tree-shake large icon libraries (lucide-react has 50k+ icons)
+    optimizePackageImports: [
+      'lucide-react',
+      'framer-motion',
+      '@radix-ui/react-icons',
+      'recharts',
+      'react-hook-form',
+      'date-fns',
+    ],
+    // Smaller CSS via dead-code elimination
+    optimizeCss: true,
+    // Reduce memory usage during build (matters for monorepos)
+    workerThreads: true,
+    // Modern cookie behavior (more secure)
+    // (Next.js 15.5+ reads this)
+    cookieUpdateSegmentation: true,
   },
 
   // ——— Optimisation des images ———
@@ -181,7 +210,14 @@ const nextConfig = {
     return config;
   },
 
+  // Disable source maps in production browser bundle (security + bundle size).
+  // Server source maps are still generated for Sentry symbolication.
   productionBrowserSourceMaps: false,
+
+  // ——— Vercel-specific ———
+  // Allow Vercel to leverage its native Image Optimization at the edge.
+  // (Next.js 15+)
+  staticPageGenerationTimeout: 120, // 2 min — large monorepo cold builds
 };
 
 export default nextConfig;

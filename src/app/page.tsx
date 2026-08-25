@@ -28,6 +28,8 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import HardTechLanding from '@/components/landing/hardtech-landing';
+import { SystemCommandCenter } from '@/components/system/system-command-center';
+import { CommandPalette } from '@/components/system/command-palette';
 
 // T23 : délai avant d'afficher l'UI "chargement bloqué" (12s).
 const STUCK_LOADING_TIMEOUT_MS = 12_000;
@@ -289,7 +291,12 @@ function AppContent() {
 
   const renderView = () => {
     switch (currentView) {
-      case 'dashboard': return <DashboardView />;
+      case 'dashboard': return (
+        <div className="space-y-4">
+          <SystemCommandCenter />
+          <DashboardView />
+        </div>
+      );
       case 'agents': return <AgentsView />;
       case 'automation': return <AutomationView />;
       case 'guardrails': return <GuardrailsView />;
@@ -355,6 +362,18 @@ export default function Home() {
   return (
     <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
       <AppContent />
+      {/* Global Cmd+K palette — always mounted, hidden until shortcut */}
+      <CommandPaletteGlobalBridge />
     </ThemeProvider>
   );
+}
+
+/**
+ * Bridge that wires the global CommandPalette to the Zustand store.
+ * Mounted once at the app root so the shortcut works in any view.
+ */
+function CommandPaletteGlobalBridge() {
+  // We read useAppStore lazily to avoid SSR/hydration timing issues.
+  const setCurrentView = useAppStore((s) => s.setCurrentView);
+  return <CommandPalette onNavigate={(v) => setCurrentView(v as any)} />;
 }
