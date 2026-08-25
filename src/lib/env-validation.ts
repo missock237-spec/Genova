@@ -10,6 +10,9 @@
 // NOTE : le projet est migré de PostgreSQL/Prisma vers Cloud Firestore.
 // `DATABASE_URL` n'est plus requis (champ optionnel de rétrocompatibilité).
 //
+// NOTE : l'ancien provider SebPay a été remplacé par Chariow (adaptateur).
+// Les variables SEBPAY_* sont OBSOLÈTES et remplacées par CHARIOW_* / CAMPAY_*.
+//
 // Critère de la phase : « Prévenir les erreurs silencieuses en production. »
 // ============================================================
 import { z } from 'zod';
@@ -67,20 +70,27 @@ export const EnvSchema = z.object({
   HUGGINGFACE_ENABLED: boolish.default(false),
   HUGGINGFACE_TOKEN: optString,
 
-  // ==== Paiements Stripe ====
+  // ==== Paiements — Chariow (principal, Mobile Money + Carte) ====
+  CHARIOW_API_KEY: optString,
+  CHARIOW_WEBHOOK_SECRET: optString,
+  CHARIOW_API_URL: optString.default('https://api.chariow.com/v1'),
+  CHARIOW_PRODUCT_DEFAULT: optString,
+
+  // ==== Paiements — Campay (Mobile Money Cameroun, push USSD) ====
+  CAMPAY_USERNAME: optString,
+  CAMPAY_PASSWORD: optString,
+  CAMPAY_APP_ID: optString,
+  CAMPAY_APP_TOKEN: optString,
+  CAMPAY_API_URL: optString.default('https://campay.net/api'),
+  CAMPAY_WEBHOOK_SECRET: optString,
+
+  // ==== Paiements Stripe (carte bancaire, optionnel) ====
   STRIPE_ENABLED: boolish.default(false),
   STRIPE_SECRET_KEY: optString,
   STRIPE_PUBLISHABLE_KEY: optString,
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: optString,
   STRIPE_WEBHOOK_SECRET: optString,
   NEXT_PUBLIC_STRIPE_PRICE_ID: optString,
-
-  // ==== SebPay — Mobile Money Afrique ====
-  SEBPAY_ENABLED: boolish.default(false),
-  SEBPAY_API_KEY: optString,
-  SEBPAY_API_SECRET: optString,
-  SEBPAY_BASE_URL: optString.default('https://api.sebpay.com'),
-  SEBPAY_WEBHOOK_SECRET: optString,
 
   // ==== Email / SMTP ====
   SMTP_ENABLED: boolish.default(false),
@@ -146,11 +156,6 @@ const conditionalRequirements: Array<{
       'STRIPE_WEBHOOK_SECRET',
     ],
     label: 'Stripe',
-  },
-  {
-    enabled: 'SEBPAY_ENABLED',
-    required: ['SEBPAY_API_KEY', 'SEBPAY_API_SECRET'],
-    label: 'SebPay',
   },
   {
     enabled: 'SMTP_ENABLED',
