@@ -130,7 +130,7 @@
     "react-resizable-panels": "^4.12.2",
     "reactflow": "^11.11.4",
     "recharts": "^2.15.4",
-    "resend": "^6.18.1",
+    "resend": "^6.19.0",
     "sharp": "^0.35.3",
     "sonner": "^2.0.6",
     "stripe": "^22.5.0",
