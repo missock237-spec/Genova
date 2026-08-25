@@ -1,8 +1,26 @@
+'use client';
+
+import { lazy, Suspense } from 'react';
 import { ApiKeysManager } from '@/components/api-keys/api-keys-manager';
 import { MCPConnector } from '@/components/connectors/mcp-connector';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Key, Plug, BookOpen, Workflow } from 'lucide-react';
-import { AgentFlow } from '@/components/developers/agent-flow';
+import { Key, Plug, BookOpen, Workflow, Loader2 } from 'lucide-react';
+
+// Lazy-load AgentFlow : reactflow est lourd (~180 KB) et peut crasher
+// en production (CSS manquant, bundling Edge, etc.). Le lazy + Suspense
+// isole le crash au seul tab Architecture — les autres tabs restent OK.
+const AgentFlow = lazy(() =>
+  import('@/components/developers/agent-flow').then((m) => ({ default: m.AgentFlow }))
+);
+
+function ArchitectureFallback() {
+  return (
+    <div className="flex items-center justify-center py-20 text-muted-foreground">
+      <Loader2 className="h-6 w-6 animate-spin mr-3" />
+      Chargement du diagramme d'architecture...
+    </div>
+  );
+}
 
 export default function DevelopersPage() {
   return (
@@ -129,6 +147,12 @@ const result = await client.executeAgent(
               </div>
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="architecture">
+          <Suspense fallback={<ArchitectureFallback />}>
+            <AgentFlow />
+          </Suspense>
         </TabsContent>
       </Tabs>
     </div>

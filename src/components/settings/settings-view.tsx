@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Shield, Bell, CreditCard, Key, Check, Moon, Sun, Monitor, Save, Eye, EyeOff, LogOut, Trash2, RefreshCw, Megaphone } from 'lucide-react';
 import { apiFetch, ApiError } from '@/lib/api';
 import { AdPreferencesPanel } from '@/components/advertising/ad-preferences-panel';
+import { ApiKeysManager } from '@/components/api-keys/api-keys-manager';
 
 interface SettingsViewProps {
   initialTab?: string;
@@ -382,42 +383,7 @@ export function SettingsView({ initialTab = 'profile' }: SettingsViewProps) {
     </div>
   );
 
-  const renderApiKeysTab = () => (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Clés API</h2>
-        <button className="px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 transition-colors">
-          + Nouvelle clé
-        </button>
-      </div>
-      <div className="border border-border rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50">
-            <tr>
-              <th className="text-left px-4 py-3 font-medium">Nom</th>
-              <th className="text-left px-4 py-3 font-medium">Clé</th>
-              <th className="text-left px-4 py-3 font-medium">Scopes</th>
-              <th className="text-left px-4 py-3 font-medium">Créée le</th>
-              <th className="text-right px-4 py-3 font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {[{ name: 'Production', key: 'g3a_••••••••a3f8', scopes: 'read,write', date: '2026-07-01' }].map(k => (
-              <tr key={k.name} className="hover:bg-muted/30">
-                <td className="px-4 py-3 font-medium">{k.name}</td>
-                <td className="px-4 py-3 font-mono text-xs">{k.key}</td>
-                <td className="px-4 py-3">{k.scopes}</td>
-                <td className="px-4 py-3 text-muted-foreground">{k.date}</td>
-                <td className="px-4 py-3 text-right">
-                  <button className="text-red-500 hover:text-red-700 text-xs">Révoquer</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  const renderApiKeysTab = () => <ApiKeysManager />;
 
   const renderApprovalsTab = () => (
     <div className="space-y-6">

@@ -29,7 +29,12 @@ export const MAX_EXPIRY_DAYS = 3650;
  * et rend impossible le calcul d'empreintes sans ce secret.
  */
 function effectiveSalt(): string {
-  const pepper = process.env.API_KEY_HASH_SALT || '';
+  let pepper = process.env.API_KEY_HASH_SALT || '';
+  // En développement, si aucune variable n'est définie, on dérive un pepper
+  // déterministe du projet pour éviter le sel complètement prévisible.
+  if (!pepper && process.env.NODE_ENV !== 'production') {
+    pepper = 'dev-mode-fallback';
+  }
   return `gen3ia-api-key-salt:${pepper}`;
 }
 

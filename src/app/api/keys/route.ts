@@ -58,6 +58,16 @@ async function requireUser(request: NextRequest): Promise<{ userId: string; ok: 
 
 export async function POST(request: NextRequest) {
   try {
+    // Production guard : API_KEY_HASH_SALT doit être défini en production.
+    // En dev local, le sel par défaut (sans pepper) est acceptable.
+    if (process.env.NODE_ENV === 'production' && !process.env.API_KEY_HASH_SALT) {
+      log.error('API_KEY_HASH_SALT non défini en production — création de clé bloquée');
+      return NextResponse.json(
+        { error: 'Configuration serveur incomplète. Contactez l\'administrateur.' },
+        { status: 503 },
+      );
+    }
+
     const auth = await requireUser(request);
     if (!auth.ok) return auth.res;
     const userId = auth.userId;
