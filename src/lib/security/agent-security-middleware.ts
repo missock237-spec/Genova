@@ -108,35 +108,26 @@ let rustSafetyModule: unknown = null;
 let rustLoadAttempted = false;
 let rustLoadFailed = false;
 
-/** Tente de charger le module Rust NAPI une seule fois.
- * Utilise un require dynamique indirect pour que le bundler
- * (webpack/turbopack) NE tente PAS de resoudre le chemin au build.
- * Le path est construit dynamiquement a l'execution.
- */
+/** Tente de charger le module Rust NAPI une seule fois. */
 function tryLoadRustModule(): unknown {
   if (rustLoadAttempted) return rustSafetyModule;
   rustLoadAttempted = true;
 
   try {
-    // Construire le chemin dynamiquement pour eviter la resolution au build.
-    // Aucun bundler ne peut analyser statiquement cette expression.
-    const pathSegments = ['..', '..', 'crates', 'agent-safety'];
-    const modulePath = pathSegments.join('/');
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require(modulePath);
+    const mod = require('../../crates/agent-safety');
     if (mod && typeof mod.safety_init === 'function') {
       mod.safety_init();
       rustSafetyModule = mod;
       log.info('rust_safety_loaded', {});
     } else {
       rustLoadFailed = true;
-      log.warn('rust_safety_init_failed', { reason: 'safety_init not a function' });
+      log.error('rust_safety_init_failed', { reason: 'safety_init not a function' });
     }
-  } catch {
-    // Module Rust non compile (normal sur Vercel/CI sans Docker)
+  } catch (err) {
     rustLoadFailed = true;
-    log.info('rust_safety_not_available', {
-      hint: 'Using JS fallback. Compile the Rust NAPI crate for enhanced security.',
+    log.error('rust_safety_load_failed', {
+      error: err instanceof Error ? err.message : String(err),
     });
   }
 
@@ -232,7 +223,7 @@ function jsPromptCheck(prompt: string): SecurityVerdict {
     { re: /\b(DAN|STAN|jailbreak|sudo\s+mode|developer\s+mode|unfiltered|uncensored)\b/i, cat: 'jailbreak_attempt' },
     { re: /(output|show|reveal|tell|print|display)\s+(your|the|system|initial|hidden|secret)\s+(prompt|instructions)/i, cat: 'system_prompt_leak' },
     { re: /\b(eval|Function\()|child_process|require\s*\(['"]child_process['"]\)/i, cat: 'code_injection' },
-    { re: /\b(reverse.shell|nc\s+-|bash\s+-i|\/dev\/tcp)/i, cat: 'reverse_shell_attempt' },
+    { re: /\b(reverse\.shell|nc\s+-|bash\s+-i|\/dev\/tcp)/i, cat: 'reverse_shell_attempt' },
   ];
 
   for (const { re, cat } of patterns) {

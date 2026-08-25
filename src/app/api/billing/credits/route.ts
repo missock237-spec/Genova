@@ -1,36 +1,30 @@
-import { NextResponse } from 'next/server';
-import { getServerSession } from '@/lib/auth';
-import { prisma } from '@/lib/prisma';
+// GET /api/billing/credits — Solde et historique des crédits
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/lib/db';
+import { applySecurity } from '@/lib/security';
 
-export const dynamic = "force-dynamic";
-export async function GET() {
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: NextRequest) {
+  const { auth, error } = await applySecurity(request, { requireAuth: true });
+  if (error) return error;
+
   try {
-    const session = await getServerSession();
-    if (!session?.user.id) {
-      return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
-    }
-
-    const [lastTx, history, totalSpentAgg] = await Promise.all([
-      prisma.creditTransaction.findFirst({
-        where: { userId: session.user.id },
-        orderBy: { createdAt: 'desc' },
+    const [lastTx, history] = await Promise.all([
+      db.creditTransaction.findFirst({
+        where: [{ field: 'userId', op: '==', value: auth.userId }],
+        orderBy: [{ field: 'createdAt', direction: 'desc' }],
       }),
-      prisma.creditTransaction.findMany({
-        where: { userId: session.user.id },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      }),
-      prisma.creditTransaction.aggregate({
-        where: { userId: session.user.id, type: 'spend' },
-        _sum: { amount: true },
+      db.creditTransaction.findMany({
+        where: [{ field: 'userId', op: '==', value: auth.userId }],
+        orderBy: [{ field: 'createdAt', direction: 'desc' }],
+        limit: 50,
       }),
     ]);
 
     return NextResponse.json({
-      balance: lastTx?.balance || 0,
-// @ts-ignore — type narrowing pending, see refactor ticket
-      totalSpent: Math.abs(totalSpentAgg._sum.amount || 0),
-      history: history.map(tx => ({
+      balance: Number(lastTx?.balance) || 0,
+      transactions: (history || []).map((tx: any) => ({
         id: tx.id,
         amount: tx.amount,
         balance: tx.balance,
@@ -39,8 +33,7 @@ export async function GET() {
         createdAt: tx.createdAt,
       })),
     });
-  } catch (error) {
-    console.error('GET /billing/credits error:', error);
+  } catch (err) {
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
 }
