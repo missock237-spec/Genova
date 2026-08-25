@@ -823,3 +823,27 @@
   50% { box-shadow: 0 0 12px 2px rgba(0, 245, 255, 0.1); }
 }
 
+/* Agent type list scrollbar in creation dialog */
+.agent-type-list-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(6, 182, 212, 0.4) transparent;
+}
+.agent-type-list-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.agent-type-list-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+.agent-type-list-scroll::-webkit-scrollbar-thumb {
+  background: rgba(6, 182, 212, 0.35);
+  border-radius: 3px;
+  border: 1px solid rgba(6, 182, 212, 0.15);
+}
+.agent-type-list-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(6, 182, 212, 0.55);
+}
+.agent-type-list-scroll::-webkit-scrollbar-thumb:active {
+  background: rgba(6, 182, 212, 0.7);
+}
+

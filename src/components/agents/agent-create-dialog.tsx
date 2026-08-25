@@ -519,57 +519,59 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
                   Choisissez le type d'agent adapté à votre besoin. Les compétences seront automatiquement sélectionnées selon le type.
                 </p>
 
-                <div className="space-y-4">
-                  {filteredCategories.map((category) => {
-                    const types = typesByCategory[category];
-                    if (!types) return null;
-                    return (
-                    <div key={category}>
-                      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                        {category}
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {types.map((type) => {
-                          const Icon = getIcon(type.icon);
-                          const isSelected = selectedTypeId === type.id;
-                          return (
-                            <button
-                              key={type.id}
-                              type="button"
-                              onClick={() => setSelectedTypeId(type.id)}
-                              className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
-                                isSelected
-                                  ? 'border-[#06b6d4]/40 bg-[#06b6d4]/5 ring-1 ring-[#06b6d4]/20'
-                                  : 'border-border/50 bg-card hover:border-[#06b6d4]/20 hover:bg-accent/30'
-                              }`}
-                            >
-                              <div className={`mt-0.5 p-1.5 rounded-lg ${isSelected ? type.bgColor : 'bg-muted'}`}>
-                                <Icon className={`h-4 w-4 ${isSelected ? type.color : 'text-muted-foreground'}`} />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <span className={`text-sm font-medium ${isSelected ? 'text-foreground' : 'text-muted-foreground'}`}>
-                                  {type.label}
-                                </span>
-                                <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
-                                  {type.description}
-                                </p>
-                              </div>
-                              <div
-                                className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border transition-colors mt-0.5 ${
+                <div className="max-h-[45vh] overflow-y-auto pr-1 agent-type-list-scroll">
+                  <div className="space-y-4 pr-1">
+                    {filteredCategories.map((category) => {
+                      const types = typesByCategory[category];
+                      if (!types) return null;
+                      return (
+                      <div key={category}>
+                        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                          {category}
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {types.map((type) => {
+                            const Icon = getIcon(type.icon);
+                            const isSelected = selectedTypeId === type.id;
+                            return (
+                              <button
+                                key={type.id}
+                                type="button"
+                                onClick={() => setSelectedTypeId(type.id)}
+                                className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
                                   isSelected
-                                    ? 'bg-[#06b6d4] border-[#06b6d4] text-white'
-                                    : 'border-border'
+                                    ? 'border-[#06b6d4]/40 bg-[#06b6d4]/5 ring-1 ring-[#06b6d4]/20'
+                                    : 'border-border/50 bg-card hover:border-[#06b6d4]/20 hover:bg-accent/30'
                                 }`}
                               >
-                                {isSelected && <Check className="h-3 w-3" />}
-                              </div>
-                            </button>
-                          );
-                        })}
+                                <div className={`mt-0.5 p-1.5 rounded-lg ${isSelected ? type.bgColor : 'bg-muted'}`}>
+                                  <Icon className={`h-4 w-4 ${isSelected ? type.color : 'text-muted-foreground'}`} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <span className={`text-sm font-medium ${isSelected ? 'text-foreground' : 'text-muted-foreground'}`}>
+                                    {type.label}
+                                  </span>
+                                  <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
+                                    {type.description}
+                                  </p>
+                                </div>
+                                <div
+                                  className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border transition-colors mt-0.5 ${
+                                    isSelected
+                                      ? 'bg-[#06b6d4] border-[#06b6d4] text-white'
+                                      : 'border-border'
+                                  }`}
+                                >
+                                  {isSelected && <Check className="h-3 w-3" />}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
