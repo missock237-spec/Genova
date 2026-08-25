@@ -16,6 +16,8 @@ const ICON_MAP: Record<string, React.ElementType> = {
   CreditCard, Send, Globe, Box, Brain, Video, Music,
   Cloud, GitBranch, FileText, ShoppingCart, Briefcase,
   Bell, Mail, Calendar, Zap, Shield, Puzzle, ImageIcon,
+  PenSquare: ImageIcon, Users: MessageSquare, MapPin: Globe,
+  Smartphone: MessageSquare, Activity: Zap, LayoutDashboard: Box,
 };
 
 function getIcon(name: string): React.ElementType {
@@ -37,6 +39,7 @@ interface CatalogPlugin {
   name: string;
   description: string;
   icon: string;
+  logoUrl?: string | null;
   categories: string[];
   authType: string;
   website: string;
@@ -47,6 +50,23 @@ interface ConnectedPlugin {
   appId: string;
   displayLabel?: string;
   isActive: boolean;
+}
+
+// ─── AppLogo : affiche le logo réel, fallback sur l'icône ───
+function AppLogo({ plugin, Icon, className }: { plugin: CatalogPlugin; Icon: React.ElementType; className?: string }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  if (plugin.logoUrl && !imgFailed) {
+    return (
+      <img
+        src={plugin.logoUrl}
+        alt={plugin.name}
+        loading="lazy"
+        onError={() => setImgFailed(true)}
+        className={`h-5 w-5 object-contain ${className || ''}`}
+      />
+    );
+  }
+  return <Icon className={`h-5 w-5 text-[#00F5FF] ${className || ''}`} />;
 }
 
 const CATEGORY_META: Record<string, { label: string; icon: React.ElementType; color: string }> = {
@@ -105,6 +125,13 @@ const CATEGORY_META: Record<string, { label: string; icon: React.ElementType; co
   Gaming:              { label: 'Gaming',              icon: MessageSquare,  color: 'text-purple-300' },
   Vidéoconférence:     { label: 'Vidéoconférence',     icon: Video,         color: 'text-pink-400' },
   Formulaires:         { label: 'Formulaires',         icon: FileText,      color: 'text-amber-200' },
+  Testing:             { label: 'Testing',             icon: Code2,         color: 'text-green-300' },
+  Product:             { label: 'Produit',             icon: Box,           color: 'text-amber-300' },
+  Data:                { label: 'Data',                icon: Database,      color: 'text-orange-300' },
+  Weather:             { label: 'Météo',               icon: Cloud,         color: 'text-cyan-300' },
+  Sales:               { label: 'Ventes',              icon: Briefcase,     color: 'text-teal-300' },
+  Community:           { label: 'Communauté',          icon: Globe,         color: 'text-blue-300' },
+  Messaging:           { label: 'Messagerie',          icon: Send,          color: 'text-cyan-300' },
 };
 
 export function IntegrationsView() {
@@ -231,7 +258,7 @@ export function IntegrationsView() {
           >
             Toutes
           </button>
-          {categories.slice(0, 8).map(cat => {
+          {categories.slice(0, 10).map(cat => {
             const meta = CATEGORY_META[cat];
             return (
               <button
@@ -272,8 +299,8 @@ export function IntegrationsView() {
                 <div className="p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-[#00F5FF]/10 flex items-center justify-center">
-                        <Icon className="h-5 w-5 text-[#00F5FF]" />
+                      <div className="w-10 h-10 rounded-lg bg-[#00F5FF]/10 flex items-center justify-center overflow-hidden">
+                        <AppLogo plugin={plugin} Icon={Icon} />
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
@@ -285,65 +312,65 @@ export function IntegrationsView() {
                         </p>
                       </div>
                     </div>
-                    {connLabel && <p className="text-xs text-[#00F5FF]/80 mb-2 truncate">Connecte : {connLabel}</p>}
-                    <p className="text-xs text-[#8A9099] line-clamp-2 mb-3">{plugin.description}</p>
-                    <div className="flex gap-2 flex-wrap mb-3">
-                      {plugin.categories.slice(0, 3).map(cat => {
-                        const meta = CATEGORY_META[cat];
-                        return (
-                          <span key={cat} className={`text-[10px] px-2 py-0.5 rounded-full bg-[#1C1E22] ${meta?.color || 'text-[#8A9099]'}`}>
-                            {meta?.label || cat}
-                          </span>
-                        );
-                      })}
-                    </div>
                   </div>
+                  {connLabel && <p className="text-xs text-[#00F5FF]/80 mb-2 truncate">Connecte : {connLabel}</p>}
+                  <p className="text-xs text-[#8A9099] line-clamp-2 mb-3">{plugin.description}</p>
+                  <div className="flex gap-2 flex-wrap mb-3">
+                    {plugin.categories.slice(0, 3).map(cat => {
+                      const meta = CATEGORY_META[cat];
+                      return (
+                        <span key={cat} className={`text-[10px] px-2 py-0.5 rounded-full bg-[#1C1E22] ${meta?.color || 'text-[#8A9099]'}`}>
+                          {meta?.label || cat}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
 
-                  {/* Actions row */}
-                  <div className="border-t border-[#1C1E22] px-5 py-3 flex items-center justify-between">
+                {/* Actions row */}
+                <div className="border-t border-[#1C1E22] px-5 py-3 flex items-center justify-between">
+                  <button
+                    onClick={() => setExpandedId(isExpanded ? null : plugin.id)}
+                    className="text-xs text-[#8A9099] hover:text-[#E6E8EC] flex items-center gap-1 transition"
+                  >
+                    {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                    Voir les actions
+                  </button>
+                  {isConnected ? (
                     <button
-                      onClick={() => setExpandedId(isExpanded ? null : plugin.id)}
-                      className="text-xs text-[#8A9099] hover:text-[#E6E8EC] flex items-center gap-1 transition"
+                      onClick={() => handleDisconnect(plugin.id)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition"
                     >
-                      {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                      Voir les actions
+                      Deconnecter
                     </button>
-                    {isConnected ? (
-                      <button
-                        onClick={() => handleDisconnect(plugin.id)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition"
-                      >
-                        Deconnecter
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setConnectDialog({ appId: plugin.id, appName: plugin.name, authType: plugin.authType });
-                          setConnectError('');
-                          setConnectForm({ apiKey: '', username: '', password: '', accessToken: '' });
-                        }}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#00F5FF]/10 text-[#00F5FF] hover:bg-[#00F5FF]/20 transition"
-                      >
-                        Connecter
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Expanded actions */}
-                  {isExpanded && (
-                    <div className="border-t border-[#1C1E22] px-5 py-3 space-y-2 max-h-60 overflow-y-auto">
-                      {Object.values(plugin.actions || {}).map(action => (
-                        <div key={action.id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-[#1C1E22]">
-                          <div>
-                            <p className="text-xs font-medium text-[#E6E8EC]">{action.name}</p>
-                            <p className="text-[10px] text-[#8A9099]">{action.method} {action.endpoint}</p>
-                          </div>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#1C1E22] text-[#8A9099]">{action.method}</span>
-                        </div>
-                      ))}
-                    </div>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setConnectDialog({ appId: plugin.id, appName: plugin.name, authType: plugin.authType });
+                        setConnectError('');
+                        setConnectForm({ apiKey: '', username: '', password: '', accessToken: '' });
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#00F5FF]/10 text-[#00F5FF] hover:bg-[#00F5FF]/20 transition"
+                    >
+                      Connecter
+                    </button>
                   )}
                 </div>
+
+                {/* Expanded actions */}
+                {isExpanded && (
+                  <div className="border-t border-[#1C1E22] px-5 py-3 space-y-2 max-h-60 overflow-y-auto">
+                    {Object.values(plugin.actions || {}).map(action => (
+                      <div key={action.id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-[#1C1E22]">
+                        <div>
+                          <p className="text-xs font-medium text-[#E6E8EC]">{action.name}</p>
+                          <p className="text-[10px] text-[#8A9099]">{action.method} {action.endpoint}</p>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#1C1E22] text-[#8A9099]">{action.method}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
