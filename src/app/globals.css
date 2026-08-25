@@ -602,7 +602,7 @@
 
 /* =========================================================
    MODERN ARCHITECTURE V2 - Glassmorphism & Animation Utilities
-   ========================================================= */
+
 .glass {
   background: rgba(14, 15, 17, 0.7);
   backdrop-filter: blur(12px);
@@ -649,3 +649,177 @@
 .animate-ping-slow {
   animation: ping-slow 2s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
+
+/* =========================================================
+   CHAT ANIMATIONS - Smooth message & typing effects
+
+/* Typing dots - elegant wave bounce */
+@keyframes typing-wave {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+.typing-dot {
+  animation: typing-wave 1.4s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Improved typing dots (smaller variant) */
+@keyframes typing-wave-sm {
+  0%, 60%, 100% {
+    transform: translateY(0) scale(1);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px) scale(1.15);
+    opacity: 1;
+  }
+}
+.typing-dot-improved {
+  animation: typing-wave-sm 1.2s ease-in-out infinite;
+}
+.typing-dot-improved:nth-child(2) {
+  animation-delay: 0.12s;
+}
+.typing-dot-improved:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
+/* Message slide-in from bottom */
+@keyframes msg-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.chat-msg-enter {
+  animation: msg-slide-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* User message slide from right */
+@keyframes msg-slide-right {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.chat-msg-user-enter {
+  animation: msg-slide-right 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Agent message fade + subtle glow */
+@keyframes msg-fade-glow {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+    box-shadow: 0 0 0 rgba(0, 245, 255, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    box-shadow: 0 0 16px rgba(0, 245, 255, 0.06);
+  }
+}
+.chat-msg-agent-enter {
+  animation: msg-fade-glow 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Input focus glow ring */
+@keyframes input-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(0, 245, 255, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(0, 245, 255, 0.15);
+  }
+}
+.chat-input-glow:focus-within {
+  box-shadow: 0 0 0 1px rgba(0, 245, 255, 0.3), 0 0 20px -4px rgba(0, 245, 255, 0.12);
+  border-color: rgba(0, 245, 255, 0.4) !important;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+/* Send button pulse on hover */
+@keyframes send-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 245, 255, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(0, 245, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 245, 255, 0); }
+}
+.chat-send-btn:not(:disabled):hover {
+  animation: send-pulse 1.5s ease-out infinite;
+}
+
+/* Send button press scale */
+.chat-send-btn:not(:disabled):active {
+  transform: scale(0.92);
+}
+.chat-send-btn {
+  transition: transform 0.15s ease, opacity 0.2s ease, background 0.2s ease;
+}
+
+/* Typing indicator container with subtle breathing */
+@keyframes typing-breathe {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+.chat-typing-container {
+  animation: typing-breathe 2s ease-in-out infinite;
+}
+
+/* Message bubble hover lift */
+.chat-msg-bubble {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.chat-msg-bubble:hover {
+  transform: translateY(-1px);
+}
+
+/* Streaming text shimmer effect on the container */
+@keyframes streaming-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.agent-response-streaming-badge {
+  background-size: 200% auto;
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 184, 0, 0.08) 0%,
+    rgba(255, 184, 0, 0.18) 50%,
+    rgba(255, 184, 0, 0.08) 100%
+  );
+  animation: streaming-shimmer 3s linear infinite, stream-pulse 2s ease-in-out infinite;
+}
+
+/* Welcome state floating animation */
+@keyframes float-gentle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.chat-welcome-float {
+  animation: float-gentle 3s ease-in-out infinite;
+}
+
+/* Quick action button hover glow */
+@keyframes action-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 245, 255, 0); }
+  50% { box-shadow: 0 0 12px 2px rgba(0, 245, 255, 0.1); }
+}
+

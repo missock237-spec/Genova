@@ -9,7 +9,7 @@
 //  - Network-first pour tout (comme v6).
 // ============================================================
 
-const CACHE_VERSION = 'gen3ia-v7';
+const CACHE_VERSION = 'gen3ia-v0.10.0-e4d8d161';
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
 
 const PRECACHE_URLS = ['/manifest.json', '/icon-192.png', '/icon-512.png'];

@@ -493,7 +493,7 @@ export const AgentResponse = memo(function AgentResponse({
     : null;
 
   return (
-    <div className={cn('agent-response-container', className)}>
+    <div className={cn('agent-response-container', isStreaming ? 'chat-msg-agent-enter' : '', className)}>
       {/* Agent identity header */}
       <div className="agent-response-header">
         <div className="agent-response-avatar">

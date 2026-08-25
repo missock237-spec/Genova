@@ -1,6 +1,6 @@
 {
   "name": "gen3ia",
-  "version": "1.0.0",
+  "version": "0.10.0",
   "private": true,
   "packageManager": "npm@11.16.0",
   "scripts": {

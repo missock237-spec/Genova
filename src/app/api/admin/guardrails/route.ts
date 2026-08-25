@@ -16,7 +16,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { applySecurity } from "@/lib/security";
 
-
 export const dynamic = "force-dynamic";
 
 export async function OPTIONS(request: NextRequest) {

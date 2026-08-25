@@ -355,8 +355,391 @@ function AgentsTab({
 // Tab 2: Chat — Délégué au composant unifié ChatPanel
 // ============================================================
 
-function ChatTab({ agents, onOpenCreate }: { agents: Agent[]; onOpenCreate: () => void }) {
-  return <ChatPanel agents={agents} onOpenCreate={onOpenCreate} />;
+function ChatTab({ agents }: { agents: Agent[] }) {
+  const { user } = useAuthStore();
+  const { incMessageCount, trackAdEvent, creditBalance, lastRewardMessage, rewardStats } = useAdContext();
+  const [selectedAgentId, setSelectedAgentId] = useState<string>('');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const userPlan = user?.plan || 'free';
+  const isPaid = userPlan !== 'free';
+  const selectedAgent = agents.find((a) => a.id === selectedAgentId);
+  const remainingToday = rewardStats.maxPerDay - rewardStats.balance.today;
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Auto-select first active agent
+  useEffect(() => {
+    if (agents.length > 0 && !selectedAgentId) {
+      const firstActive = agents.find((a) => a.status === 'active');
+      if (firstActive) setSelectedAgentId(firstActive.id);
+      else setSelectedAgentId(agents[0].id);
+    }
+  }, [agents, selectedAgentId]);
+
+  // Reset messages on agent change
+  useEffect(() => {
+    setMessages([]);
+    setError(null);
+  }, [selectedAgentId]);
+
+  const handleSend = async () => {
+    if (!input.trim() || isTyping || !selectedAgentId) return;
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: input,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    const sentText = input;
+    setInput('');
+    setIsTyping(true);
+    setError(null);
+    incMessageCount();
+
+    try {
+      const res = await fetch(`/api/agents/${selectedAgentId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', credentials: 'include' },
+        body: JSON.stringify({ message: sentText }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: `Erreur ${res.status}` }));
+        throw new Error(errData.error || `Erreur ${res.status}`);
+      }
+
+      const contentType = res.headers.get('content-type') || '';
+
+      if (contentType.includes('text/event-stream')) {
+        const reader = res.body?.getReader();
+        const decoder = new TextDecoder();
+        let fullContent = '';
+
+        if (reader) {
+          const agentMsgId = (Date.now() + 1).toString();
+          setMessages((prev) => [
+            ...prev,
+            { id: agentMsgId, role: 'agent', content: '', timestamp: new Date() },
+          ]);
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6);
+                if (data === '[DONE]') break;
+                try {
+                  const parsed = JSON.parse(data);
+                  if (parsed.delta) {
+                    fullContent += parsed.delta;
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const lastMsg = updated[updated.length - 1];
+                      if (lastMsg && lastMsg.role === 'agent') {
+                        updated[updated.length - 1] = { ...lastMsg, content: fullContent };
+                      }
+                      return updated;
+                    });
+                  } else if (parsed.content) {
+                    fullContent = parsed.content;
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      const lastMsg = updated[updated.length - 1];
+                      if (lastMsg && lastMsg.role === 'agent') {
+                        updated[updated.length - 1] = { ...lastMsg, content: fullContent };
+                      }
+                      return updated;
+                    });
+                  }
+                } catch {
+                  // Skip invalid JSON chunks
+                }
+              }
+            }
+          }
+
+          if (!fullContent) {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const lastMsg = updated[updated.length - 1];
+              if (lastMsg && lastMsg.role === 'agent') {
+                updated[updated.length - 1] = {
+                  ...lastMsg,
+                  content: "L'agent a traité votre demande.",
+                };
+              }
+              return updated;
+            });
+          }
+        }
+      } else {
+        const data = await res.json();
+        const agentMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'agent',
+          content: data.response || data.content || "L'agent a répondu.",
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, agentMsg]);
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Erreur de communication';
+      setError(errMsg);
+      const fallbackMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'agent',
+        content: `Désolé, je n'ai pas pu contacter le serveur : ${errMsg}. Veuillez réessayer.`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, fallbackMsg]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const activeAgents = agents.filter((a) => a.status === 'active');
+  const inactiveAgents = agents.filter((a) => a.status !== 'active');
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-16rem)]">
+      {/* Ad credit bar */}
+      {isPaid && (
+        <div className="flex items-center justify-between px-4 py-2 border-b bg-gradient-to-r from-emerald-500/5 to-green-500/5">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-emerald-500" />
+            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <strong>{creditBalance.total}</strong> crédit{creditBalance.total > 1 ? 's' : ''} gagné{creditBalance.total > 1 ? 's' : ''}
+            </span>
+            {remainingToday > 0 && (
+              <span className="text-[10px] text-muted-foreground">({remainingToday} dispo)</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {lastRewardMessage && (
+        <div className="px-4 py-1.5 bg-emerald-500/10 border-b border-emerald-500/20 text-center">
+          <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+            <Sparkles className="h-3 w-3 inline mr-1" />
+            {lastRewardMessage}
+          </span>
+        </div>
+      )}
+
+      {/* Agent selector */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+        <Bot className="h-4 w-4 text-[#06b6d4] flex-shrink-0" />
+        <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
+          <SelectTrigger className="flex-1">
+            <SelectValue placeholder="Sélectionner un agent..." />
+          </SelectTrigger>
+          <SelectContent>
+            {activeAgents.length > 0 && (
+              <>
+                <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">Agents actifs</div>
+                {activeAgents.map((agent) => (
+                  <SelectItem key={agent.id} value={agent.id}>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                      {agent.name}
+                    </div>
+                  </SelectItem>
+                ))}
+              </>
+            )}
+            {inactiveAgents.length > 0 && (
+              <>
+                <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">Agents inactifs</div>
+                {inactiveAgents.map((agent) => (
+                  <SelectItem key={agent.id} value={agent.id}>
+                    <div className="flex items-center gap-2">
+                      <XCircle className="h-3 w-3 text-muted-foreground" />
+                      {agent.name}
+                    </div>
+                  </SelectItem>
+                ))}
+              </>
+            )}
+            {agents.length === 0 && (
+              <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                Aucun agent disponible. Créez-en un dans l'onglet « Mes Agents ».
+              </div>
+            )}
+          </SelectContent>
+        </Select>
+        {selectedAgent && (
+          <Badge
+            variant="outline"
+            className={`text-[10px] whitespace-nowrap ${
+              selectedAgent.status === 'active'
+                ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                : 'bg-muted text-muted-foreground'
+            }`}
+          >
+            {selectedAgent.status === 'active' ? 'Actif' : 'Inactif'}
+          </Badge>
+        )}
+      </div>
+
+      {/* Error banner */}
+      {error && (
+        <Alert variant="destructive" className="mx-4 mt-2 py-2">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="text-xs">{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+        {messages.length === 0 && !selectedAgentId && (
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground hardtech-reveal">
+            <div className="p-4 rounded-2xl bg-[#06b6d4]/10 mb-4 chat-welcome-float">
+              <Bot className="h-12 w-12 text-[#06b6d4]/60" />
+            </div>
+            <p className="text-sm font-medium text-foreground/80">Sélectionnez un agent</p>
+            <p className="text-xs mt-1.5 text-center max-w-xs text-muted-foreground/70">
+              Choisissez un agent dans le menu ci-dessus pour démarrer une conversation.
+            </p>
+            <div className="mt-5 flex items-center gap-1.5">
+              <span className="typing-dot w-1.5 h-1.5 rounded-full bg-[#06b6d4]/50" />
+              <span className="typing-dot w-1.5 h-1.5 rounded-full bg-[#06b6d4]/50" />
+              <span className="typing-dot w-1.5 h-1.5 rounded-full bg-[#06b6d4]/50" />
+            </div>
+          </div>
+        )}
+        {messages.length === 0 && selectedAgent && (
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground hardtech-reveal">
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-[#06b6d4]/15 to-[#8b5cf6]/10 mb-4 chat-welcome-float border border-[#06b6d4]/10">
+              <Bot className="h-12 w-12 text-[#06b6d4]/70" />
+            </div>
+            <p className="text-sm font-medium text-foreground/90">Conversation avec {selectedAgent.name}</p>
+            <p className="text-xs mt-1.5 text-center max-w-xs text-muted-foreground/60 leading-relaxed">
+              {selectedAgent.description || 'Envoyez un message pour commencer.'}
+            </p>
+            <div className="mt-6 flex items-center gap-2 text-xs text-[#06b6d4]/50">
+              <Zap className="h-3 w-3" />
+              <span>Prêt à répondre</span>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            </div>
+          </div>
+        )}
+
+        {messages.map((msg, idx) => (
+          <div key={msg.id}>
+            {msg.role === 'user' ? (
+              <div className="flex gap-3 justify-end chat-msg-user-enter">
+                <div className="max-w-[80%] rounded-2xl px-4 py-2.5 bg-gradient-to-br from-[#06b6d4] to-[#0891b2] text-white rounded-tr-sm chat-msg-bubble shadow-lg shadow-[#06b6d4]/10">
+                  <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
+                  <p className="text-[10px] mt-1.5 text-white/40 flex items-center gap-1">
+                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <CheckCircle2 className="h-2.5 w-2.5 text-white/30" />
+                  </p>
+                </div>
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#06b6d4] to-[#0891b2] flex items-center justify-center flex-shrink-0 shadow-md shadow-[#06b6d4]/15">
+                  <User className="h-4 w-4 text-white" />
+                </div>
+              </div>
+            ) : (
+              <div className={isTyping && idx === messages.length - 1 ? 'chat-msg-agent-enter' : ''}>
+                <AgentResponse
+                  content={msg.content}
+                  agentName={selectedAgent?.name}
+                  avatar={selectedAgent?.avatar}
+                  timestamp={msg.timestamp.toISOString()}
+                  isStreaming={isTyping && idx === messages.length - 1}
+                />
+              </div>
+            )}
+            {msg.role === 'agent' && idx > 0 && (
+              <div className="mt-2">
+                <AdBanner
+                  userPlan={userPlan}
+                  placement="agent-response"
+                  messageIndex={idx}
+                  onAdViewed={() => trackAdEvent(`ad_response_${idx}`, 'view', userPlan)}
+                  onAdClicked={() => trackAdEvent(`ad_response_${idx}`, 'click', userPlan)}
+                />
+              </div>
+            )}
+          </div>
+        ))}
+
+        {isTyping && messages.length > 0 && messages[messages.length - 1].role === 'user' && (
+          <div className="flex gap-3 chat-typing-container">
+            <div className="w-8 h-8 rounded-full bg-[#06b6d4]/10 flex items-center justify-center flex-shrink-0 border border-[#06b6d4]/15">
+              <Bot className="h-4 w-4 text-[#06b6d4]" />
+            </div>
+            <div className="bg-muted/80 rounded-2xl rounded-tl-sm px-4 py-3.5 border border-border/30">
+              <div className="flex items-center gap-1.5">
+                <span className="typing-dot w-2 h-2 rounded-full bg-[#06b6d4]/60" />
+                <span className="typing-dot w-2 h-2 rounded-full bg-[#06b6d4]/60" />
+                <span className="typing-dot w-2 h-2 rounded-full bg-[#06b6d4]/60" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input area with BorderBeam */}
+      <div className="p-4">
+        <BorderBeam size="sm" colorVariant="colorful">
+          <div className="flex gap-2 rounded-xl border bg-background p-1 chat-input-glow transition-all duration-300">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                selectedAgent?.status === 'active'
+                  ? `Écrivez votre message à ${selectedAgent.name}...`
+                  : selectedAgent
+                    ? 'Cet agent est inactif'
+                    : ''
+              }
+              className="flex-1 min-h-[44px] max-h-32 rounded-lg bg-transparent px-3 py-2.5 text-sm resize-none focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-200"
+              rows={1}
+              disabled={!selectedAgentId || selectedAgent?.status !== 'active'}
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || isTyping || !selectedAgentId || selectedAgent?.status !== 'active'}
+              className="chat-send-btn h-[44px] w-[44px] rounded-lg bg-gradient-to-br from-[#06b6d4] to-[#8b5cf6] text-white hover:from-[#06b6d4]/90 hover:to-[#8b5cf6]/90 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center shrink-0"
+            >
+              {isTyping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </button>
+          </div>
+        </BorderBeam>
+        {selectedAgent && selectedAgent.status !== 'active' && (
+          <p className="text-[10px] text-amber-500 mt-1.5 px-1">Cet agent est inactif. Activez-le pour discuter.</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ============================================================
