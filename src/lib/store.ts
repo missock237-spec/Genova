@@ -120,7 +120,8 @@ export type ViewType =
   | 'notifications'
   | 'scheduler'
   | 'agent-chat'
-  | 'prompts';
+  | 'prompts'
+  | 'generation';
 
 interface AppState {
   currentView: ViewType;
@@ -151,7 +152,7 @@ export type ModernViewType =
   | 'dashboard' | 'agents' | 'agent-chat' | 'automation' | 'guardrails'
   | 'coordination' | 'settings' | 'approvals' | 'analytics' | 'billing'
   | 'developers' | 'voice' | 'images' | 'integrations' | 'notifications'
-  | 'scheduler' | 'prompts';
+  | 'scheduler' | 'prompts' | 'generation';
 
 interface NotificationItem {
   id: string;
