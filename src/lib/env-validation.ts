@@ -7,6 +7,9 @@
 // - Erreur lisible si une variable CRITIQUE manque (fail-fast, pas d'échec silencieux)
 // - Défauts sûrs pour les options optionnelles
 //
+// NOTE : le projet est migré de PostgreSQL/Prisma vers Cloud Firestore.
+// `DATABASE_URL` n'est plus requis (champ optionnel de rétrocompatibilité).
+//
 // Critère de la phase : « Prévenir les erreurs silencieuses en production. »
 // ============================================================
 import { z } from 'zod';
@@ -41,8 +44,11 @@ export const EnvSchema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
     .default('development'),
-  DATABASE_URL: reqString.default('postgresql://gen3ia:gen3ia@localhost:5432/gen3ia_dev'),
-  AUTH_SECRET: reqString.default(process.env.NEXT_PUBLIC_APP_URL?.startsWith('http') ? 'dev-insecure-secret' : ''), // échoue proprement si vide en prod
+  // Optionnel : conservé pour rétrocompatibilité (migration Firestore).
+  DATABASE_URL: optString,
+  // AUTH_SECRET critique en production, vérifié dans validateEnv().
+  // En dev, un défaut inoffensif évite de bloquer le boot.
+  AUTH_SECRET: optString.default('dev-insecure-secret'),
   NEXTAUTH_SECRET: optString,
   NEXTAUTH_URL: optString,
   NEXT_PUBLIC_APP_URL: optString.default('http://localhost:3000'),
@@ -125,24 +131,15 @@ export type EnvConfig = z.infer<typeof EnvSchema>;
  */
 const conditionalRequirements: Array<{
   enabled: keyof EnvConfig;
-  required: keyof z.infer<typeof EnvSchema>[];
+  required: (keyof EnvConfig)[];
   label: string;
 }> = [
-// @ts-ignore — type narrowing pending, see refactor ticket
   { enabled: 'OPENAI_ENABLED', required: ['OPENAI_API_KEY'], label: 'OpenAI' },
-// @ts-ignore — type narrowing pending, see refactor ticket
   { enabled: 'ANTHROPIC_ENABLED', required: ['ANTHROPIC_API_KEY'], label: 'Anthropic' },
-// @ts-ignore — type narrowing pending, see refactor ticket
   { enabled: 'GROQ_ENABLED', required: ['GROQ_API_KEY'], label: 'Groq' },
-  {
-    enabled: 'HUGGINGFACE_ENABLED',
-// @ts-ignore — type narrowing pending, see refactor ticket
-    required: ['HUGGINGFACE_TOKEN'],
-    label: 'Hugging Face',
-  },
+  { enabled: 'HUGGINGFACE_ENABLED', required: ['HUGGINGFACE_TOKEN'], label: 'Hugging Face' },
   {
     enabled: 'STRIPE_ENABLED',
-// @ts-ignore — type narrowing pending, see refactor ticket
     required: [
       'STRIPE_SECRET_KEY',
       'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
@@ -152,13 +149,11 @@ const conditionalRequirements: Array<{
   },
   {
     enabled: 'SEBPAY_ENABLED',
-// @ts-ignore — type narrowing pending, see refactor ticket
     required: ['SEBPAY_API_KEY', 'SEBPAY_API_SECRET'],
     label: 'SebPay',
   },
   {
     enabled: 'SMTP_ENABLED',
-// @ts-ignore — type narrowing pending, see refactor ticket
     required: ['SMTP_USER', 'SMTP_PASS'],
     label: 'SMTP/Email',
   },
@@ -199,9 +194,8 @@ export function validateEnv(env: NodeJS.ProcessEnv = process.env): EnvConfig {
     // Vérification croisée des intégrations activées
     const missing: string[] = [];
     for (const req of conditionalRequirements) {
-      if (!cfg[req.enabled as keyof EnvConfig]) continue;
-// @ts-ignore — type narrowing pending, see refactor ticket
-      const missingKeys = (req.required as string[]).filter(
+      if (!cfg[req.enabled]) continue;
+      const missingKeys = req.required.filter(
         (k) => !(cfg as Record<string, unknown>)[k],
       );
       if (missingKeys.length > 0) {
@@ -236,24 +230,4 @@ export function getEnv(): EnvConfig {
 /** Vide le cache (utile pour les tests). */
 export function resetEnvCache(): void {
   _env = undefined;
-}
-// Ajoutez dans la fonction validate()
-const requiredVars = [
-  'NEXT_PUBLIC_FIREBASE_API_KEY',
-  'FIREBASE_SERVICE_ACCOUNT',
-  'REDIS_URL',
-  // ... autres variables
-];
-
-for (const v of requiredVars) {
-  if (!process.env[v]) {
-    throw new Error(`Missing required env variable: ${v}`);
-  }
-}
-
-// Vérification du format du service account
-try {
-  JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT!);
-} catch {
-  throw new Error('FIREBASE_SERVICE_ACCOUNT is not valid JSON');
 }
