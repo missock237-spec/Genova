@@ -319,6 +319,7 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
   const [name, setName] = useState(editAgent?.name || '');
   const [description, setDescription] = useState(editAgent?.description || '');
   const [selectedTypeId, setSelectedTypeId] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
   const [systemPrompt, setSystemPrompt] = useState(
     (existingConfig.systemPrompt as string) || ''
   );
@@ -374,6 +375,7 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
       setName(editAgent?.name || '');
       setDescription(editAgent?.description || '');
       setSelectedTypeId('');
+      setCategoryFilter('all');
       setSystemPrompt(editAgent ? ((existingConfig.systemPrompt as string) || '') : '');
       setKnowledge(editAgent ? ((existingConfig.knowledge as string) || '') : '');
       setModel((existingConfig.model as string) || 'default');
@@ -386,6 +388,10 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
   }, [open]);
 
   // ── Group types by category ──────────────────
+  const allCategories = useMemo(() => {
+    return [...new Set(AGENT_TYPE_CATALOG.map((t) => t.category))];
+  }, []);
+
   const typesByCategory = useMemo(() => {
     const groups: Record<string, AgentTypeOption[]> = {};
     for (const t of AGENT_TYPE_CATALOG) {
@@ -394,6 +400,12 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
     }
     return groups;
   }, []);
+
+  // Filtered categories based on dropdown selection
+  const filteredCategories = useMemo(() => {
+    if (categoryFilter === 'all') return allCategories;
+    return allCategories.filter((c) => c === categoryFilter);
+  }, [categoryFilter, allCategories]);
 
   // ── Submit ───────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
@@ -486,16 +498,32 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
 
               {/* ── Step 2: Sélection du type (20 choix) ── */}
               <div className="space-y-3">
-                <Label className="text-base flex items-center gap-1.5">
-                  <Zap className="h-4 w-4 text-[#06b6d4]" />
-                  Type d'agent <span className="text-destructive">*</span>
-                </Label>
+                <div className="flex items-center justify-between gap-3">
+                  <Label className="text-base flex items-center gap-1.5">
+                    <Zap className="h-4 w-4 text-[#06b6d4]" />
+                    Type d'agent <span className="text-destructive">*</span>
+                  </Label>
+                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                    <SelectTrigger className="w-[200px] rounded-xl h-9 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Toutes les catégories</SelectItem>
+                      {allCategories.map((cat) => (
+                        <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <p className="text-xs text-muted-foreground">
                   Choisissez le type d'agent adapté à votre besoin. Les compétences seront automatiquement sélectionnées selon le type.
                 </p>
 
                 <div className="space-y-4">
-                  {Object.entries(typesByCategory).map(([category, types]) => (
+                  {filteredCategories.map((category) => {
+                    const types = typesByCategory[category];
+                    if (!types) return null;
+                    return (
                     <div key={category}>
                       <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                         {category}
