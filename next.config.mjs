@@ -83,11 +83,11 @@ const nextConfig = {
     ],
     // Smaller CSS via dead-code elimination
     optimizeCss: true,
-    // Reduce memory usage during build (matters for monorepos)
-    workerThreads: true,
-    // Modern cookie behavior (more secure)
-    // (Next.js 15.5+ reads this)
-    cookieUpdateSegmentation: true,
+    // NOTE: workerThreads disabled — incompatible with the custom webpack(config)
+    // function below (functions are not structured-cloneable across worker threads,
+    // triggers "DataCloneError" during build). Re-enable only after refactoring
+    // webpack customizations into a static config.
+    // workerThreads: true,
   },
 
   // ——— Optimisation des images ———
