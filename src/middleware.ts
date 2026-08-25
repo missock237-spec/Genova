@@ -10,13 +10,6 @@
 //    withAuth).
 //  - Les routes ADMIN exigent TOUJOURS le rôle 'admin' (custom claim
 //    Firebase Auth), jamais court-circuité par une api key non validée.
-//
-//  HEADERS DE SÉCURITÉ :
-//  - CSP durcie (nonce per-request) via src/lib/csp.ts
-//  - HSTS, COOP, COEP, CORP, Permissions-Policy, etc. via src/lib/security-headers.ts
-//  - Un nonce unique est généré par requête et propagé à Next.js via
-//    l'header de requête "x-nonce" (Next.js l'applique automatiquement à
-//    ses <script> inline).
 // ============================================================
 import { SESSION_COOKIE_NAME } from '@/lib/firebase/config';
 import { generateCspNonce, buildCspHeader } from '@/lib/csp';
@@ -32,7 +25,7 @@ import {
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// P1 — Rate limiting (roadmap qualité). Edge-safe : store mémoire/Redis injecté.
+// P1 — Rate limiting. Edge-safe : store mémoire/Redis injecté.
 import { rateLimit } from '@/lib/security/rate-limit';
 
 // Quotas de rate limiting (P1). Les clés API ont un quota supérieur.
@@ -85,23 +78,6 @@ const ADMIN_ROUTES = [
   '/api/evolution/',
 ];
 
-// Routes sensibles (LLM coûteux) : vérifiées par withAuth (couche 2).
-const SENSITIVE_RESOURCE_ROUTES = [
-  '/api/ai-server/',
-  '/api/ai/',
-  '/api/audio/',
-  '/api/analytics/',
-  '/api/media/',
-  '/api/images/',
-  '/api/videos/',
-  '/api/multimodal/',
-  '/api/generation/',
-  '/api/llm/',
-  '/api/rag/',
-  '/api/compute/',
-  '/api/browser/',
-];
-
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 function matchesRoute(pathname: string, route: string): boolean {
@@ -109,7 +85,7 @@ function matchesRoute(pathname: string, route: string): boolean {
 }
 
 /**
- * Vérifie la présence d'un session cookie Firebase SANS importer firebase-admin
+ * Vérifie la présence d'un session cookie SANS importer firebase-admin
  * (interdit en Edge Runtime — voir build Next.js). La vérification
  * cryptographique est reportée sur la couche 2 (withAuth) qui s'exécute en
  * Node.js Runtime. Ici on ne fait qu'une vérification de présence pour
@@ -160,14 +136,7 @@ export async function middleware(request: NextRequest) {
     // Pages publiques (auth) : accessibles sans session
     // + vues SPA (toutes servies par / via zustand currentView)
     const PUBLIC_PAGES = [
-      '/',
-      '/login',
-      '/register',
-      '/forgot-password',
-      '/reset-password',
-      '/verify-email',
-      // Vues SPA — toutes gérées côté client par le switch renderView()
-      // Le middleware doit les laisser passer pour éviter une 307 vers /
+      '/', '/login', '/register', '/forgot-password', '/reset-password', '/verify-email',
       '/dashboard', '/agents', '/agent-chat', '/automation', '/guardrails',
       '/coordination', '/settings', '/approvals', '/analytics', '/billing',
       '/developers', '/voice', '/images', '/integrations', '/notifications',
@@ -178,8 +147,6 @@ export async function middleware(request: NextRequest) {
       return response;
     }
 
-    // Toute autre page doit passer par le dashboard (SPA à /)
-    // Redirige vers / qui gère l'auth côté client
     const dashboardUrl = request.nextUrl.clone();
     dashboardUrl.pathname = '/';
     return NextResponse.redirect(dashboardUrl, { headers: response.headers });
@@ -212,28 +179,42 @@ export async function middleware(request: NextRequest) {
   const normalizedPathname = pathname.replace(/^\/api\/v\d+(?:\.\d+)?/, '/api');
 
   // 2.bis — P1 Rate limiting
+  // FIX « Failed to fetch keys » : le quota anonyme par IP ne s'applique QU'aux
+  // requêtes NON authentifiées. Une session valide (cookie gen3ia_session — JWT
+  // standalone ou Firebase) n'est PAS limitée par IP, sinon le dashboard SPA, qui
+  // émet plusieurs appels /api/* au montage (hydrate, compteurs, navigation),
+  // dépassait RL_MAX_ANON et faisait échouer GET /api/keys avec 429 → le client
+  // montrait « Failed to fetch keys ».
+  const sessionCookieForRl = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  const sessionForRl = await verifyFirebaseSession(sessionCookieForRl);
   const apiKeyRl = request.headers.get('x-api-key');
-  const clientIp =
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    request.headers.get('x-real-ip') ??
-    'unknown';
-  const rlIdentity = apiKeyRl ? `apikey:${apiKeyRl}` : `ip:${clientIp}`;
-  const rlResult = await rateLimit({
-    key: rlIdentity,
-    windowSec: RL_WINDOW_SEC,
-    max: apiKeyRl ? RL_MAX_APIKEY : RL_MAX_ANON,
-    bypass: false,
-  });
-  response.headers.set('X-RateLimit-Limit', String(apiKeyRl ? RL_MAX_APIKEY : RL_MAX_ANON));
-  if (!rlResult.ok) {
-    const retryAfterSec = rlResult.retryAfterSec;
-    const rlRes = NextResponse.json(
-      { error: 'Too Many Requests', retryAfterSec },
-      { status: 429, headers: response.headers },
-    );
-    rlRes.headers.set('Retry-After', String(retryAfterSec));
-    rlRes.headers.set('X-RateLimit-Remaining', '0');
-    return rlRes;
+  const rlIsAnonymous = !sessionForRl && !apiKeyRl;
+
+  if (rlIsAnonymous) {
+    const clientIp =
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+      request.headers.get('x-real-ip') ??
+      'unknown';
+    const rlResult = await rateLimit({
+      key: `ip:${clientIp}`,
+      windowSec: RL_WINDOW_SEC,
+      max: RL_MAX_ANON,
+      bypass: false,
+    });
+    response.headers.set('X-RateLimit-Limit', String(RL_MAX_ANON));
+    if (!rlResult.ok) {
+      const retryAfterSec = rlResult.retryAfterSec;
+      const rlRes = NextResponse.json(
+        { error: 'Too Many Requests', retryAfterSec },
+        { status: 429, headers: response.headers },
+      );
+      rlRes.headers.set('Retry-After', String(retryAfterSec));
+      rlRes.headers.set('X-RateLimit-Remaining', '0');
+      return rlRes;
+    }
+  } else {
+    // Authentifié (session) ou clé API : budget élevé / non limité par IP.
+    response.headers.set('X-RateLimit-Limit', String(apiKeyRl ? RL_MAX_APIKEY : RL_MAX_ANON));
   }
 
   // 3. Routes publiques (liste stricte)
@@ -242,8 +223,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // 4. DENY-BY-DEFAULT : une auth est requise.
-  const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-  const session = await verifyFirebaseSession(sessionCookie);
+  const session = await verifyFirebaseSession(sessionCookieForRl);
 
   const apiKey = request.headers.get('x-api-key');
   const hasBearer = request.headers.get('authorization')?.startsWith('Bearer ');
