@@ -101,7 +101,11 @@ export function ApiKeysManager() {
         body: JSON.stringify({ name: newKeyName, scopes: Array.from(selectedScopes) }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error((data?.error) || describeFetchError(res.status, 'Failed to create key'));
+      if (!res.ok) {
+        const detail = data?.detail ? ` (${data.detail})` : '';
+        const step = data?.step ? ` [étape: ${data.step}]` : '';
+        throw new Error((data?.error) || describeFetchError(res.status, 'Failed to create key') + detail + step);
+      }
       setNewlyCreatedKey(data.key);
       setNewKeyName('');
       await fetchKeys();

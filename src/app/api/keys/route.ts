@@ -57,21 +57,23 @@ async function requireUser(request: NextRequest): Promise<{ userId: string; ok: 
 }
 
 export async function POST(request: NextRequest) {
+  let step = 'init';
   try {
     // Production guard : API_KEY_HASH_SALT doit être défini en production.
-    // En dev local, le sel par défaut (sans pepper) est acceptable.
     if (process.env.NODE_ENV === 'production' && !process.env.API_KEY_HASH_SALT) {
       log.error('API_KEY_HASH_SALT non défini en production — création de clé bloquée');
       return NextResponse.json(
-        { error: 'Configuration serveur incomplète. Contactez l\'administrateur.' },
+        { error: 'Configuration serveur incomplète (API_KEY_HASH_SALT manquant).', code: 'MISSING_SALT' },
         { status: 503 },
       );
     }
 
+    step = 'auth';
     const auth = await requireUser(request);
     if (!auth.ok) return auth.res;
     const userId = auth.userId;
 
+    step = 'parse-body';
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: 'Corps JSON invalide' }, { status: 400 });
@@ -90,7 +92,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // expiresInDays : entier borné ([1, MAX_EXPIRY_DAYS]) ou null = sans expiration.
     const validatedExpiry = normalizeExpiryDays(body.expiresInDays);
     if (validatedExpiry === 'invalid') {
       return NextResponse.json({
@@ -99,11 +100,16 @@ export async function POST(request: NextRequest) {
     }
     const expiresAt = validatedExpiry ? new Date(Date.now() + validatedExpiry * 86400000) : null;
 
-    // Sécurité : on ne persiste JAMAIS la clé brute — seulement son empreinte.
+    step = 'generate-key';
     const rawKey = generateApiKey();
+
+    step = 'hash-key';
     const keyHash = hashApiKey(rawKey);
+
+    step = 'build-id';
     const id = `key_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
+    step = 'firestore-write';
     await db.apiKey.createWithId(id, {
       userId,
       name,
@@ -116,7 +122,6 @@ export async function POST(request: NextRequest) {
 
     log.info('API key created', { name, scopes, userId });
 
-    // La clé brute n'est retournée qu'ici, une seule fois.
     return NextResponse.json({
       success: true,
       key: rawKey,
@@ -126,8 +131,14 @@ export async function POST(request: NextRequest) {
       expiresAt: expiresAt?.toISOString() ?? null,
     });
   } catch (error) {
-    log.error('API key creation error', { error: error instanceof Error ? error.message : String(error) });
-    return NextResponse.json({ error: 'Erreur lors de la création' }, { status: 500 });
+    const msg = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+    log.error('API key creation error', { step, error: msg, stack });
+    console.error(`[api-keys] POST failed at step="${step}"`, error);
+    return NextResponse.json(
+      { error: 'Erreur lors de la création', detail: msg, step },
+      { status: 500 },
+    );
   }
 }
 
