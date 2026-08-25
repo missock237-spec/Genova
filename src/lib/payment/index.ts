@@ -1,180 +1,69 @@
 // ============================================================
-// PAIEMENT UNIFIÉ — Orchestrateur unique des fournisseurs
+// PAIEMENTS — Orchestrateur à deux fournisseurs
 // ============================================================
-//  Centralise le choix du fournisseur en fonction de la configuration :
-//   - Chariow  → redirection web (Orange Money, MTN MoMo, Wave, Carte)
-//   - Campay   → push USSD direct Mobile Money (Cameroun)
-//   - Stripe   → carte bancaire internationale (optionnel)
+//  Règle métier : exactement 2 fournisseurs de paiement.
+//   - CHARIOW  → abonnements (plans + packs de crédits)
+//   - SEBPAY   → marketplace de prompts (Mobile Money + payout créateur)
 //
-//  Les adaptateurs historiques (sebpay, subpay) sont conservés ailleurs
-//  pour la rétro-compatibilité des imports, mais ce module est la source
-//  de vérité pour les nouvelles intégrations.
+//  Ce module est la source de vérité. Il n'importe AUCUN autre provider.
 // ============================================================
 
 import { chariow } from '@/lib/payment/chariow';
-import { campay } from '@/lib/payment/campay';
+import { sebpayMarketplace } from '@/lib/payment/sebpay';
 
-export type PaymentProvider = 'chariow' | 'campay' | 'stripe';
-
-export interface PaymentInitInput {
-  provider?: PaymentProvider;
-  amount: number;
-  currency?: string;
-  phone?: string;
-  productId?: string;
-  planId?: string;
-  description?: string;
-  reference?: string;
-  metadata?: Record<string, string>;
-  customerEmail?: string;
-  customerName?: string;
-  successUrl?: string;
-  cancelUrl?: string;
-}
-
-export interface PaymentInitResult {
-  provider: PaymentProvider;
-  success: boolean;
-  transactionId?: string;
-  reference: string;
-  status: 'pending' | 'completed' | 'failed';
-  redirectUrl?: string;
-  message?: string;
-}
+export type PaymentProvider = 'chariow' | 'sebpay';
 
 /**
- * Retourne les fournisseurs réellement disponibles (configurés).
+ * Indique le fournisseur dédié à chaque flux métier.
+ */
+export const PAYMENT_PROVIDERS = {
+  subscription: 'chariow' as const, // abonnements
+  marketplace: 'sebpay' as const,   // marketplace de prompts
+} as const;
+
+/**
+ * Vérifie la disponibilité réelle des deux fournisseurs (configurés).
  */
 export function getAvailableProviders(): PaymentProvider[] {
   const providers: PaymentProvider[] = [];
   if (chariow.isConfigured()) providers.push('chariow');
-  if (campay.isConfigured()) providers.push('campay');
-  // Stripe à ajouter lorsque src/lib/billing/stripe-client.ts sera actif.
+  if (sebpayMarketplace.isConfigured()) providers.push('sebpay');
   return providers;
 }
 
 /**
- * Résout le fournisseur à utiliser : celui demandé s'il est configuré,
- * sinon le premier disponible (Chariow prioritaire).
+ * Résout le fournisseur associé à un flux métier (`subscription` | `marketplace`).
+ * Vérifie qu'il est configuré ; renvoie null sinon.
  */
-export function resolveProvider(preferred?: PaymentProvider): PaymentProvider | null {
-  if (preferred) {
-    if (preferred === 'chariow' && chariow.isConfigured()) return 'chariow';
-    if (preferred === 'campay' && campay.isConfigured()) return 'campay';
-    return null;
-  }
-  return getAvailableProviders()[0] ?? null;
+export function resolveProvider(flow: 'subscription' | 'marketplace'): PaymentProvider | null {
+  const provider = PAYMENT_PROVIDERS[flow];
+  if (provider === 'chariow' && chariow.isConfigured()) return 'chariow';
+  if (provider === 'sebpay' && sebpayMarketplace.isConfigured()) return 'sebpay';
+  return null;
 }
 
-/**
- * Initie un paiement via le fournisseur approprié.
- * Campay est requis pour le push USSD (phone obligatoire) ; sinon Chariow.
- */
-export async function initiatePayment(input: PaymentInitInput): Promise<PaymentInitResult> {
-  const provider = resolveProvider(input.provider);
-  if (!provider) {
-    return {
-      provider: input.provider ?? 'chariow',
-      success: false,
-      reference: input.reference || '',
-      status: 'failed',
-      message: 'Aucun fournisseur de paiement configuré (CHARIOW_API_KEY ou CAMPAY_*)',
-    };
-  }
+// ============================================================
+//  Ré-exports dédiés : chaque flux consomme son provider.
+//  (évite les imports croisés et rend le couplage explicite)
+// ============================================================
 
-  const reference =
-    input.reference ||
-    `gen3ia_${(input.planId || input.description || 'pay').slice(0, 12)}_${Date.now()}`;
-
-  if (provider === 'campay') {
-    if (!input.phone) {
-      return {
-        provider,
-        success: false,
-        reference,
-        status: 'failed',
-        message: 'Campay (push USSD) requiert un numéro de téléphone',
-      };
-    }
-    const result = await campay.collect({
-      amount: input.amount,
-      currency: input.currency || 'XAF',
-      phone: input.phone,
-      description: input.description || 'Paiement Gen3ia',
-      reference,
-      email: input.customerEmail,
-      name: input.customerName,
-    });
-    return {
-      provider,
-      success: result.success,
-      transactionId: result.transactionId,
-      reference: result.reference || reference,
-      status: result.success ? 'pending' : 'failed',
-      message: result.message,
-    };
-  }
-
-  // Chariow (redirection web)
-  const productId = input.productId;
-  if (!productId) {
-    return {
-      provider,
-      success: false,
-      reference,
-      status: 'failed',
-      message: 'Un productId Chariow est requis pour ce paiement',
-    };
-  }
-
-  const checkout = await chariow.initiateCheckout({
-    productId,
-    customerEmail: input.customerEmail,
-    customerName: input.customerName,
-    metadata: {
-      ...(input.metadata || {}),
-      reference,
-      amount: String(input.amount),
-      currency: input.currency || 'XAF',
-      ...(input.planId ? { type: 'plan', planId: input.planId } : {}),
-    },
-    successUrl: input.successUrl,
-    cancelUrl: input.cancelUrl,
-  });
-
-  return {
-    provider,
-    success: true,
-    transactionId: checkout.saleId || reference,
-    reference,
-    status: checkout.step === 'payment' ? 'pending' : 'completed',
-    redirectUrl: checkout.checkoutUrl,
-  };
-}
-
-/**
- * Vérifie le statut d'un paiement en fonction du fournisseur.
- */
-export async function checkPaymentStatus(
-  provider: PaymentProvider,
-  transactionId: string
-): Promise<string> {
-  if (provider === 'campay') {
-    const res = await campay.getTransactionStatus(transactionId);
-    return res?.status ?? 'unknown';
-  }
-  const { status } = await chariow.getSaleStatus(transactionId);
-  return status;
-}
-
-/**
- * Vérifie la signature d'un webhook en fonction du fournisseur.
- */
-export function verifyWebhookSignature(
-  provider: PaymentProvider,
-  body: string,
-  signature: string
-): boolean {
-  if (provider === 'campay') return campay.verifyWebhookSignature(body, signature);
-  return chariow.verifyWebhookSignature(body, signature);
-}
+export { chariow } from '@/lib/payment/chariow';
+export { sebpayMarketplace } from '@/lib/payment/sebpay';
+export {
+  MARKETPLACE_COMMISSION_RATE,
+  MARKETPLACE_SELLER_RATE,
+} from '@/lib/payment/sebpay';
+export type {
+  SebpayCurrency,
+  SebpayProvider,
+  SebpayTransactionStatus,
+  SebpayInitiatePaymentParams,
+  SebpayWebhookPayload,
+} from '@/lib/payment/sebpay';
+export type {
+  ChariowCurrency,
+  ChariowSaleStatus,
+  ChariowCheckoutParams,
+  ChariowCheckoutResult,
+  ChariowWebhookPayload,
+} from '@/lib/payment/chariow';
