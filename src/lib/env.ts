@@ -1,11 +1,20 @@
 import { z } from 'zod';
 
+/**
+ * Gen3ia — Accès typé aux variables d'environnement (compat)
+ *
+ * NOTE : le projet est migré de PostgreSQL/Prisma vers Cloud Firestore.
+ * `DATABASE_URL` n'est plus requis ; il est conservé comme champ optionnel
+ * pour la rétrocompatibilité des consommateurs existants. Le schéma canonique
+ * complet reste dans `src/lib/env-validation.ts` (validateEnv/getEnv).
+ */
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   NEXT_PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
-  DATABASE_URL: z.string().min(1, 'DATABASE_URL est requis'),
-  AUTH_SECRET: z.string().min(32, 'AUTH_SECRET doit faire au moins 32 caracteres'),
+  // Optionnel : conservé pour rétrocompatibilité (migration Firestore).
+  DATABASE_URL: z.string().optional(),
+  AUTH_SECRET: z.string().optional(),
   REDIS_URL: z.string().optional(),
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
@@ -35,7 +44,7 @@ export function getEnv(): Env {
       NODE_ENV: 'development',
       NEXT_PUBLIC_APP_URL: 'http://localhost:3000',
       LOG_LEVEL: 'debug',
-      DATABASE_URL: process.env.DATABASE_URL || 'postgresql://localhost:5432/genova',
+      DATABASE_URL: process.env.DATABASE_URL,
       AUTH_SECRET: process.env.AUTH_SECRET || 'dev-secret-key-32-characters-minimum!!',
     } as Env;
     return _env;
