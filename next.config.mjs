@@ -82,7 +82,9 @@ const nextConfig = {
       'date-fns',
     ],
     // Smaller CSS via dead-code elimination
-    optimizeCss: true,
+    // NOTE: optimizeCss requires 'critters' package — not installed in this repo.
+    // To enable: `npm i -D critters` then uncomment.
+    // optimizeCss: true,
     // NOTE: workerThreads disabled — incompatible with the custom webpack(config)
     // function below (functions are not structured-cloneable across worker threads,
     // triggers "DataCloneError" during build). Re-enable only after refactoring
