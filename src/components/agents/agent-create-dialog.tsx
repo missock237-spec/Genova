@@ -568,7 +568,8 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
                         })}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
