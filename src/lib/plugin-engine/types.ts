@@ -33,6 +33,8 @@ export interface PluginCatalogEntry {
   name: string;
   description: string;
   icon: string;
+  /** URL du logo officiel de l'application (affiché dans le frontend) */
+  logoUrl?: string;
   categories: string[];
   baseUrl: string;
   authType: AuthType;
