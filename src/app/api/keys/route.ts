@@ -50,9 +50,50 @@ function parseScopes(raw: unknown): string[] | null {
  * deux modes (même logique que withAuth/createApiHandler).
  */
 async function requireUser(request: NextRequest): Promise<{ userId: string; ok: true } | { ok: false; res: NextResponse }> {
+  const sessionCookie = request.cookies.get('gen3ia_session')?.value;
+  const hasBearer = request.headers.get('authorization')?.startsWith('Bearer ');
+  const hasApiKey = !!request.headers.get('x-api-key');
+
+  if (!sessionCookie && !hasBearer && !hasApiKey) {
+    return { ok: false, res: NextResponse.json(
+      { error: 'Session non authentifiée', code: 'NO_CREDENTIALS',
+        hint: 'Aucun cookie de session, token Bearer ou clé API détecté. Reconnectez-vous.' },
+      { status: 401 },
+    ) };
+  }
+
+  if (sessionCookie) {
+    const parts = sessionCookie.split('.');
+    if (parts.length !== 3) {
+      return { ok: false, res: NextResponse.json(
+        { error: 'Session non authentifiée', code: 'MALFORMED_COOKIE',
+          hint: 'Le cookie de session est corrompu (pas un JWT valide). Déconnectez-vous puis reconnectez-vous.' },
+        { status: 401 },
+      ) };
+    }
+  }
+
   const { auth, error } = await applySecurity(request, { requireAuth: true });
-  if (error) return { ok: false, res: error };
-  if (!auth?.userId) return { ok: false, res: NextResponse.json({ error: 'Non authentifié' }, { status: 401 }) };
+  if (error) {
+    // Enrichir la réponse 401 avec le code diagnostique et le statut Firebase
+    let errorBody: Record<string, unknown>;
+    try { errorBody = await error.json(); } catch { errorBody = {}; }
+    return { ok: false, res: NextResponse.json(
+      { error: 'Session non authentifiée', code: 'AUTH_FAILED',
+        hint: (errorBody.hint as string) || 'Session expirée ou invalide — reconnectez-vous.',
+        firebaseConfigured: typeof process.env.FIREBASE_SERVICE_ACCOUNT === 'string' && process.env.FIREBASE_SERVICE_ACCOUNT.length > 0 },
+      { status: 401 },
+    ) };
+  }
+
+  if (!auth?.userId) {
+    return { ok: false, res: NextResponse.json(
+      { error: 'Non authentifié', code: 'NO_USER_ID',
+        hint: 'L\'authentification a réussi mais aucun userId n\'a été trouvé.' },
+      { status: 401 },
+    ) };
+  }
+
   return { ok: true, userId: auth.userId };
 }
 

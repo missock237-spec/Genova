@@ -50,9 +50,19 @@ async function fetchJson(url: string, init?: RequestInit, retries = 1, attempt =
   return res;
 }
 
-function describeFetchError(status: number, fallback: string): string {
+function describeFetchError(status: number, fallback: string, data?: Record<string, unknown>): string {
   if (status === 429) return 'Trop de requêtes (429) — réessayez dans quelques secondes';
-  if (status === 401) return 'Session non authentifiée (401) — reconnectez-vous';
+  if (status === 401) {
+    const code = data?.code as string | undefined;
+    const hint = data?.hint as string | undefined;
+    if (code === 'NO_CREDENTIALS') return 'Aucune session détectée — vous devez vous reconnecter.';
+    if (code === 'MALFORMED_COOKIE') return 'Cookie de session corrompu — déconnectez-vous puis reconnectez-vous.';
+    if (code === 'AUTH_FAILED') {
+      if (data?.firebaseConfigured) return 'La vérification Firebase a échoué. Le service account est peut-être mal configuré en production.';
+      return 'Session expirée ou invalide — reconnectez-vous.';
+    }
+    return hint || 'Session non authentifiée (401) — reconnectez-vous';
+  }
   if (status === 403) return `Accès refusé (403) — statut: ${status}`;
   if (status >= 500) return `Erreur serveur (${status}) — réessayez dans un instant`;
   return `${fallback} (${status})`;
@@ -71,7 +81,10 @@ export function ApiKeysManager() {
   const fetchKeys = useCallback(async () => {
     try {
       const res = await fetchJson('/api/keys');
-      if (!res.ok) throw new Error(describeFetchError(res.status, 'Failed to fetch keys'));
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(describeFetchError(res.status, 'Failed to fetch keys', errData));
+      }
       const data = await res.json();
       setKeys(data.keys || []);
       setError(null);
@@ -104,7 +117,7 @@ export function ApiKeysManager() {
       if (!res.ok) {
         const detail = data?.detail ? ` (${data.detail})` : '';
         const step = data?.step ? ` [étape: ${data.step}]` : '';
-        throw new Error((data?.error) || describeFetchError(res.status, 'Failed to create key') + detail + step);
+        throw new Error((data?.hint && data?.code) || (data?.error) || describeFetchError(res.status, 'Failed to create key', data) + detail + step);
       }
       setNewlyCreatedKey(data.key);
       setNewKeyName('');

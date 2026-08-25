@@ -60,12 +60,24 @@ export async function applySecurity(
   // 1. Session cookie (Firebase OU Standalone)
   const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
   if (sessionCookie) {
-    // --- Tentative Firebase (si configure) ---
+    // --- Détection HS256 : si le header JWT indique alg=HS256, c'est un token
+    // standalone (pas Firebase qui utilise RS256). On évite ainsi 3 tentatives
+    // Firebase inutiles (+6s de timeout) et on passe directement au verifyJWT.
+    let isLikelyStandalone = false;
+    try {
+      const headerB64 = sessionCookie.split('.')[0];
+      if (headerB64) {
+        const header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf-8'));
+        isLikelyStandalone = header.alg === 'HS256';
+      }
+    } catch { /* cookie malformé, on laisse le flux normal continuer */ }
+
+    // --- Tentative Firebase (si configuré ET pas HS256) ---
     // Même logique de retry que getServerSession() et verifyIdToken() :
     //   1. verifySessionCookie(cookie, true)  — vérif signature + révocation
     //   2. verifySessionCookie(cookie, false) — sans révocation (cold start)
     //   3. Pause 1s + retry — cold start Vercel (JWKS download)
-    if (isFirebaseConfigured()) {
+    if (isFirebaseConfigured() && !isLikelyStandalone) {
       let fbAuth: SecurityContext | null = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -90,6 +102,8 @@ export async function applySecurity(
       }
       if (fbAuth) return validateRole(fbAuth, options);
       // Tous les tentatives Firebase ont échoué — on tente le standalone
+    } else if (isLikelyStandalone) {
+      console.log('[applySecurity] JWT header alg=HS256 détecté — bypass Firebase, vérification standalone directe');
     }
 
     // --- Tentative Standalone JWT ---
