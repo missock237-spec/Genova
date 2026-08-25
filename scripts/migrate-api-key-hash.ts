@@ -46,8 +46,8 @@ async function main(): Promise<void> {
   if (!process.env.API_KEY_HASH_SALT) {
     console.warn(
       `${warn} API_KEY_HASH_SALT n'est PAS définie. Le sel déterministe sera ` +
-        'gen3ia-api-key-salt: (vide). Vérifiez que c\\'est la même valeur que ' +
-        'celle utilisée en production, sinon les clés migrées seront invalides.',
+        `gen3ia-api-key-salt: (vide). Vérifiez que c'est la même valeur que ` +
+        `celle utilisée en production, sinon les clés migrées seront invalides.`,
     )
   }
 

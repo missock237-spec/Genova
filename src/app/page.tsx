@@ -84,8 +84,13 @@ function AppContent() {
   }, [isAuthenticated, loadError, fetchApprovalCount]);
 
   // --- SPA deep-linking : lire le pathname pour restaurer la vue ---
+  // IMPORTANT : ce useEffect s'exécute UNE FOIS après auth (authDoneRef)
+  // pour éviter de réinitialiser la vue à chaque re-render.
+  const authDoneRef = useRef(false);
   useEffect(() => {
     if (!isAuthenticated) return;
+    if (authDoneRef.current) return;
+    authDoneRef.current = true;
     const path = window.location.pathname.replace(/^\//, '');
     const validViews: Record<string, string> = {
       dashboard: 'dashboard', agents: 'agents', 'agent-chat': 'agent-chat',
@@ -95,10 +100,43 @@ function AppContent() {
       images: 'images', integrations: 'integrations', notifications: 'notifications',
       scheduler: 'scheduler', prompts: 'prompts',
     };
-    if (path && validViews[path] && currentView === 'dashboard') {
+    if (path && validViews[path]) {
       setCurrentView(validViews[path] as any);
     }
-  }, [isAuthenticated, currentView, setCurrentView]);
+  }, [isAuthenticated, setCurrentView]);
+
+  // --- SPA navigation : mettre à jour l'URL quand currentView change ---
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    // Ne pas pousser si on est déjà sur le bon pathname (évite doubles entrées)
+    const expected = currentView === 'dashboard' ? '/' : `/${currentView}`;
+    if (window.location.pathname !== expected) {
+      window.history.replaceState(null, '', expected);
+    }
+  }, [isAuthenticated, currentView]);
+
+  // --- SPA popstate : boutons retour/avancer du navigateur ---
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const validViews: Record<string, string> = {
+      dashboard: 'dashboard', agents: 'agents', 'agent-chat': 'agent-chat',
+      automation: 'automation', guardrails: 'guardrails', coordination: 'coordination',
+      settings: 'settings', approvals: 'approvals', analytics: 'analytics',
+      billing: 'billing', developers: 'developers', voice: 'voice',
+      images: 'images', integrations: 'integrations', notifications: 'notifications',
+      scheduler: 'scheduler', prompts: 'prompts',
+    };
+    const onPopState = () => {
+      const path = window.location.pathname.replace(/^\//, '');
+      if (path && validViews[path]) {
+        setCurrentView(validViews[path] as any);
+      } else {
+        setCurrentView('dashboard');
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [isAuthenticated, setCurrentView]);
 
   // --- T23 : timer stuck loading ---
   useEffect(() => {
@@ -136,6 +174,7 @@ function AppContent() {
   // --- Fix 4 : logout stable ---
   const handleUnauthorized = useCallback(() => {
     validatedRef.current = false;
+    authDoneRef.current = false;
     void logout();
   }, [logout]);
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import {
@@ -202,7 +202,7 @@ export function PromptsView() {
             )}
             fill={rating >= i - 0.5 ? '#00F5FF' : 'none'}
           />
-        )}
+        ))}
       </div>
     );
   };
@@ -522,7 +522,7 @@ export function PromptsView() {
   );
 }
 
-function ModalShell({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+function ModalShell({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
@@ -609,6 +609,3 @@ function DetailContent({ prompt, onCopy, isOwner }: { prompt: PublicPrompt; onCo
     </div>
   );
 }
-
-// Alias React pour la type dans Data component
-import type * as React from 'react';
