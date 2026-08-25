@@ -34,6 +34,11 @@ import {
   RotateCcw,
   Copy,
   Wand2,
+  CheckCircle2,
+  AlertTriangle,
+  ImagePlus,
+  Layers,
+  Hash,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────
@@ -417,16 +422,44 @@ export function GenerationWorkbench() {
     }
   };
 
+  const resolutionLabel = (key: string): string =>
+    effectiveMeta.resolutions.find((r) => r.key === key)?.label || key;
+
   // ─── Rendu ──────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Génération</h1>
-        <p className="text-muted-foreground">Interface de travail — génération d’images par intelligence artificielle</p>
+      {/* Bandeau d'en-tête */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-fuchsia-600 text-primary-foreground shadow-sm sm:flex">
+            <Wand2 className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="font-heading text-2xl font-bold tracking-tight sm:text-3xl">
+              Génération{' '}
+              <span className="bg-gradient-to-r from-primary via-fuchsia-500 to-indigo-500 bg-clip-text text-transparent">
+                d'images
+              </span>
+            </h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Interface de travail — générez des images par intelligence artificielle
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {meta ? (
+            <Badge variant="secondary" className="gap-1.5 px-2.5 py-1">
+              <Layers className="h-3.5 w-3.5" />
+              {meta.models.length} modèle(s) · {meta.resolutions.length} résolution(s)
+            </Badge>
+          ) : (
+            <Skeleton className="h-7 w-36 rounded-full" />
+          )}
+        </div>
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="w-full sm:w-auto">
+        <TabsList className="w-full gap-1 p-1 sm:w-auto">
           <TabsTrigger value="create" className="gap-1.5">
             <Wand2 className="h-4 w-4" /> Nouvelle génération
           </TabsTrigger>
@@ -442,29 +475,41 @@ export function GenerationWorkbench() {
         <TabsContent value="create" className="mt-4 space-y-4">
           <div className="grid gap-6 lg:grid-cols-[5fr_6fr]">
             {/* Formulaire */}
-            <Card>
+            <Card className="overflow-hidden shadow-sm">
+              <div className="h-1.5 bg-gradient-to-r from-primary via-fuchsia-500 to-indigo-500" />
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <SlidersHorizontal className="h-4 w-4 text-primary" /> Nouvelle génération
                 </CardTitle>
-                <CardDescription>Décrivez ce que vous voulez générer, puis lancez la génération.</CardDescription>
+                <CardDescription>
+                  Décrivez ce que vous voulez générer, puis lancez la génération.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="prompt">Prompt</Label>
+                  <Label htmlFor="prompt" className="flex items-center gap-1.5">
+                    <Wand2 className="h-3.5 w-3.5 text-primary" /> Prompt
+                  </Label>
                   <Textarea
                     id="prompt"
                     placeholder="Decrivez ce que vous voulez générer..."
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     disabled={isGenerating}
-                    className="min-h-28 resize-y"
+                    className="min-h-28 resize-y bg-card focus-visible:ring-2"
                   />
-                  <p className="text-xs text-muted-foreground">{prompt.length}/1000</p>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Le prompt alimente le modèle, plus il est précis, meilleur est le rendu.</span>
+                    <span className={prompt.length > 900 ? 'font-semibold text-amber-600' : ''}>
+                      {prompt.length}/1000
+                    </span>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="negative-prompt">Prompt négatif (optionnel)</Label>
+                  <Label htmlFor="negative-prompt" className="flex items-center gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 text-muted-foreground" /> Prompt négatif (optionnel)
+                  </Label>
                   <Input
                     id="negative-prompt"
                     placeholder="Ce que l’image doit éviter..."
@@ -480,7 +525,7 @@ export function GenerationWorkbench() {
                   <div className="space-y-2">
                     <Label>Modèle</Label>
                     <Select value={model} onValueChange={setModel} disabled={isGenerating || metaLoading}>
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="w-full focus-visible:ring-2">
                         <SelectValue placeholder={metaLoading ? 'Chargement…' : 'Choisir un modèle'} />
                       </SelectTrigger>
                       <SelectContent>
@@ -491,12 +536,13 @@ export function GenerationWorkbench() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {metaLoading && <p className="text-xs text-muted-foreground">Chargement des modèles…</p>}
                   </div>
 
                   <div className="space-y-2">
                     <Label>Résolution</Label>
                     <Select value={resolution} onValueChange={setResolution} disabled={isGenerating}>
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="w-full focus-visible:ring-2">
                         <SelectValue placeholder="Choisir une résolution" />
                       </SelectTrigger>
                       <SelectContent>
@@ -512,7 +558,7 @@ export function GenerationWorkbench() {
                   <div className="space-y-2">
                     <Label>Style</Label>
                     <Select value={style} onValueChange={setStyle} disabled={isGenerating}>
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="w-full focus-visible:ring-2">
                         <SelectValue placeholder="Choisir un style" />
                       </SelectTrigger>
                       <SelectContent>
@@ -564,7 +610,9 @@ export function GenerationWorkbench() {
 
                 <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
                   <div className="space-y-2">
-                    <Label htmlFor="seed">Graine (seed)</Label>
+                    <Label htmlFor="seed" className="flex items-center gap-1.5">
+                      <Hash className="h-3.5 w-3.5 text-muted-foreground" /> Graine (seed)
+                    </Label>
                     <div className="flex items-center gap-2">
                       <Input
                         id="seed"
@@ -574,7 +622,7 @@ export function GenerationWorkbench() {
                         placeholder="Aléatoire"
                         onChange={(e) => setSeed(Number(e.target.value) || 0)}
                         disabled={isGenerating || !useSeed}
-                        className="font-mono"
+                        className="font-mono focus-visible:ring-2"
                       />
                       <Button
                         type="button"
@@ -606,9 +654,9 @@ export function GenerationWorkbench() {
 
                 <Button
                   onClick={handleGenerate}
-                  disabled={isGenerating || (!prompt.trim() && !demoMode)}
-                  className="w-full"
+                  disabled={ isGenerating || (!prompt.trim() && !demoMode)}
                   size="lg"
+                  className="w-full bg-gradient-to-r from-primary via-fuchsia-600 to-indigo-600 font-semibold shadow-md hover:from-primary hover:via-fuchsia-500 hover:to-indigo-500 hover:shadow-lg disabled:from-muted disabled:via-muted disabled:to-muted"
                 >
                   {isGenerating ? (
                     <>
@@ -623,50 +671,82 @@ export function GenerationWorkbench() {
 
                 {genError && (
                   <div
+                    role={demoMode ? 'status' : 'alert'}
                     className={
                       demoMode
-                        ? 'rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200'
-                        : 'rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200'
+                        ? 'flex items-start gap-2 rounded-lg border border-amber-300/70 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200'
+                        : 'flex items-start gap-2 rounded-lg border border-red-300/70 bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200'
                     }
                   >
-                    {genError}
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{genError}</span>
                   </div>
                 )}
               </CardContent>
             </Card>
 
             {/* Aperçu des générations */}
-            <Card ref={resultRef} className="scroll-mt-6">
+            <Card ref={resultRef} className="scroll-mt-6 overflow-hidden shadow-sm">
+              <div className="h-1.5 bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-primary" />
               <CardHeader>
-                <CardTitle className="text-base">Aperçu des générations</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ImagePlus className="h-4 w-4 text-primary" /> Aperçu des générations
+                </CardTitle>
                 <CardDescription>
                   {results.length > 0
                     ? `${results.length} image(s) générée(s) — grille ci-dessous`
                     : 'Les images générées apparaîtront ici.'}
-                  {demoMode && <Badge className="ml-2 bg-amber-500">Mode démo</Badge>}
+                  {demoMode && <Badge className="ml-2 gap-1 bg-amber-500"><AlertTriangle className="h-3 w-3" /> Mode démo</Badge>}
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {results.length === 0 ? (
-                  <div className="flex min-h-64 flex-col items-center justify-center rounded-lg border border-dashed border-border p-8 text-center text-muted-foreground">
-                    <Wand2 className="mb-2 h-10 w-10 opacity-40" />
-                    <p className="text-sm">Votre création apparaîtra dans cette grille.</p>
+                {isGenerating && results.length === 0 ? (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    {Array.from({ length: count }).map((_, i) => (
+                      <Skeleton key={i} className="aspect-square w-full rounded-xl" />
+                    ))}
+                  </div>
+                ) : results.length === 0 ? (
+                  <div className="relative flex min-h-64 flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground">
+                    <div className="absolute -left-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
+                    <div className="absolute -bottom-12 -right-10 h-44 w-44 rounded-full bg-fuchsia-500/10 blur-3xl" />
+                    <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/15 to-fuchsia-500/15 ring-1 ring-border">
+                      <ImagePlus className="h-8 w-8 text-primary/60" />
+                    </div>
+                    <p className="mt-4 text-sm font-medium text-foreground/80">Aucune génération</p>
+                    <p className="mt-1 max-w-xs text-xs">
+                      Remplissez un prompt puis cliquez sur « Générer ». Votre création apparaîtra dans cette grille.
+                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {results.map((img, i) => (
-                      <Card key={`${img.id || 'gen'}-${i}`} className="overflow-hidden">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={img.imageUrl}
-                          alt={`Génération ${i + 1}`}
-                          className="aspect-square w-full object-cover"
-                          loading="lazy"
-                        />
+                      <Card key={`${img.id || 'gen'}-${i}`} className="group overflow-hidden shadow-none ring-1 ring-border/60">
+                        <div className="relative overflow-hidden">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={img.imageUrl}
+                            alt={`Génération ${i + 1}`}
+                            className="aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            loading="lazy"
+                          />
+                          <div className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/70 via-transparent to-transparent p-3 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="gap-1.5 shadow"
+                              onClick={() => downloadImage(img.imageUrl, i)}
+                            >
+                              <Download className="h-4 w-4" /> Télécharger
+                            </Button>
+                          </div>
+                        </div>
                         <CardContent className="space-y-2 p-3">
                           <div className="flex items-center justify-between">
-                            <Badge variant="secondary">{img.model || 'Modèle'}</Badge>
-                            <span className="text-xs text-muted-foreground">
+                            <Badge variant="secondary" className="gap-1">
+                              <Layers className="h-3 w-3" /> {img.model || 'Modèle'}
+                            </Badge>
+                            <span className="text-xs tabular-nums text-muted-foreground">
                               {img.width} × {img.height}
                             </span>
                           </div>
@@ -690,55 +770,85 @@ export function GenerationWorkbench() {
 
         {/* ≈≈≈≈≈≈ Onglet "Historique" ≈≈≈≈≈≈ */}
         <TabsContent value="history" className="mt-4 space-y-4">
-          <Card>
+          <Card className="overflow-hidden shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base">Historique des générations</CardTitle>
-              <CardDescription>Vos générations récentes, de la plus récente à la plus ancienne.</CardDescription>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <History className="h-4 w-4 text-primary" /> Historique des générations
+              </CardTitle>
+              <CardDescription>
+                Vos générations récentes, de la plus récente à la plus ancienne.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {historyLoading ? (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <Skeleton key={i} className="h-56 rounded-lg" />
+                    <div key={i} className="overflow-hidden rounded-xl ring-1 ring-border/60">
+                      <Skeleton className="aspect-square w-full rounded-none" />
+                      <div className="space-y-2 p-3">
+                        <Skeleton className="h-4 w-3/4" />
+                        <Skeleton className="h-4 w-1/2" />
+                      </div>
+                    </div>
                   ))}
                 </div>
               ) : historyError ? (
-                <div className="rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
-                  {historyError}
-                  {!userId && (
-                    <p className="mt-2 text-xs">Aucun utilisateur connecté — connectez-vous pour voir votre historique.</p>
-                  )}
+                <div className="flex items-start gap-2 rounded-lg border border-red-300/70 bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    {historyError}
+                    {!userId && (
+                      <p className="mt-2 text-xs">
+                        Aucun utilisateur connecté — connectez-vous pour voir votre historique.
+                      </p>
+                    )}
+                  </div>
                 </div>
               ) : history.length === 0 ? (
-                <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-border p-8 text-center text-muted-foreground">
-                  <History className="mb-2 h-10 w-10 opacity-40" />
-                  <p className="text-sm">Aucune génération pour le moment. Lancez votre première création dans l’onglet « Nouvelle génération ».</p>
+                <div className="relative flex min-h-48 flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground">
+                  <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
+                  <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/15 to-fuchsia-500/15 ring-1 ring-border">
+                    <History className="h-7 w-7 text-primary/60" />
+                  </div>
+                  <p className="mt-4 text-sm font-medium text-foreground/80">Aucune génération</p>
+                  <p className="mt-1 max-w-sm text-xs">
+                    Lancez votre première création dans l’onglet « Nouvelle génération ».
+                  </p>
                 </div>
               ) : (
                 <>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {history.map((item) => (
-                      <Card key={item.id} className="overflow-hidden">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={item.imageUrl || ''}
-                          alt={item.prompt}
-                          className="aspect-square w-full object-cover"
-                          loading="lazy"
-                        />
+                      <Card key={item.id} className="group overflow-hidden shadow-none ring-1 ring-border/60">
+                        <div className="relative overflow-hidden">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={item.imageUrl || ''}
+                            alt={item.prompt}
+                            className="aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            loading="lazy"
+                          />
+                        </div>
                         <CardContent className="space-y-2 p-3">
                           <p className="line-clamp-2 text-sm font-medium">{item.prompt || 'Sans prompt'}</p>
-                          <div className="flex items-center gap-2">
-                            <Badge variant={item.status === 'completed' ? 'default' : 'destructive'}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={item.status === 'completed' ? 'default' : 'destructive'} className="gap-1">
+                              {item.status === 'completed' ? (
+                                <CheckCircle2 className="h-3 w-3" />
+                              ) : (
+                                <AlertTriangle className="h-3 w-3" />
+                              )}
                               {item.status === 'completed' ? 'Complété' : 'Échec'}
                             </Badge>
                             <Badge variant="secondary">{item.model || '—'}</Badge>
                           </div>
-                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <div className="flex items-center justify-between text-xs tabular-nums text-muted-foreground">
                             <span>
                               {item.width} × {item.height}
                             </span>
-                            <span>{new Date(item.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                            <span>
+                              {new Date(item.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
                           </div>
                         </CardContent>
                       </Card>
@@ -746,7 +856,7 @@ export function GenerationWorkbench() {
                   </div>
 
                   {totalPages > 1 && (
-                    <div className="mt-4 flex items-center justify-center gap-2">
+                    <div className="mt-5 flex items-center justify-center gap-2">
                       <Button
                         variant="outline"
                         size="sm"
@@ -776,9 +886,11 @@ export function GenerationWorkbench() {
 
         {/* ≈≈≈≈≈≈ Onglet "Paramètres" ≈≈≈≈≈≈ */}
         <TabsContent value="settings" className="mt-4">
-          <Card>
+          <Card className="shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base">Paramètres par défaut</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Settings2 className="h-4 w-4 text-primary" /> Paramètres par défaut
+              </CardTitle>
               <CardDescription>
                 Les valeurs par défaut appliquées à vos prochaines générations (enregistrées localement sur ce navigateur).
               </CardDescription>
@@ -788,7 +900,7 @@ export function GenerationWorkbench() {
                 <div className="space-y-2">
                   <Label>Modèle par défaut</Label>
                   <Select value={defaultModel || model} onValueChange={setDefaultModel}>
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className="w-full focus-visible:ring-2">
                       <SelectValue placeholder="Choisir" />
                     </SelectTrigger>
                     <SelectContent>
@@ -803,7 +915,7 @@ export function GenerationWorkbench() {
                 <div className="space-y-2">
                   <Label>Résolution par défaut</Label>
                   <Select value={defaultResolution} onValueChange={setDefaultResolution}>
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className="w-full focus-visible:ring-2">
                       <SelectValue placeholder="Choisir" />
                     </SelectTrigger>
                     <SelectContent>
@@ -814,11 +926,12 @@ export function GenerationWorkbench() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">{resolutionLabel(defaultResolution)}</p>
                 </div>
                 <div className="space-y-2">
                   <Label>Style par défaut</Label>
                   <Select value={defaultStyle} onValueChange={setDefaultStyle}>
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className="w-full focus-visible:ring-2">
                       <SelectValue placeholder="Choisir" />
                     </SelectTrigger>
                     <SelectContent>
@@ -836,8 +949,9 @@ export function GenerationWorkbench() {
                 <p className="text-sm text-muted-foreground">Chargement des options disponibles…</p>
               )}
               {metaError && (
-                <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
-                  {metaError}
+                <div className="flex items-start gap-2 rounded-lg border border-red-300/70 bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{metaError}</span>
                 </div>
               )}
 
@@ -848,7 +962,11 @@ export function GenerationWorkbench() {
                 <Button variant="outline" onClick={resetSettings}>
                   <RotateCcw className="mr-2 h-4 w-4" /> Réinitialiser
                 </Button>
-                {paramsSaved && <Badge className="bg-green-500">Paramètres enregistrés</Badge>}
+                {paramsSaved && (
+                  <Badge className="gap-1 bg-green-500">
+                    <CheckCircle2 className="h-3 w-3" /> Paramètres enregistrés
+                  </Badge>
+                )}
               </div>
             </CardContent>
           </Card>
