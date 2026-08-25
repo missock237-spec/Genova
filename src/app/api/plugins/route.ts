@@ -43,6 +43,10 @@ const PublishPluginBodySchema = z.object({
 });
 
 // ─── GET ───
+// Le catalogue (scope=catalog/sdk/scaffold) est une donnée PUBLIQUE :
+// requireAuth: false les rend accessibles sans session (couche 2).
+// Seul le scope 'mine' (plugins utilisateur) exige une authentification,
+// vérifiée explicitement dans le handler.
 export const GET = createApiHandler(
   async ({ auth, query }) => {
     const { scope, category, q, type, name } = query as z.infer<typeof CatalogQuerySchema>;
@@ -66,9 +70,13 @@ export const GET = createApiHandler(
       }
 
       case 'mine': {
+        // Endpoint privé : exige une session valide.
+        if (!auth?.userId) {
+          throw ApiError.unauthorized('Authentification requise');
+        }
         const { prisma } = await import('@/lib/prisma');
         const plugins = await prisma.plugin.findMany({
-          where: [{ field: 'authorId', op: '==', value: auth!.userId }],
+          where: [{ field: 'authorId', op: '==', value: auth.userId }],
           orderBy: [{ field: 'createdAt', direction: 'desc' }],
         });
         return { plugins };
@@ -82,6 +90,7 @@ export const GET = createApiHandler(
     }
   },
   {
+    requireAuth: false,
     rateLimit: { limit: 120, windowMs: 60_000 },
     querySchema: CatalogQuerySchema,
     envelope: false, // rétrocompatibilité frontend
@@ -89,6 +98,9 @@ export const GET = createApiHandler(
 );
 
 // ─── POST ───
+// Les actions (create/execute/publish) restent AUTHENTIFIÉES.
+// createApiHandler garde requireAuth: true (défaut) → couche 1 ET couche 2
+// exigent une session/api key/bearer validée.
 export const POST = createApiHandler(
   async ({ auth, body, query }) => {
     const action = (query.action as string) || 'create';
