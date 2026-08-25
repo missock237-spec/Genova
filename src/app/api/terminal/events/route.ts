@@ -11,9 +11,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { applySecurity } from "@/lib/security";
 
-
-
-
 export const dynamic = "force-dynamic";
 const clients = new Map<string, ReadableStreamController<Uint8Array>>();
 
@@ -67,22 +64,4 @@ export async function GET(request: NextRequest) {
       "X-Accel-Buffering": "no",
     },
   });
-}
-
-// Fonction utilitaire pour envoyer un événement à un client
-// Utilisable depuis n'importe quelle route
-// NOTE: Next.js route files can only export route handlers (GET/POST/etc).
-// This helper is internal — callers should use the SSE stream directly.
-function sendTerminalEvent(connectionId: string, event: { type: string; data: string }) {
-  const controller = clients.get(connectionId);
-  if (!controller) return false;
-
-  try {
-    const encoder = new TextEncoder();
-    controller.enqueue(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`));
-    return true;
-  } catch {
-    clients.delete(connectionId);
-    return false;
-  }
 }
