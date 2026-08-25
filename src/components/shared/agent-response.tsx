@@ -493,43 +493,61 @@ export const AgentResponse = memo(function AgentResponse({
     : null;
 
   return (
-    <div className={cn('agent-response-container', isStreaming ? 'chat-msg-agent-enter' : '', className)}>
-      {/* Agent identity header */}
-      <div className="agent-response-header">
-        <div className="agent-response-avatar">
-          {avatar ? (
-            <img
-              src={avatar}
-              alt={agentName || 'Agent'}
-              className="h-5 w-5 rounded-full object-cover"
-            />
-          ) : (
-            <Bot className="h-5 w-5 text-[#00F5FF]" />
-          )}
-        </div>
-        <div className="agent-response-meta">
-          <span className="agent-response-name">
-            {agentName || 'Agent IA'}
-          </span>
-          {isStreaming && (
-            <span className="agent-response-streaming-badge">
-              <Sparkles className="h-3 w-3" />
-              Génération en cours
-            </span>
-          )}
-        </div>
-        {formattedTime && !isStreaming && (
-          <span className="agent-response-time">{formattedTime}</span>
-        )}
-      </div>
+    <div className={cn('group relative', isStreaming && content ? 'chat-msg-agent-enter' : '', className)}>
+      {/* Ambient glow behind the assistant card */}
+      <div className="pointer-events-none absolute -left-6 -top-3 h-28 w-28 rounded-full bg-[#06b6d4]/10 blur-2xl opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
 
-      {/* Content body */}
-      <div className="agent-response-body">
-        {tokens.map((token, idx) => renderToken(token, idx))}
-        {/* Streaming cursor */}
-        {isStreaming && content && (
-          <span className="hardtech-caret" />
-        )}
+      <div className="relative flex items-start gap-3">
+        {/* Avatar with luminous gradient ring */}
+        <div className="relative flex-shrink-0">
+          <div className="absolute -inset-[3px] rounded-2xl bg-gradient-to-br from-[#06b6d4] via-sky-400 to-violet-500 opacity-70 blur-sm" />
+          <div className="relative flex h-9 w-9 items-center justify-center rounded-2xl border border-white/20 bg-slate-900 shadow-lg">
+            {avatar ? (
+              <img
+                src={avatar}
+                alt={agentName || 'Agent'}
+                className="h-9 w-9 rounded-2xl object-cover"
+              />
+            ) : (
+              <Bot className="h-4 w-4 text-[#00F5FF]" />
+            )}
+          </div>
+          {isStreaming && (
+            <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+          )}
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-1">
+          {/* Meta row */}
+          <div className="flex items-center gap-2 pl-0.5">
+            <span className="text-[11px] font-semibold tracking-wide text-foreground/80">
+              {agentName || 'Agent IA'}
+            </span>
+            {isStreaming ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-[#06b6d4]/25 bg-[#06b6d4]/10 px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider text-[#06b6d4]">
+                <Sparkles className="h-2.5 w-2.5 animate-pulse" />
+                Génération en cours
+              </span>
+            ) : (
+              formattedTime && (
+                <span className="text-[10px] text-muted-foreground/50">
+                  {formattedTime}
+                </span>
+              )
+            )}
+          </div>
+
+          {/* Content body — frosted glass card */}
+          <div className="max-w-[88%] rounded-2xl rounded-tl-md border border-white/10 bg-white/[0.03] p-3.5 shadow-lg shadow-black/5 backdrop-blur-xl transition-colors duration-300 hover:border-[#06b6d4]/20">
+            <div className="agent-response-body">
+              {tokens.map((token, idx) => renderToken(token, idx))}
+              {/* Streaming cursor */}
+              {isStreaming && content && (
+                <span className="hardtech-caret" />
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
