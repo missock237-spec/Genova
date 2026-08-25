@@ -77,10 +77,6 @@
     {
       "path": "/api/cron/refresh-tokens",
       "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/health/ready",
-      "schedule": "*/5 * * * *"
     }
   ],
   "git": {
