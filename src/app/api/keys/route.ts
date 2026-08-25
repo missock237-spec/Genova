@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createLogger } from '@/lib/logger';
+import { applySecurity } from '@/lib/security';
 import { db } from '@/lib/db';
-import { getServerSession } from '@/lib/auth';
 import crypto from 'crypto';
 import {
   generateApiKey,
@@ -37,12 +37,30 @@ function parseScopes(raw: unknown): string[] | null {
   return valid.length === 0 ? null : valid;
 }
 
+/**
+ * Authentifie la requête de façon mode-agnostique (cookie session Firebase OU
+ * JWT standalone, Bearer, X-API-Key) via applySecurity(). Retourne l'userId,
+ * ou une réponse d'erreur 401 si non authentifié.
+ *
+ * IMPORTANT : la route utilisait getServerSession() de @/lib/firebase/auth
+ * (Firebase UNIQUEMENT). En mode standalone (Admin SDK Firebase non configuré,
+ * ou connexion email/mot de passe), le cookie gen3ia_session est un JWT
+ * HS256 standalone qui faisait échouer cette vérification Firebase-only →
+ * session null → 401 → « Failed to fetch keys ». applySecurity() gère les
+ * deux modes (même logique que withAuth/createApiHandler).
+ */
+async function requireUser(request: NextRequest): Promise<{ userId: string; ok: true } | { ok: false; res: NextResponse }> {
+  const { auth, error } = await applySecurity(request, { requireAuth: true });
+  if (error) return { ok: false, res: error };
+  if (!auth?.userId) return { ok: false, res: NextResponse.json({ error: 'Non authentifié' }, { status: 401 }) };
+  return { ok: true, userId: auth.userId };
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
-    }
+    const auth = await requireUser(request);
+    if (!auth.ok) return auth.res;
+    const userId = auth.userId;
 
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object') {
@@ -77,7 +95,7 @@ export async function POST(request: NextRequest) {
     const id = `key_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
     await db.apiKey.createWithId(id, {
-      userId: session.user.id,
+      userId,
       name,
       keyHash,
       prefix: keyPrefix(rawKey),
@@ -86,7 +104,7 @@ export async function POST(request: NextRequest) {
       isActive: true,
     });
 
-    log.info('API key created', { name, scopes, userId: session.user.id });
+    log.info('API key created', { name, scopes, userId });
 
     // La clé brute n'est retournée qu'ici, une seule fois.
     return NextResponse.json({
@@ -103,14 +121,13 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
-    }
+    const auth = await requireUser(request);
+    if (!auth.ok) return auth.res;
+    const userId = auth.userId;
 
-    const where: never = [{ field: 'userId', op: '==', value: session.user.id }] as never;
+    const where: never = [{ field: 'userId', op: '==', value: userId }] as never;
 
     // Tri DESC par createdAt. Le filtre = où + orderBy nécessite un index
     // composite Firestore (userId ASC, createdAt DESC). Si l'index n'est pas
@@ -157,10 +174,9 @@ export async function GET() {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
-    }
+    const auth = await requireUser(request);
+    if (!auth.ok) return auth.res;
+    const userId = auth.userId;
 
     // Accepte id depuis searchParams ou corps JSON.
     let keyId: string | null = new URL(request.url).searchParams.get('id');
@@ -186,7 +202,7 @@ export async function DELETE(request: NextRequest) {
     if (!existing) {
       return NextResponse.json({ error: 'Clé introuvable' }, { status: 404 });
     }
-    if (existing.userId !== session.user.id) {
+    if (existing.userId !== userId) {
       return NextResponse.json({ error: 'Accès refusé' }, { status: 403 });
     }
 
@@ -195,7 +211,7 @@ export async function DELETE(request: NextRequest) {
       data: { isActive: false },
     });
 
-    log.info('API key revoked', { keyId, userId: session.user.id });
+    log.info('API key revoked', { keyId, userId });
 
     return NextResponse.json({ success: true, message: 'Clé révoquée' });
   } catch (error) {
