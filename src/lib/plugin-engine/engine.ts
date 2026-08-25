@@ -16,34 +16,66 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('plugin-engine');
 
-// ─── SSRF Protection v2 — couvre 43+ APIs du catalogue ───
+// ─── SSRF Protection v2 — couvre 140+ APIs du catalogue ───
 const ALLOWED_HOSTNAME_PATTERNS = [
   /^api\./, /^www\./, /^app\./, /^cdn\./, /^hooks\./,
-  // Google
+  // Google Workspace & Gemini
   /\.googleapis\.com$/, /\.google\.com$/,
   // Communication
   /\.slack\.com$/, /discord\.com$/, /\.twitter\.com$/, /\.x\.com$/,
   /graph\.facebook\.com$/, /api\.linkedin\.com$/, /api\.intercom\.io$/,
   /graph\.microsoft\.com$/, /api\.zoom\.us$/,
+  // Microsoft 365 / Azure
+  /\.azure\.com$/, /\.sharepoint\.com$/, /\.office\.com$/,
   // DevOps
   /\.github\.com$/, /\.gitlab\.com$/, /api\.linear\.app$/,
-  /circleci\.com$/, /api\.datadoghq\.com$/, /api\.pagerduty\.com$/,
+  /\.bitbucket\.org$/, /circleci\.com$/, /dev\.azure\.com$/,
+  /api\.datadoghq\.com$/, /api\.pagerduty\.com$/,
   // Productivité
-  /\.notion\.so$/, /api\.airtable\.com$/, /api\.figma\.com$/,
-  /api\.typeform\.com$/,
+  /\.notion\.so$/, /\.notion\.com$/, /api\.airtable\.com$/, /api\.figma\.com$/,
+  /\.todoist\.com$/, /\.clickup\.com$/, /\.monday\.com$/, /\.wrike\.com$/,
+  /\.miro\.com$/, /\.canva\.com$/, /\.whimsical\.com$/, /\.larksuite\.com$/,
+  /\.webflow\.com$/, /\.wixapis\.com$/, /\.confluence\.net$/,
   // Paiement & Finance
   /\.stripe\.com$/, /quickbooks\.api\.intuit\.com$/,
+  /\.paypal\.com$/, /\.squareup\.com$/, /\.xero\.com$/, /\.freshbooks\.com$/,
+  /\.harvestapp\.com$/, /\.gocardless\.com$/, /\.lemonsqueezy\.com$/,
+  /\.gumroad\.com$/, /\.coinbase\.com$/, /\.chartmogul\.com$/,
   // Email & Notification
   /\.sendgrid\.com$/, /\.twilio\.com$/, /api\.pushover\.net$/,
+  /\.mailgun\.net$/, /\.postmarkapp\.com$/, /\.brevo\.com$/, /\.customer\.io$/,
+  /\.klaviyo\.com$/,
   // Marketing & CRM
-  /\.hubapi\.com$/, /\.mailchimp\.com$/,
+  /\.hubapi\.com$/, /\.mailchimp\.com$/, /\.pipedrive\.com$/, /\.close\.com$/,
+  /\.keap\.com$/, /\.infusionsoft\.com$/,
+  // Signature & Documents
+  /\.adobesign\.com$/, /\.docusign\.net$/, /\.hellosign\.com$/, /\.adobe\.com$/,
   // Stockage & Cloud
   /\.dropboxapi\.com$/, /\.vercel\.com$/, /\.amazonaws\.com$/,
-  /\.myshopify\.com$/, /\.supabase\.co$/,
+  /\.myshopify\.com$/, /\.supabase\.co$/, /\.digitalocean\.com$/,
+  /\.cloudflare\.com$/, /\.heroku\.com$/, /\.mongodb\.com$/,
   // Project Management
   /\.atlassian\.net$/, /\.trello\.com$/, /\.asana\.com$/,
-  // IA
+  // Mobile Money / Fintech (Afrique)
+  /\.moov-africa\.biz$/, /\.orange\.com$/, /\.mtn\.com$/,
+  // Social & Streaming
   /\.openai\.com$/, /\.anthropic\.com$/,
+  /\.twitter\.com$/, /\.pinterest\.com$/, /\.tumblr\.com$/, /\.reddit\.com$/,
+  /\.tiktokapis\.com$/, /\.medium\.com$/, /\.dribbble\.com$/, /\.behance\.net$/,
+  /\.mastodon\.social$/, /\.bsky\.social$/, /\.telegram\.org$/,
+  /\.twitch\.tv$/, /\.spotify\.com$/, /\.tidal\.com$/,
+  // Reteaux sociaux / messagerie (autres domaines racines)
+  /\.whatsapp\.com$/,
+  // Testing & Qualité
+  /\.sentry\.io$/, /\.grafana\.com$/, /\.statuspage\.io$/,
+  /\.testrail\.io$/, /\.sonarcloud\.io$/, /\.codecov\.io$/,
+  // Data & Analytics
+  /\.segment\.io$/, /\.amplitude\.com$/, /\.mixpanel\.com$/,
+  /\.openweathermap\.org$/, /\.openstreetmap\.org$/,
+  /\.newsdata\.io$/, /\.wakatime\.com$/,
+  // Security / IDP / Divers
+  /\.auth0\.com$/, /\.okta\.com$/, /\.healthchecks\.io$/,
+  /\.neon\.tech$/,
 ];
 
 const BLOCKED_HOSTNAMES = ['localhost', '127.0.0.1', '0.0.0.0', '169.254.169.254', 'metadata.google.internal'];
@@ -122,6 +154,7 @@ export function listCatalog(category?: string, query?: string) {
       name: e.name,
       description: e.description,
       icon: e.icon,
+      logoUrl: e.logoUrl ?? null,
       categories: e.categories,
       authType: e.authType,
       docsUrl: e.docsUrl,
@@ -149,6 +182,7 @@ export function getPluginDetail(appId: string) {
   if (!entry) return null;
   return {
     ...entry,
+    logoUrl: entry.logoUrl ?? null,
     actionCount: Object.keys(entry.actions).length,
   };
 }
@@ -227,12 +261,32 @@ export async function executeAction(
   };
 
   // Notion requiert un header spécifique
-  if (appId === 'notion') {
+  if (appId === 'notion' || appId === 'notion_database' || appId === 'notion_calendar') {
     headers['Notion-Version'] = '2022-06-28';
   }
   // Asana requiert l'accept
   if (appId === 'asana') {
     headers['Accept'] = 'application/json';
+  }
+  // GitHub requiert la version API
+  if (appId === 'github') {
+    headers['X-GitHub-Api-Version'] = '2022-11-28';
+  }
+  // Stripe utilise une clé Bearer dans un header Authorization (déjà géré par basic)
+  // Twitch requiert Client-Id présent dans les credentials
+  if (appId === 'twitch' && credentials?.apiKey) {
+    headers['Client-Id'] = credentials.apiKey;
+  }
+  if (appId === 'spotify') {
+    headers['Accept'] = 'application/json';
+  }
+  // Cloudflare utilise X-Auth
+  if (appId === 'cloudflare') {
+    headers['Content-Type'] = 'application/json';
+  }
+  // DigitalOcean requiert le type de contenu
+  if (appId === 'digitalocean') {
+    headers['Content-Type'] = 'application/json';
   }
 
   // 9. Exécuter avec retry
