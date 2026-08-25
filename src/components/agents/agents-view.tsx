@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Bot,
+  User,
+  Send,
   Plus,
   Loader2,
   AlertCircle,
@@ -16,6 +18,9 @@ import {
   FileText,
   Globe,
   MessageSquare,
+  Sparkles,
+  CheckCircle2,
+  XCircle,
   ArrowLeft,
   Zap,
   Database,
@@ -24,19 +29,29 @@ import {
   Trash2,
   Eye,
   Cpu,
-  Sparkles,
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AdProvider } from '@/components/shared/ad-context';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { AdProvider, useAdContext } from '@/components/shared/ad-context';
+import { AdBanner } from '@/components/shared/ad-banner';
+import { AgentResponse } from '@/components/shared/agent-response';
+import { BorderBeam } from '@/components/ui/border-beam';
 import { ChatPanel } from '@/components/chat/chat-panel';
 import { AgentCreateDialog } from './agent-create-dialog';
 import { AgentDetailView } from './agent-detail-view';
 import { apiFetch } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useAuthStore } from '@/lib/store';
 
 // ============================================================
 // Types
