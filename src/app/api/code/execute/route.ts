@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from '@/lib/auth';
+import { applySecurity } from '@/lib/security';
 import { prisma } from '@/lib/prisma';
 
 export const maxDuration = 30;
@@ -16,14 +16,28 @@ interface ExecutionResult {
   exitCode: number;
 }
 
+/**
+ * Authentifie de façon mode-agnostique (cookie session Firebase OU JWT
+ * standalone, Bearer, X-API-Key) via applySecurity(). L'ancien code utilisait
+ * getServerSession() de @/lib/auth (ré-export Firebase UNIQUEMENT) : en mode
+ * standalone le cookie gen3ia_session est un JWT HS256 qui échouait la vérif
+ * Firebase-only → 401 → le visualiseur/exécuteur de code était inutilisable.
+ */
+async function requireUser(request: NextRequest): Promise<{ userId: string; ok: true } | { ok: false; res: NextResponse }> {
+  const { auth, error } = await applySecurity(request, { requireAuth: true });
+  if (error) return { ok: false, res: error };
+  if (!auth?.userId) return { ok: false, res: NextResponse.json({ error: 'Non authentifie' }, { status: 401 }) };
+  return { ok: true, userId: auth.userId };
+}
+
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   try {
-    const session = await getServerSession();
-    if (!session?.user.id) {
-      return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
-    }
-    const { code, language, input } = await request.json();
+    const auth = await requireUser(request);
+    if (!auth.ok) return auth.res;
+    const userId = auth.userId;
+
+    const { code, language, input } = await request.json().catch(() => ({ code: undefined, language: undefined, input: undefined }));
     if (!code || !language) {
       return NextResponse.json({ error: 'Code et langage requis' }, { status: 400 });
     }
@@ -41,7 +55,7 @@ export async function POST(request: NextRequest) {
         details: JSON.stringify({ language, codeLength: code.length }),
         status: result.error ? 'failed' : 'completed',
         result: JSON.stringify({ outputLength: result.output.length, executionTime: result.executionTime }),
-        userId: session.user.id,
+        userId,
       },
     });
     return NextResponse.json({
@@ -57,6 +71,25 @@ export async function POST(request: NextRequest) {
       executionTime: Date.now() - startTime, memoryUsage: 0, exitCode: 1,
     }, { status: 500 });
   }
+}
+
+// Motifs interdits : le code exécuté ne doit jamais toucher au process hôte.
+const FORBIDDEN_PATTERNS: RegExp[] = [
+  /require\s*\(/,
+  /import\s+["\w{*]/,
+  /process\./,
+  /global\./,
+  /__dirname/,
+  /child_process/,
+  /eval\s*\(/,
+  /new\s+Function\s*\(/,
+];
+
+function findForbidden(code: string): string | null {
+  for (const pattern of FORBIDDEN_PATTERNS) {
+    if (pattern.test(code)) return pattern.source;
+  }
+  return null;
 }
 
 async function executeInSandbox(code: string, language: string, input?: string): Promise<ExecutionResult> {
@@ -76,114 +109,46 @@ async function executeInSandbox(code: string, language: string, input?: string):
       } catch { wrappedCode = code; }
     }
 
-    // Validate: block dangerous patterns before execution
-    const dangerousPatterns = [
-      /require\s*\(/,          // No require()
-      /import\s+/,             // No import
-      /process\./,             // No process access
-      /global\./,              // No global access
-      /__dirname/,             // No filesystem paths
-      /child_process/,        // No subprocess
-      /eval\s*\(/,            // No eval
-      /Function\s*\(/,        // No Function constructor
-    ];
-    for (const pattern of dangerousPatterns) {
-      if (pattern.test(wrappedCode)) {
-        return {
-          output: '',
-          error: `Blocage sécurité: pattern interdit détecté (${pattern.source})`,
-          executionTime: Date.now() - startTime,
-          memoryUsage: 0,
-          exitCode: 1,
-        };
-      }
-    }
-
-    // Try isolated-vm for true sandbox isolation
-    const logs: string[] = [];
-    try {
-      const ivm = await import('isolated-vm') as any;
-      const isolate = new ivm.Isolate({ memoryLimit: 128 }); // 128MB max
-      const context = await isolate.createContext();
-
-      // Inject console.log into the isolate
-      const logFn = new ivm.Reference(function(...args: any[]) {
-        logs.push(args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' '));
-      });
-      context.global.setSync('console', {
-        log: logFn.derefInto(),
-        error: logFn.derefInto(),
-        warn: logFn.derefInto(),
-      });
-      context.global.setSync('input', input || '');
-
-      // Execute with timeout
-      const script = new ivm.Script(wrappedCode);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout execution')), SANDBOX_TIMEOUT)
-      );
-
-      await Promise.race([
-        script.run(context, { timeout: SANDBOX_TIMEOUT }),
-        timeoutPromise,
-      ]);
-
-      // Get memory usage from isolate
-      const heapStats = isolate.getHeapStatistics
-        ? isolate.getHeapStatistics()
-        : { used_heap_size: 0 };
-
-      isolate.dispose();
-
-      const output = logs.join('\n').slice(0, MAX_OUTPUT_SIZE);
+    const blocked = findForbidden(wrappedCode);
+    if (blocked) {
       return {
-        output,
-        error: null,
+        output: '',
+        error: `Blocage sécurité: pattern interdit détecté (${blocked})`,
         executionTime: Date.now() - startTime,
-        memoryUsage: heapStats.used_heap_size || 0,
-        exitCode: 0,
+        memoryUsage: 0,
+        exitCode: 1,
       };
-    } catch (ivmError: any) {
-      // isolated-vm not available — use hardened new Function with strict guards
-      // This is a fallback, not as safe as isolated-vm
-      if (ivmError?.message?.includes('Cannot find module')) {
-        // Hardened fallback: block global access via proxy
-        const blockProxy = new Proxy({}, {
-          get: () => { throw new Error('Accès global interdit'); },
-          set: () => { throw new Error('Accès global interdit'); },
-        });
-
-        const logs2: string[] = [];
-        const safeConsole = {
-          log: (...args: unknown[]) => { logs2.push(args.map(String).join(' ')); },
-          error: (...args: unknown[]) => { logs2.push('[ERROR] ' + args.map(String).join(' ')); },
-          warn: (...args: unknown[]) => { logs2.push('[WARN] ' + args.map(String).join(' ')); },
-        };
-
-        // Strip all dangerous globals from the function scope
-        // Block code injection patterns
-      if (/eval\s*\(|Function\s*\(|child_process|process\.binding|require\s*\(/.test(wrappedCode)) {
-        return { output: '', error: 'Code contains forbidden patterns', executionTime: 0, memoryUsage: 0, exitCode: 1 };
-      }
-      const fn = new Function('console', 'input', 'process', 'require', 'global', 'module',
-          'const process=undefined;const require=undefined;const global=undefined;const module=undefined;' +
-          wrappedCode
-        );
-
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout execution')), SANDBOX_TIMEOUT)
-        );
-
-        await Promise.race([
-          Promise.resolve().then(() => fn(safeConsole, input || '', blockProxy, blockProxy, blockProxy, blockProxy)),
-          timeoutPromise,
-        ]);
-
-        const output = logs2.join('\n').slice(0, MAX_OUTPUT_SIZE);
-        return { output, error: null, executionTime: Date.now() - startTime, memoryUsage: 0, exitCode: 0 };
-      }
-      throw ivmError;
     }
+
+    // Note : isolated-vm n'est pas installé (absent de package.json) ; son
+    // import[i1]` générait une erreur de résolution webpack (crash build/cold
+    // start). On exécute donc via le fallback blindé : scope borné, pourri
+    // des globals serveur, et timeout.
+    const logs: string[] = [];
+    const safeConsole = {
+      log: (...args: unknown[]) => { logs.push(args.map(String).join(' ')); },
+      error: (...args: unknown[]) => { logs.push('[ERROR] ' + args.map(String).join(' ')); },
+      warn: (...args: unknown[]) => { logs.push('[WARN] ' + args.map(String).join(' ')); },
+    };
+    const blockProxy = new Proxy({}, {
+      get: () => { throw new Error('Accès global interdit'); },
+      set: () => { throw new Error('Accès global interdit'); },
+    });
+
+    const fn = new Function('console', 'input', 'process', 'require', 'global', 'module',
+      'const process=undefined;const require=undefined;const global=undefined;const module=undefined;' +
+      wrappedCode
+    );
+
+    await Promise.race([
+      Promise.resolve().then(() => fn(safeConsole, input || '', blockProxy, blockProxy, blockProxy, blockProxy)),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout execution')), SANDBOX_TIMEOUT)
+      ),
+    ]);
+
+    const output = logs.join('\n').slice(0, MAX_OUTPUT_SIZE);
+    return { output, error: null, executionTime: Date.now() - startTime, memoryUsage: 0, exitCode: 0 };
   } catch (error) {
     return {
       output: '',
