@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from '@/lib/auth';
+import { applySecurity } from '@/lib/security';
 
 export const dynamic = "force-dynamic";
 const ALLOWED_LANGUAGES = ['javascript','typescript','python','html','css','jsx','tsx','sql','bash','json','yaml','markdown'];
@@ -31,17 +31,30 @@ const FALLBACK_TEMPLATES: Record<string, (prompt: string) => string> = {
   bash: (p) => '#!/bin/bash\n# ' + p + '\nset -euo pipefail\necho "Execution..."',
 };
 
+/**
+ * Authentifie de façon mode-agnostique (cookie session Firebase OU JWT
+ * standalone, Bearer, X-API-Key) via applySecurity(). L'ancien code utilisait
+ * getServerSession() de @/lib/auth (ré-export Firebase UNIQUEMENT) : en mode
+ * standalone le cookie gen3ia_session est un JWT HS256 qui échouait la vérif
+ * Firebase-only → 401 → le visualiseur de code était inutilisable.
+ */
+async function requireUser(request: NextRequest): Promise<{ userId: string; ok: true } | { ok: false; res: NextResponse }> {
+  const { auth, error } = await applySecurity(request, { requireAuth: true });
+  if (error) return { ok: false, res: error };
+  if (!auth?.userId) return { ok: false, res: NextResponse.json({ error: 'Non authentifie' }, { status: 401 }) };
+  return { ok: true, userId: auth.userId };
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user.id) {
-      return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
-    }
-    const { prompt, language = 'javascript' } = await request.json();
+    const auth = await requireUser(request);
+    if (!auth.ok) return auth.res;
+
+    const { prompt, language = 'javascript' } = await request.json().catch(() => ({ prompt: undefined, language: 'javascript' }));
     if (!prompt) {
       return NextResponse.json({ error: 'Prompt requis' }, { status: 400 });
     }
-    const lang = language.toLowerCase();
+    const lang = String(language).toLowerCase();
     if (!ALLOWED_LANGUAGES.includes(lang)) {
       return NextResponse.json({ error: 'Langage non supporte: ' + lang }, { status: 400 });
     }
