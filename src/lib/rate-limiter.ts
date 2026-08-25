@@ -1,10 +1,13 @@
 // ============================================================
-// Rate Limiter — Distribué via Redis (ioredis / Upstash) + fallback mémoire
+// Rate Limiter — Distribué via Redis (ioredis / Upstash REST) + fallback mémoire
 // Phase 2.2 — Rate limiting distribué
 // - Limite par utilisateur (identity) et par IP (fallback)
 // - Limite par ENDPOINT : categories AUTH, PAYMENT, API et défaut
 // - Token bucket (burst contrôlé) via Redis (multi-instance)
-// - Fallback mémoire propre quand Redis indisponible
+// - Transport Upstash REST natif (fetch) quand UPSTASH_REDIS_REST_URL + TOKEN
+//   sont définis — PAS de dépendance @upstash/redis requise, fonctionne en
+//   Edge/Serverless. Sinon ioredis si REDIS_URL, sinon mémoire.
+// - Fallback mémoire propre quand Redis est indisponible
 // - Limites personnalisées par route (options.limit / options.windowMs)
 // Compatible Vercel Edge, Serverless, et Docker multi-instances
 // ============================================================
@@ -59,8 +62,106 @@ const memoryStore = new Map<
 let lastCleanup = Date.now();
 const CLEANUP_INT = 300000; // 5 min
 
+// ============================================================
+// Transport Upstash REST natif (fetch) — aucune dépendance ajoutée
+// ============================================================
+//  Upstash REST : POST {REST_URL}/pipeline  avec Bearer {REST_TOKEN}
+//  Exécute les commandes Redis de façon pipelinée (atomique par pipeline).
+//  On exécute un token bucket en Lua (EVAL) pour l'atomicité multi-instance.
+// ============================================================
+
+const UPSTASH_REST_URL = process.env.UPSTASH_REDIS_REST_URL || '';
+const UPSTASH_REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+
+function isUpstashConfigured(): boolean {
+  return !!(UPSTASH_REST_URL && UPSTASH_REST_TOKEN);
+}
+
+async function upstashPipeline(
+  command: Array<Array<string | number>>,
+): Promise<Array<unknown> | null> {
+  const url = UPSTASH_REST_URL.replace(/\/$/, '') + '/pipeline';
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${UPSTASH_REST_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(command),
+      // Timeout raisonnable pour ne pas bloquer la requête entrante
+      signal: AbortSignal.timeout(3000),
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as unknown;
+    // Format réponse pipeline Upstash : [{ result: X, error?: string }, ...]
+    return data as Array<unknown>;
+  } catch {
+    // Fail-open : on retombera sur le fallback mémoire
+    return null;
+  }
+}
+
+/**
+ * Exécute le token bucket de façon atomique côté Upstash via EVAL.
+ * Retourne { allowed, remaining } ou null en cas d'échec (fallback mémoire).
+ */
+async function checkUpstash(key: string, policy: Policy): Promise<{ allowed: boolean; remaining: number } | null> {
+  const now = Date.now();
+  const nowSec = Math.floor(now / 1000);
+
+  // Lua : reconstitution + décrément, le tout atomique.
+  const script = `
+    local key = KEYS[1]
+    local cap = tonumber(ARGV[1])
+    local refillPerSec = tonumber(ARGV[2])
+    local now_sec = tonumber(ARGV[3])
+    local tokens = tonumber(redis.call('GET', key))
+    if tokens == nil then tokens = cap end
+    local ts = tonumber(redis.call('HGET', key .. ':ts', 'v')) or now_sec
+    tokens = math.min(cap, tokens + (now_sec - ts) * refillPerSec)
+    local allowed = 0
+    if tokens >= 1 then allowed = 1; tokens = tokens - 1 end
+    redis.call('SET', key, tokens)
+    redis.call('HSET', key .. ':ts', 'v', now_sec)
+    redis.call('EXPIRE', key, math.max(60, math.ceil(cap / refillPerSec)))
+    redis.call('EXPIRE', key .. ':ts', math.max(60, math.ceil(cap / refillPerSec)))
+    return {allowed, math.max(0, math.floor(tokens))}
+  `;
+
+  const res = await upstashPipeline([
+    ['EVAL', script, '1', key, String(policy.capacity), String(policy.refillPerMin / 60), String(nowSec)],
+  ]);
+
+  if (!res || !Array.isArray(res) || res.length === 0) {
+    return null;
+  }
+
+  const first = res[0] as { result?: unknown; error?: string };
+  if (first.error || first.result == null) {
+    return null;
+  }
+
+  // EVAL retourne un tableau [allowed, remaining]
+  const tuple = first.result as [number, number];
+  if (!Array.isArray(tuple) || tuple.length < 2) {
+    return null;
+  }
+
+  return {
+    allowed: Number(tuple[0]) === 1,
+    remaining: Math.max(0, Math.floor(Number(tuple[1]))),
+  };
+}
+
+// ---------- Client ioredis (fallback secondaire, serveurs Redis classiques) ----------
+
 function getRedisClient(): Redis | null {
-  const url = process.env.REDIS_URL || process.env.UPSTASH_REDIS_REST_URL || '';
+  const url = process.env.REDIS_URL || '';
   if (!url) return null;
   try {
     return new Redis(url, {
@@ -73,30 +174,28 @@ function getRedisClient(): Redis | null {
   }
 }
 
-export function getClientIp(request: Request): string {
-  // Ne pas faire confiance à x-forwarded-for seul (spoofable côté client)
-  const cf = request.headers.get('cf-connecting-ip'); // Cloudflare
-  if (cf) return cf;
-  const realIp = request.headers.get('x-real-ip');
-  if (realIp) return realIp;
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0]?.trim() || 'unknown';
-  return 'unknown';
-}
+function checkMemory(key: string, policy: Policy): { allowed: boolean; remaining: number; resetIn: number } {
+  const now = Date.now();
+  let entry = memoryStore.get(key);
+  if (!entry) {
+    entry = { tokens: policy.capacity, lastRefill: now };
+    memoryStore.set(key, entry);
+  }
+  // refill
+  entry.tokens = Math.min(policy.capacity, entry.tokens + (now - entry.lastRefill) * (policy.refillPerMin / 60000));
+  entry.lastRefill = now;
+  const allowed = entry.tokens >= 1;
+  if (allowed) entry.tokens -= 1;
+  const remaining = Math.floor(entry.tokens);
 
-/** Devine la catégorie d'endpoint à partir du path pour appliquer la bonne politique. */
-export function scopeForPath(pathname: string): RateLimitScope {
-  if (/\/(auth|api\/auth|api\/oauth|api\/twofa|register|signin|signup)/.test(pathname)) return 'auth';
-  if (/\/payment|\/stripe|\/sebpay|\/api\/(payments|billing|credits|webhooks)/.test(pathname)) return 'payment';
-  if (/^\/api\//.test(pathname)) return 'api';
-  return 'default';
-}
-
-function getRateLimitKey(request: Request, scope: RateLimitScope, endpoint: string, userId?: string): string {
-  const ip = getClientIp(request);
-  const identity = userId || ip;
-  // clé incluant endpoint + scope pour des limites par ressource
-  return `rl:${scope}:${endpoint}:${identity}`;
+  // cleanup périodique
+  if (now - lastCleanup > CLEANUP_INT) {
+    lastCleanup = now;
+    for (const [k, v] of memoryStore) {
+      if (now - v.lastRefill > policy.windowSec * 1000 * 2) memoryStore.delete(k);
+    }
+  }
+  return { allowed, remaining, resetIn: policy.windowSec };
 }
 
 async function checkRedis(redis: Redis, key: string, policy: Policy): Promise<{ allowed: boolean; remaining: number; resetIn: number }> {
@@ -133,28 +232,30 @@ async function checkRedis(redis: Redis, key: string, policy: Policy): Promise<{ 
   }
 }
 
-function checkMemory(key: string, policy: Policy): { allowed: boolean; remaining: number; resetIn: number } {
-  const now = Date.now();
-  let entry = memoryStore.get(key);
-  if (!entry) {
-    entry = { tokens: policy.capacity, lastRefill: now };
-    memoryStore.set(key, entry);
-  }
-  // refill
-  entry.tokens = Math.min(policy.capacity, entry.tokens + (now - entry.lastRefill) * (policy.refillPerMin / 60000));
-  entry.lastRefill = now;
-  const allowed = entry.tokens >= 1;
-  if (allowed) entry.tokens -= 1;
-  const remaining = Math.floor(entry.tokens);
+function getClientIp(request: Request): string {
+  // Ne pas faire confiance à x-forwarded-for seul (spoofable côté client)
+  const cf = request.headers.get('cf-connecting-ip'); // Cloudflare
+  if (cf) return cf;
+  const realIp = request.headers.get('x-real-ip');
+  if (realIp) return realIp;
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0]?.trim() || 'unknown';
+  return 'unknown';
+}
 
-  // cleanup périodique
-  if (now - lastCleanup > CLEANUP_INT) {
-    lastCleanup = now;
-    for (const [k, v] of memoryStore) {
-      if (now - v.lastRefill > policy.windowSec * 1000 * 2) memoryStore.delete(k);
-    }
-  }
-  return { allowed, remaining, resetIn: policy.windowSec };
+/** Devine la catégorie d'endpoint à partir du path pour appliquer la bonne politique. */
+export function scopeForPath(pathname: string): RateLimitScope {
+  if (/\/(auth|api\/auth|api\/oauth|api\/twofa|register|signin|signup)/.test(pathname)) return 'auth';
+  if (/\/payment|\/stripe|\/sebpay|\/api\/(payments|billing|credits|webhooks)/.test(pathname)) return 'payment';
+  if (/^\/api\//.test(pathname)) return 'api';
+  return 'default';
+}
+
+function getRateLimitKey(request: Request, scope: RateLimitScope, endpoint: string, userId?: string): string {
+  const ip = getClientIp(request);
+  const identity = userId || ip;
+  // clé incluant endpoint + scope pour des limites par ressource
+  return `rl:${scope}:${endpoint}:${identity}`;
 }
 
 export interface RateLimitResult {
@@ -172,6 +273,11 @@ export interface RateLimitResult {
  * @param scope    catégorie d'endpoint (défaut: devinée depuis pathname)
  * @param endpoint (optionnel) clé explicite de l'endpoint
  * @param options  (optionnel) limites personnalisées { limit, windowMs }
+ *
+ * Ordre de résolution du transport :
+ *   1. Upstash REST (UPSTASH_REDIS_REST_URL + TOKEN) — atomique via Lua
+ *   2. ioredis (REDIS_URL) — serveur Redis classique
+ *   3. Fallback mémoire (single-instance)
  */
 export async function rateLimit(
   request: Request,
@@ -186,6 +292,16 @@ export async function rateLimit(
   const policy = resolvePolicy(resolvedScope, options);
   const key = getRateLimitKey(request, resolvedScope, resolvedEndpoint, userId);
 
+  // 1. Upstash REST (préféré en serverless/edge)
+  if (isUpstashConfigured()) {
+    const upstashResult = await checkUpstash(key, policy);
+    if (upstashResult) {
+      return { ...upstashResult, resetIn: policy.windowSec, limit: policy.capacity, scope: resolvedScope };
+    }
+    // Échec Upstash -> fallback mémoire (jamais fail-open silencieusement pour les limites)
+  }
+
+  // 2. ioredis (serveur Redis classique)
   const redis = getRedisClient();
   if (redis) {
     try {
@@ -196,7 +312,8 @@ export async function rateLimit(
       try { redis.disconnect(); } catch { /* noop */ }
     }
   }
-  // Fallback mémoire
+
+  // 3. Fallback mémoire
   const mem = checkMemory(key, policy);
   return { ...mem, limit: policy.capacity, scope: resolvedScope };
 }
