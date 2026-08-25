@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 // ============================================================
 // Campay Client — Paiement Mobile Money (Cameroun)
 // ============================================================
@@ -26,6 +26,7 @@ const CAMPAY_USERNAME = process.env.CAMPAY_USERNAME || '';
 const CAMPAY_PASSWORD = process.env.CAMPAY_PASSWORD || '';
 const CAMPAY_APP_ID = process.env.CAMPAY_APP_ID || '';
 const CAMPAY_APP_TOKEN = process.env.CAMPAY_APP_TOKEN || '';
+const CAMPAY_WEBHOOK_SECRET = process.env.CAMPAY_WEBHOOK_SECRET || '';
 
 export type CampayOperator = 'MTN_MOMO' | 'ORANGE_MONEY' | 'ORANGE_CM' | 'MTN_CM';
 
@@ -212,15 +213,24 @@ class CampayClient {
   }
 
   /**
-   * Vérifie la signature d'un webhook Campay.
+   * Vérifie la signature d'un webhook Campay (HMAC SHA-256, constant-time).
+   * Le secret utilisé est CAMPAY_WEBHOOK_SECRET s'il est défini, sinon on
+   * retombe sur CAMPAY_APP_TOKEN / CAMPAY_PASSWORD (compat historique).
    */
   verifyWebhookSignature(payload: string, signature: string): boolean {
-    // Campay utilise un secret partagé pour signer les webhooks
-    const expected = require('node:crypto')
-      .createHmac('sha256', CAMPAY_APP_TOKEN || CAMPAY_PASSWORD)
-      .update(payload)
-      .digest('hex');
-    return expected === signature;
+    const secret = CAMPAY_WEBHOOK_SECRET || CAMPAY_APP_TOKEN || CAMPAY_PASSWORD;
+    if (!secret || !signature || !payload) return false;
+
+    try {
+      const expected = createHmac('sha256', secret).update(payload).digest('hex');
+      const sig = signature.startsWith('sha256=') ? signature.slice(7) : signature;
+      const expectedBuf = Buffer.from(expected, 'utf-8');
+      const signatureBuf = Buffer.from(sig, 'utf-8');
+      if (expectedBuf.length !== signatureBuf.length) return false;
+      return timingSafeEqual(expectedBuf, signatureBuf);
+    } catch {
+      return false;
+    }
   }
 }
 
