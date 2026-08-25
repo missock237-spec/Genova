@@ -8,7 +8,7 @@ import { useAppStore, useAuthStore, useModernStore } from '@/lib/store';
 import {
   LayoutDashboard, Bot, Radio, Shield, GitBranch, Settings,
   BarChart3, ChevronLeft, LogOut, Sparkles, Type,
-  Wallet, Mic, ImageIcon, Puzzle, Clock, Bell, Code2,
+  Wallet, Mic, ImageIcon, Puzzle, Clock, Bell, Code2, Wand2,
 } from 'lucide-react';
 import type { ModernViewType } from '@/lib/store';
 
@@ -59,6 +59,7 @@ export function AppSidebar({ mobileOpen = false, onCloseMobile }: AppSidebarProp
     {
       items: [
         { id: 'voice', label: 'Voice Studio', icon: Mic },
+        { id: 'generation', label: 'Génération IA', icon: Wand2 },
         { id: 'images', label: 'Generate Image', icon: ImageIcon },
         { id: 'integrations', label: 'Integrations', icon: Puzzle },
         { id: 'scheduler', label: 'Scheduler', icon: Clock },
