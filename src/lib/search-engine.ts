@@ -2,8 +2,14 @@
 // SEARCH ENGINE V2 — Recherche globale amelioree
 // Scoring pondere, fuzzy matching, suggestions,
 // historique, cache memoization, filtres avances
+//
+// NOTE : projet migré de Prisma vers Cloud Firestore.
+// Les requêtes reposent désormais sur la façade `db` (src/lib/db.ts).
+// Firestore ne supporte pas `contains`/`mode` en natif : la recherche
+// plein-texte est donc faite en mémoire après lecture des collections
+// cibles (filtrage exact + fuzzy scoring côté serveur).
 // ============================================================
-import { prisma } from './prisma';
+import { db } from './db';
 import { createLogger } from './logger';
 
 const log = createLogger('search-engine');
@@ -41,9 +47,33 @@ const searchCache = new Map<string, { results: SearchResult[]; timestamp: number
 const CACHE_TTL = 30_000; // 30 secondes
 const CACHE_MAX = 50;
 
+// Plafond de lecture par collection (évite de scanner tout l'historique).
+const SCAN_LIMIT = 500;
+
+/**
+ * Normalise une valeur `createdAt`/`updatedAt` Firestore en timestamp (ms).
+ * Tolère les dates invalides (migration historique des sentinelles).
+ */
+function toTimestamp(value: unknown): number | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'object' && typeof (value as { _seconds?: number })._seconds === 'number') {
+    return (value as { _seconds: number })._seconds * 1000;
+  }
+  const ms = new Date(value as string | number).getTime();
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function toStr(value: unknown): string {
+  return String(value ?? '');
+}
+
+function includesInsensitive(haystack: string, needle: string): boolean {
+  return haystack.toLowerCase().includes(needle);
+}
+
 export class SearchEngine {
   /**
-   * Recherche globale avec scoring pondere V2
+   * Recherche globale avec scoring pondéré V2.
    */
   async search(query: string, userId: string, options: SearchOptions = {}): Promise<SearchResult[]> {
     if (!query || query.length < 2) return [];
@@ -60,19 +90,18 @@ export class SearchEngine {
     }
 
     const types = options.types;
-    const maxPerType = Math.ceil((limit + offset) / 5) + 2;
     const results: SearchResult[] = [];
 
-    // Lancer toutes les recherches en parallele
+    // Lancer toutes les recherches en parallèle
     await Promise.all([
-      this.searchAgents(q, userId, maxPerType, results),
-      this.searchWorkflows(q, userId, maxPerType, results),
-      this.searchDatasets(q, userId, maxPerType, results),
-      this.searchDashboards(q, userId, maxPerType, results),
-      this.searchMarketplace(q, maxPerType, results),
-      this.searchConversations(q, userId, maxPerType, results),
-      this.searchTemplates(q, userId, maxPerType, results),
-      this.searchMessages(q, userId, maxPerType, results),
+      this.searchAgents(q, userId, results),
+      this.searchWorkflows(q, userId, results),
+      this.searchDatasets(q, userId, results),
+      this.searchDashboards(q, userId, results),
+      this.searchMarketplace(q, results),
+      this.searchConversations(q, userId, results),
+      this.searchTemplates(q, userId, results),
+      this.searchMessages(q, userId, results),
     ]);
 
     // Scoring final avec boost contextuel
@@ -102,7 +131,7 @@ export class SearchEngine {
   }
 
   /**
-   * Suggestions en temps reel (prefix matching)
+   * Suggestions en temps réel (préfixe match).
    */
   async suggest(query: string, userId: string): Promise<SuggestionResult[]> {
     if (!query || query.length < 1) return [];
@@ -111,25 +140,34 @@ export class SearchEngine {
     const suggestions: SuggestionResult[] = [];
 
     const [agents, workflows, datasets] = await Promise.all([
-      prisma.agent.findMany({ where: { ownerId: userId, name: { startsWith: q, mode: 'insensitive' } }, select: { name: true }, take: 3 }),
-      prisma.workflow.findMany({ where: { userId, name: { startsWith: q, mode: 'insensitive' } }, select: { name: true }, take: 3 }),
-      prisma.dataset.findMany({ where: { userId, name: { startsWith: q, mode: 'insensitive' } }, select: { name: true }, take: 3 }),
+      db.agent.findMany({ where: { ownerId: userId }, limit: SCAN_LIMIT, select: ['name'] }).catch(() => []),
+      db.workflow.findMany({ where: { userId }, limit: SCAN_LIMIT, select: ['name'] }).catch(() => []),
+      db.dataset.findMany({ where: { userId }, limit: SCAN_LIMIT, select: ['name'] }).catch(() => []),
     ]);
 
-    agents.forEach(a => suggestions.push({ text: a.name, type: 'agent', count: 0 }));
-    workflows.forEach(w => suggestions.push({ text: w.name, type: 'workflow', count: 0 }));
-    datasets.forEach(d => suggestions.push({ text: d.name, type: 'dataset', count: 0 }));
+    for (const a of agents as Array<Record<string, unknown>>) {
+      const name = toStr(a.name);
+      if (name.toLowerCase().startsWith(q)) suggestions.push({ text: name, type: 'agent', count: 0 });
+    }
+    for (const w of workflows as Array<Record<string, unknown>>) {
+      const name = toStr(w.name);
+      if (name.toLowerCase().startsWith(q)) suggestions.push({ text: name, type: 'workflow', count: 0 });
+    }
+    for (const d of datasets as Array<Record<string, unknown>>) {
+      const name = toStr(d.name);
+      if (name.toLowerCase().startsWith(q)) suggestions.push({ text: name, type: 'dataset', count: 0 });
+    }
 
     return suggestions.slice(0, 6);
   }
 
   /**
-   * Fuzzy match (Levenshtein) pour tolerer les fautes de frappe
+   * Fuzzy match (Levenshtein) pour tolérer les fautes de frappe.
    */
   private fuzzyMatch(text: string, query: string): number {
     if (text.includes(query)) return 1.0;
 
-    const parts = query.split(/s+/);
+    const parts = query.split(/\s+/);
     let matchScore = 0;
     for (const part of parts) {
       if (part.length < 2) continue;
@@ -150,14 +188,14 @@ export class SearchEngine {
   }
 
   /**
-   * Scoring V2 avec boost contextuel
+   * Scoring V2 avec boost contextuel.
    */
   private computeBoostedScore(result: SearchResult, query: string): number {
     const lower = result.title.toLowerCase();
     const desc = result.description.toLowerCase();
     let score = 0;
 
-    // Score base
+    // Score de base
     if (lower === query) score += 100;
     else if (lower.startsWith(query)) score += 85;
     else if (lower.includes(' ' + query)) score += 70;
@@ -172,7 +210,7 @@ export class SearchEngine {
     };
     score += typeBoost[result.type] || 0;
 
-    // Boost par metadonnees
+    // Boost par métadonnées
     if (result.metadata?.usageCount) {
       score += Math.min(result.metadata.usageCount * 0.5, 5);
     }
@@ -185,97 +223,231 @@ export class SearchEngine {
 
   // ===== RECHERCHES PAR MODULE =====
 
-  private async searchAgents(q: string, userId: string, take: number, results: SearchResult[]) {
-    const agents = await prisma.agent.findMany({
-      where: { ownerId: userId, OR: [{ name: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }, { role: { contains: q, mode: 'insensitive' } }, { model: { contains: q, mode: 'insensitive' } }] },
-      take, select: { id: true, name: true, description: true, role: true, status: true, model: true, usageCount: true, updatedAt: true },
-    });
-    agents.forEach(a => {
-      const matchField = a.name.toLowerCase().includes(q) ? 'name' : a.description?.toLowerCase().includes(q) ? 'description' : 'role';
-      results.push({ id: a.id, type: 'agent', title: a.name, description: a.description || a.role, subtitle: `${a.model} · ${a.status}`, icon: '🤖', url: '/agents/' + a.id, score: 0, matchField, metadata: { usageCount: a.usageCount, updatedAt: a.updatedAt?.getTime() } });
-    });
+  private async searchAgents(q: string, userId: string, results: SearchResult[]) {
+    const agents = await db.agent
+      .findMany({ where: { ownerId: userId }, limit: SCAN_LIMIT })
+      .catch(() => []) as Array<Record<string, unknown>>;
+    for (const a of agents) {
+      const name = toStr(a.name);
+      const description = toStr(a.description);
+      const role = toStr(a.role);
+      const model = toStr(a.model);
+      if (![name, description, role, model].some((f) => includesInsensitive(f, q))) continue;
+
+      const matchField = includesInsensitive(name, q) ? 'name' : includesInsensitive(description, q) ? 'description' : 'role';
+      results.push({
+        id: toStr(a.id),
+        type: 'agent',
+        title: name,
+        description: description || role,
+        subtitle: `${model || '—'} · ${toStr(a.status)}`,
+        icon: '🤖',
+        url: '/agents/' + toStr(a.id),
+        score: 0,
+        matchField,
+        metadata: { usageCount: Number(a.usageCount || 0), updatedAt: toTimestamp(a.updatedAt) },
+      });
+    }
   }
 
-  private async searchWorkflows(q: string, userId: string, take: number, results: SearchResult[]) {
-    const workflows = await prisma.workflow.findMany({
-      where: { userId, OR: [{ name: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] },
-      take, select: { id: true, name: true, description: true, trigger: true, status: true, updatedAt: true },
-    });
-    workflows.forEach(w => results.push({ id: w.id, type: 'workflow', title: w.name, description: w.description || `Declencheur: ${w.trigger}`, subtitle: `${w.status} · ${w.trigger}`, icon: '⚡', url: '/workflows/' + w.id, score: 0, metadata: { updatedAt: w.updatedAt?.getTime() } }));
+  private async searchWorkflows(q: string, userId: string, results: SearchResult[]) {
+    const workflows = await db.workflow
+      .findMany({ where: { userId }, limit: SCAN_LIMIT })
+      .catch(() => []) as Array<Record<string, unknown>>;
+    for (const w of workflows) {
+      const name = toStr(w.name);
+      const description = toStr(w.description);
+      if (!includesInsensitive(name, q) && !includesInsensitive(description, q)) continue;
+
+      const trigger = toStr(w.trigger);
+      results.push({
+        id: toStr(w.id),
+        type: 'workflow',
+        title: name,
+        description: description || `Déclencheur: ${trigger}`,
+        subtitle: `${toStr(w.status)} · ${trigger}`,
+        icon: '⚡',
+        url: '/workflows/' + toStr(w.id),
+        score: 0,
+        metadata: { updatedAt: toTimestamp(w.updatedAt) },
+      });
+    }
   }
 
-  private async searchDatasets(q: string, userId: string, take: number, results: SearchResult[]) {
-    const datasets = await prisma.dataset.findMany({
-      where: { userId, OR: [{ name: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }, { tags: { contains: q, mode: 'insensitive' } }] },
-      take, select: { id: true, name: true, description: true, source: true, rowCount: true, tags: true },
-    });
-    datasets.forEach(d => results.push({ id: d.id, type: 'dataset', title: d.name, description: d.description || `${d.source} dataset`, subtitle: `${d.source} · ${d.rowCount} lignes`, icon: '📊', url: '/data/datasets/' + d.id, score: 0, metadata: { usageCount: d.rowCount } }));
+  private async searchDatasets(q: string, userId: string, results: SearchResult[]) {
+    const datasets = await db.dataset
+      .findMany({ where: { userId }, limit: SCAN_LIMIT })
+      .catch(() => []) as Array<Record<string, unknown>>;
+    for (const d of datasets) {
+      const name = toStr(d.name);
+      const description = toStr(d.description);
+      const tags = toStr(d.tags ?? '');
+      if (![name, description, tags].some((f) => includesInsensitive(f, q))) continue;
+
+      const source = toStr(d.source);
+      const rowCount = Number(d.rowCount || 0);
+      results.push({
+        id: toStr(d.id),
+        type: 'dataset',
+        title: name,
+        description: description || `${source} dataset`,
+        subtitle: `${source} · ${rowCount} lignes`,
+        icon: '📊',
+        url: '/data/datasets/' + toStr(d.id),
+        score: 0,
+        metadata: { usageCount: rowCount },
+      });
+    }
   }
 
-  private async searchDashboards(q: string, userId: string, take: number, results: SearchResult[]) {
-    const dashboards = await prisma.dashboard.findMany({
-      where: { userId, OR: [{ name: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] },
-      take, select: { id: true, name: true, description: true },
-    });
-    dashboards.forEach(d => results.push({ id: d.id, type: 'dashboard', title: d.name, description: d.description || 'Tableau de bord', subtitle: 'Dashboard', icon: '📈', url: '/data/dashboards/' + d.id, score: 0 }));
+  private async searchDashboards(q: string, userId: string, results: SearchResult[]) {
+    const dashboards = await db.dashboard
+      .findMany({ where: { userId }, limit: SCAN_LIMIT })
+      .catch(() => []) as Array<Record<string, unknown>>;
+    for (const d of dashboards) {
+      const name = toStr(d.name);
+      const description = toStr(d.description);
+      if (!includesInsensitive(name, q) && !includesInsensitive(description, q)) continue;
+
+      results.push({
+        id: toStr(d.id),
+        type: 'dashboard',
+        title: name,
+        description: description || 'Tableau de bord',
+        subtitle: 'Dashboard',
+        icon: '📈',
+        url: '/data/dashboards/' + toStr(d.id),
+        score: 0,
+      });
+    }
   }
 
-  private async searchMarketplace(q: string, take: number, results: SearchResult[]) {
-    const listings = await prisma.marketplaceListing.findMany({
-      where: { OR: [{ name: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }], status: 'published', isActive: true },
-      take, select: { id: true, name: true, description: true, type: true, price: true, rating: true },
-    });
-    listings.forEach(l => results.push({ id: l.id, type: 'marketplace', title: l.name, description: l.description || l.type, subtitle: `${l.type}${l.price > 0 ? ` · ${l.price} FCFA` : ' · Gratuit'}`, icon: '🛒', url: '/marketplace/' + l.id, score: 0, metadata: { rating: l.rating } }));
+  private async searchMarketplace(q: string, results: SearchResult[]) {
+    const listings = await db.marketplaceListing
+      .findMany({ where: { status: 'published', isActive: true }, limit: SCAN_LIMIT })
+      .catch(() => []) as Array<Record<string, unknown>>;
+    for (const l of listings) {
+      const name = toStr(l.name);
+      const description = toStr(l.description);
+      const type = toStr(l.type);
+      if (!includesInsensitive(name, q) && !includesInsensitive(description, q)) continue;
+
+      const price = Number(l.price || 0);
+      results.push({
+        id: toStr(l.id),
+        type: 'markepline',
+        title: name,
+        description: description || type,
+        subtitle: `${type}${price > 0 ? ` · ${price} FCFA` : ' · Gratuit'}`,
+        icon: '🛒',
+        url: '/marketplace/' + toStr(l.id),
+        score: 0,
+        metadata: { rating: Number(l.rating || 0) },
+      });
+    }
   }
 
-  private async searchConversations(q: string, userId: string, take: number, results: SearchResult[]) {
-    const conversations = await prisma.conversation.findMany({
-      where: { userId, title: { contains: q, mode: 'insensitive' } },
-      take, select: { id: true, title: true, type: true, updatedAt: true },
-    });
-    conversations.forEach(c => results.push({ id: c.id, type: 'conversation', title: c.title, description: `Conversation ${c.type}`, subtitle: c.type, icon: '💬', url: '/chat/' + c.id, score: 0, metadata: { updatedAt: c.updatedAt?.getTime() } }));
+  private async searchConversations(q: string, userId: string, results: SearchResult[]) {
+    const conversations = await db.conversation
+      .findMany({ where: { userId }, limit: SCAN_LIMIT })
+      .catch(() => []) as Array<Record<string, unknown>>;
+    for (const c of conversations) {
+      const title = toStr(c.title);
+      if (!includesInsensitive(title, q)) continue;
+
+      results.push({
+        id: toStr(c.id),
+        type: 'conversation',
+        title,
+        description: `Conversation ${toStr(c.type)}`,
+        subtitle: toStr(c.type),
+        icon: '💬',
+        url: '/chat/' + toStr(c.id),
+        score: 0,
+        metadata: { updatedAt: toTimestamp(c.updatedAt) },
+      });
+    }
   }
 
-  private async searchTemplates(q: string, userId: string, take: number, results: SearchResult[]) {
-    const templates = await prisma.workflowTemplate.findMany({
-// @ts-ignore — type narrowing pending, see refactor ticket
-      where: { OR: [{ name: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }], OR: [{ isPublic: true }, { userId }] },
-      take, select: { id: true, name: true, description: true, category: true, icon: true, usageCount: true },
-    });
-    templates.forEach(t => results.push({ id: t.id, type: 'template', title: t.name, description: t.description || t.category, subtitle: t.category, icon: t.icon || '📋', url: '/templates/' + t.id, score: 0, metadata: { usageCount: t.usageCount } }));
+  private async searchTemplates(q: string, userId: string, results: SearchResult[]) {
+    const templates = await db.workflowTemplate
+      .findMany({ limit: SCAN_LIMIT })
+      .catch(() => []) as Array<Record<string, unknown>>;
+    for (const t of templates) {
+      // Visibilité : public OU propriétaire
+      const isPublic = t.isPublic === true;
+      const owner = toStr(t.userId);
+      if (!isPublic && owner !== userId) continue;
+
+      const name = toStr(t.name);
+      const description = toStr(t.description);
+      if (!includesInsensitive(name, q) && !includesInsensitive(description, q)) continue;
+
+      const category = toStr(t.category);
+      results.push({
+        id: toStr(t.id),
+        type: 'template',
+        title: name,
+        description: description || category,
+        subtitle: category,
+        icon: toStr(t.icon) || '📋',
+        url: '/templates/' + toStr(t.id),
+        score: 0,
+        metadata: { usageCount: Number(t.usageCount || 0) },
+      });
+    }
   }
 
-  private async searchMessages(q: string, userId: string, take: number, results: SearchResult[]) {
-    const conversations = await prisma.conversation.findMany({ where: { userId }, select: { id: true, title: true }, take: 20 });
-    const convIds = conversations.map(c => c.id);
+  private async searchMessages(q: string, userId: string, results: SearchResult[]) {
+    const conversations = await db.conversation
+      .findMany({ where: { userId }, limit: 20, select: ['id', 'title'] })
+      .catch(() => []) as Array<Record<string, unknown>>;
+    const convIds = conversations.map((c) => toStr(c.id));
     if (convIds.length === 0) return;
-    const messages = await prisma.message.findMany({
-      where: { conversationId: { in: convIds }, content: { contains: q, mode: 'insensitive' } },
-      take, select: { id: true, content: true, conversationId: true, createdAt: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    messages.forEach(m => {
-      const conv = conversations.find(c => c.id === m.conversationId);
-      results.push({ id: m.id, type: 'conversation', title: conv?.title || 'Message', description: m.content.slice(0, 100), subtitle: 'Message', icon: '💬', url: '/chat/' + m.conversationId, score: 0, matchField: 'content' });
-    });
+
+    // Firestore ne supporte pas `in` sur la façade ; on filtre en mémoire
+    // après lecture des messages récents de l'utilisateur.
+    const messages = await db.message
+      .findMany({ limit: SCAN_LIMIT })
+      .catch(() => []) as Array<Record<string, unknown>>;
+
+    for (const m of messages) {
+      if (!convIds.includes(toStr(m.conversationId))) continue;
+      const content = toStr(m.content);
+      if (!includesInsensitive(content, q)) continue;
+
+      const conv = conversations.find((c) => toStr(c.id) === toStr(m.conversationId));
+      results.push({
+        id: toStr(m.id),
+        type: 'conversation',
+        title: conv ? toStr(conv.title) : 'Message',
+        description: content.slice(0, 100),
+        subtitle: 'Message',
+        icon: '💬',
+        url: '/chat/' + toStr(m.conversationId),
+        score: 0,
+        matchField: 'content',
+        metadata: { updatedAt: toTimestamp(m.createdAt) },
+      });
+    }
   }
 
   /**
-   * Compteurs par type
+   * Compteurs par type.
    */
   async getSearchCounts(userId: string): Promise<Record<string, number>> {
     const [agents, workflows, datasets, dashboards, conversations] = await Promise.all([
-      prisma.agent.count({ where: { ownerId: userId } }),
-      prisma.workflow.count({ where: { userId } }),
-      prisma.dataset.count({ where: { userId } }),
-      prisma.dashboard.count({ where: { userId } }),
-      prisma.conversation.count({ where: { userId } }),
+      db.agent.count({ where: { ownerId: userId } }),
+      db.workflow.count({ where: { userId } }),
+      db.dataset.count({ where: { userId } }),
+      db.dashboard.count({ where: { userId } }),
+      db.conversation.count({ where: { userId } }),
     ]);
     return { agents, workflows, datasets, dashboards, conversations };
   }
 
   /**
-   * Vide le cache
+   * Vide le cache.
    */
   clearCache(): void {
     searchCache.clear();
