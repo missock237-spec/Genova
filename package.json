@@ -147,7 +147,7 @@
   "devDependencies": {
     "@eslint/compat": "^2.1.0",
     "@eslint/eslintrc": "^2.1.0",
-    "@next/eslint-plugin-next": "15",
+    "@next/eslint-plugin-next": "16",
     "@playwright/test": "^1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^22.20.1",
