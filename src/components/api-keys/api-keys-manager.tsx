@@ -30,6 +30,34 @@ const SCOPE_OPTIONS = [
   { value: 'admin:read', label: 'Administration' },
 ];
 
+// FIX « Failed to fetch keys » : jamais de réponse en cache (un service-worker ou
+// un cache HTTP peut servir une réponse 412/erronée), cookies same-origin explicites,
+// et un seul retry automatique sur 429/5xx avant de lâcher — le statut réel est
+// exposé à l'utilisateur pour un diagnostic précis.
+const API_FETCH_OPTIONS: RequestInit = {
+  cache: 'no-store',
+  credentials: 'same-origin',
+};
+
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
+async function fetchJson(url: string, init?: RequestInit, retries = 1, attempt = 0): Promise<Response> {
+  const res = await fetch(url, { ...API_FETCH_OPTIONS, ...init });
+  if (!res.ok && RETRYABLE_STATUS.has(res.status) && attempt < retries) {
+    await new Promise((r) => setTimeout(r, 300 * Math.pow(2, attempt)));
+    return fetchJson(url, init, retries, attempt + 1);
+  }
+  return res;
+}
+
+function describeFetchError(status: number, fallback: string): string {
+  if (status === 429) return 'Trop de requêtes (429) — réessayez dans quelques secondes';
+  if (status === 401) return 'Session non authentifiée (401) — reconnectez-vous';
+  if (status === 403) return `Accès refusé (403) — statut: ${status}`;
+  if (status >= 500) return `Erreur serveur (${status}) — réessayez dans un instant`;
+  return `${fallback} (${status})`;
+}
+
 export function ApiKeysManager() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,10 +70,11 @@ export function ApiKeysManager() {
 
   const fetchKeys = useCallback(async () => {
     try {
-      const res = await fetch('/api/keys');
-      if (!res.ok) throw new Error('Failed to fetch keys');
+      const res = await fetchJson('/api/keys');
+      if (!res.ok) throw new Error(describeFetchError(res.status, 'Failed to fetch keys'));
       const data = await res.json();
       setKeys(data.keys || []);
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load keys');
     } finally { setLoading(false); }
@@ -66,13 +95,13 @@ export function ApiKeysManager() {
     if (!newKeyName.trim()) return;
     setError(null);
     try {
-      const res = await fetch('/api/keys', {
+      const res = await fetchJson('/api/keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newKeyName, scopes: Array.from(selectedScopes) }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create key');
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error((data?.error) || describeFetchError(res.status, 'Failed to create key'));
       setNewlyCreatedKey(data.key);
       setNewKeyName('');
       await fetchKeys();
@@ -84,12 +113,12 @@ export function ApiKeysManager() {
   const deleteKey = async (id: string) => {
     if (!confirm('Supprimer cette clé API ? Les services qui l\'utilisent seront coupés.')) return;
     try {
-      const res = await fetch('/api/keys', {
+      const res = await fetchJson('/api/keys', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       });
-      if (!res.ok) throw new Error('Failed to delete key');
+      if (!res.ok) throw new Error(describeFetchError(res.status, 'Failed to delete key'));
       await fetchKeys();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete key');
@@ -130,7 +159,12 @@ export function ApiKeysManager() {
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>Erreur</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription className="flex items-center justify-between gap-2">
+                <span>{error}</span>
+                <Button size="sm" variant="outline" onClick={() => { setLoading(true); fetchKeys(); }}>
+                  <RefreshCw className="h-3.5 w-3.5 mr-1" /> Réessayer
+                </Button>
+              </AlertDescription>
             </Alert>
           )}
 
@@ -218,10 +252,13 @@ export function ApiKeysManager() {
               </div>
             </div>
           </div>
-          <Button onClick={createKey} disabled={!newKeyName.trim()} className="self-end">
-            <Plus className="h-4 w-4 mr-2" />
-            Créer la clé
-          </Button>
+          <div className="flex justify-between items-center w-full gap-2">
+            <span className="text-xs text-muted-foreground">{keys.length} clé{keys.length > 1 ? 's' : ''}</span>
+            <Button onClick={createKey} disabled={!newKeyName.trim()} className="self-end">
+              <Plus className="h-4 w-4 mr-2" />
+              Créer la clé
+            </Button>
+          </div>
         </CardFooter>
       </Card>
     </div>
