@@ -62,6 +62,12 @@ const PUBLIC_PATHS = [
   '/api/docs/openapi.json',
   '/api/public/',
   '/api/version',
+  // Catalogue d'intégrations (GET /api/plugins) : le catalogue est une
+  // donnée PUBLIQUE (liste des apps disponibles). Le préfixe est exposé
+  // publiquement au bord ; les endpoints sensibles (connected, connect,
+  // disconnect, execute, scope=mine) restent authentifiés en couche 2
+  // via createApiHandler (requireAuth par défaut).
+  '/api/plugins',
 ];
 
 // Routes ADMIN : exigent TOUJOURS le rôle 'admin' (custom claim Firebase).
