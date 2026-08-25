@@ -33,9 +33,19 @@ import { cookies } from 'next/headers';
 // Le secret N'EST JAMAIS stocke sur disque.
 // En production, STANDALONE_JWT_SECRET doit etre defini (64 hex chars).
 // En dev, un secret aleatoire en memoire est genere (perdu au restart).
+//
+// IMPORTANT : La résolution est LAZY (paresseuse). Le secret n'est
+// résolu qu'au premier appel de signJWT/verifyJWT (runtime), JAMAIS
+// à l'import du module (build time). Cela évite que le build
+// Next.js échoue si STANDALONE_JWT_SECRET n'est pas défini dans
+// l'environnement de build Vercel.
 // ============================================================
 
-function resolveJwtSecret(): string {
+let _jwtSecret: string | null = null;
+
+function getJwtSecret(): string {
+  if (_jwtSecret !== null) return _jwtSecret;
+
   const envSecret = process.env.STANDALONE_JWT_SECRET;
 
   if (envSecret) {
@@ -46,10 +56,13 @@ function resolveJwtSecret(): string {
         'Generez un avec : node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
       );
     }
-    return envSecret;
+    _jwtSecret = envSecret;
+    return _jwtSecret;
   }
 
-  // En production, le secret est OBLIGATOIRE
+  // En production, le secret est OBLIGATOIRE (mais seulement au runtime,
+  // pas pendant le build Next.js où les modules sont importés sans que
+  // les fonctions de signing/verification ne soient appelées).
   if (process.env.NODE_ENV === 'production') {
     throw new Error(
       '[standalone-auth] STANDALONE_JWT_SECRET n\'est pas defini. ' +
@@ -65,10 +78,9 @@ function resolveJwtSecret(): string {
     'Les sessions seront invalidees au prochain redemarrage. ' +
     'Definissez STANDALONE_JWT_SECRET pour la persistance.'
   );
-  return randomBytes(32).toString('hex');
+  _jwtSecret = randomBytes(32).toString('hex');
+  return _jwtSecret;
 }
-
-const JWT_SECRET = resolveJwtSecret();
 
 // ============================================================
 // Types
@@ -236,7 +248,7 @@ export function signJWT(payload: Record<string, unknown>, expiresIn: number = SE
 
   const headerB64 = base64urlEncode(JSON.stringify(header));
   const payloadB64 = base64urlEncode(JSON.stringify(fullPayload));
-  const signature = createHmac('sha256', JWT_SECRET)
+  const signature = createHmac('sha256', getJwtSecret())
     .update(`${headerB64}.${payloadB64}`)
     .digest('base64url');
 
@@ -251,7 +263,7 @@ export function verifyJWT(token: string): StandaloneSession | null {
     const [headerB64, payloadB64, signature] = parts;
 
     // Verification avec le secret JWT (env var, jamais sur disque)
-    const expectedSig = createHmac('sha256', JWT_SECRET)
+    const expectedSig = createHmac('sha256', getJwtSecret())
       .update(`${headerB64}.${payloadB64}`)
       .digest('base64url');
 
