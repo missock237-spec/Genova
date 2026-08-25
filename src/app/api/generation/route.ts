@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
  *  GET  /api/generation?userId=..&page=1&limit=24
  *        -> historique persévé de l'utilisateur + catalogue de modèles
  *  POST /api/generation
- *        { userId, prompt, negativePrompt?, model?, resolution?, style?, count? }
+ *        { userId, prompt, negativePrompt?, model?, resolution?, style?, count?, seed? }
  *        -> génère de 1 à 4 images et retourne leurs data-URL
  */
 export const dynamic = 'force-dynamic';
@@ -100,6 +100,7 @@ export async function POST(request: NextRequest) {
       resolution = '1024:1024',
       style = 'photorealistic',
       count = 1,
+      seed,
     } = (body ?? {}) as {
       userId?: string;
       prompt?: string;
@@ -108,6 +109,7 @@ export async function POST(request: NextRequest) {
       resolution?: string;
       style?: string;
       count?: number;
+      seed?: number;
     };
 
     if (!userId || !prompt || !String(prompt).trim()) {
@@ -121,8 +123,9 @@ export async function POST(request: NextRequest) {
     const styleCfg = STYLES[(style as StyleKey) in STYLES ? style as StyleKey : 'photorealistic'];
     const n = Math.min(4, Math.max(1, Number(count) || 1));
 
-    // On différencie les images multiples d'un même prompt via une graine déterministe.
-    const seed = Math.floor(Math.random() * 1_000_000_000);
+    // Graine déterministe : on utilise celle fournie par l'UI si elle est positive,
+    // sinon on en génère une aléatoire pour différencier les images multiples.
+    const effectiveSeed = Number(seed) && Number(seed) > 0 ? Number(seed) : Math.floor(Math.random() * 1_000_000_000);
     const basePrompt = `${String(prompt).trim()}${styleCfg.suffix}`;
 
     const results: Array<{
@@ -134,7 +137,7 @@ export async function POST(request: NextRequest) {
     }> = [];
 
     for (let i = 0; i < n; i++) {
-      const effectivePrompt = n > 1 ? `${basePrompt}, seed ${seed + i}` : basePrompt;
+      const effectivePrompt = n > 1 ? `${basePrompt}, seed ${effectiveSeed + i}` : basePrompt;
       const r = await imageGenerator.generate({
         userId,
         prompt: effectivePrompt,
