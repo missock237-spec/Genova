@@ -1,17 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from '@/lib/auth';
+import { applySecurity } from '@/lib/security';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = "force-dynamic";
-export async function GET() {
+
+/**
+ * Authentifie de façon mode-agnostique (cookie session Firebase OU JWT
+ * standalone, Bearer, X-API-Key) via applySecurity(). L'ancien code utilisait
+ * getServerSession() de @/lib/auth (ré-export Firebase UNIQUEMENT) : en mode
+ * standalone le cookie gen3ia_session est un JWT HS256 qui échouait la vérif
+ * Firebase-only → 401 → les projets de code du visualiseur étaient inaccessibles.
+ */
+async function requireUser(request: NextRequest): Promise<{ userId: string; ok: true } | { ok: false; res: NextResponse }> {
+  const { auth, error } = await applySecurity(request, { requireAuth: true });
+  if (error) return { ok: false, res: error };
+  if (!auth?.userId) return { ok: false, res: NextResponse.json({ error: 'Non authentifie' }, { status: 401 }) };
+  return { ok: true, userId: auth.userId };
+}
+
+export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user.id) return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
+    const auth = await requireUser(request);
+    if (!auth.ok) return auth.res;
+    const userId = auth.userId;
 
     const projects = await prisma.codeProject.findMany({
-      where: { userId: session.user.id },
-      orderBy: { updatedAt: 'desc' },
-      select: { id: true, name: true, language: true, fileCount: true, updatedAt: true, createdAt: true },
+      where: [{ field: 'userId', op: '==', value: userId }],
+      orderBy: [{ field: 'updatedAt', direction: 'desc' }],
+      select: ['id', 'name', 'language', 'fileCount', 'updatedAt', 'createdAt'],
       take: 50,
     });
 
@@ -23,10 +39,11 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user.id) return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
+    const auth = await requireUser(request);
+    if (!auth.ok) return auth.res;
+    const userId = auth.userId;
 
-    const { name, language, files } = await request.json();
+    const { name, language, files } = await request.json().catch(() => ({}));
     if (!name || !language) {
       return NextResponse.json({ error: 'Nom et langage requis' }, { status: 400 });
     }
@@ -35,9 +52,11 @@ export async function POST(request: NextRequest) {
       data: {
         name,
         language,
-        userId: session.user.id,
+        userId,
         fileCount: files?.length || 1,
         files: JSON.stringify(files || [{ name: 'main.' + language, content: '', language }]),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       },
     });
 
@@ -49,15 +68,18 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user.id) return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
+    const auth = await requireUser(request);
+    if (!auth.ok) return auth.res;
+    const userId = auth.userId;
 
     const url = new URL(request.url);
     const id = url.searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'ID requis' }, { status: 400 });
 
-    const project = await prisma.codeProject.findUnique({ where: { id } });
-    if (!project || project.userId !== session.user.id) {
+    // findUnique traite l'id comme clé de document (les docs n'ont pas de
+    // champ id en données).
+    const project = await prisma.codeProject.findUnique({ where: { id } }) as Record<string, unknown> | null;
+    if (!project || project.userId !== userId) {
       return NextResponse.json({ error: 'Projet non trouve' }, { status: 404 });
     }
 
@@ -70,14 +92,15 @@ export async function DELETE(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const session = await getServerSession();
-    if (!session?.user.id) return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
+    const auth = await requireUser(request);
+    if (!auth.ok) return auth.res;
+    const userId = auth.userId;
 
-    const { id, name, files } = await request.json();
+    const { id, name, files } = await request.json().catch(() => ({}));
     if (!id) return NextResponse.json({ error: 'ID requis' }, { status: 400 });
 
-    const project = await prisma.codeProject.findUnique({ where: { id } });
-    if (!project || project.userId !== session.user.id) {
+    const project = await prisma.codeProject.findUnique({ where: { id } }) as Record<string, unknown> | null;
+    if (!project || project.userId !== userId) {
       return NextResponse.json({ error: 'Projet non trouve' }, { status: 404 });
     }
 
@@ -87,6 +110,7 @@ export async function PATCH(request: NextRequest) {
       updateData.files = JSON.stringify(files);
       updateData.fileCount = files.length;
     }
+    updateData.updatedAt = new Date().toISOString();
 
     const updated = await prisma.codeProject.update({ where: { id }, data: updateData });
     return NextResponse.json({ project: updated });
