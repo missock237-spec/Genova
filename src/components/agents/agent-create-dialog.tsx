@@ -478,7 +478,7 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
 
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
           <ScrollArea className="flex-1 px-6">
-            <div className="pb-6 space-y-6 pt-4">
+            <div className="pb-4 space-y-6 pt-4">
               {/* ── Step 1: Nom ──────────────────── */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-1.5">
@@ -702,28 +702,30 @@ export function AgentCreateDialog({ open, onOpenChange, onSuccess, editAgent }: 
                   <div className="font-medium">{temperature.toFixed(1)}</div>
                 </div>
               </div>
+
+              <Separator />
+
+              {/* ── Footer buttons (inside scroll) ── */}
+              <div className="flex items-center justify-end gap-2 pt-2 pb-6">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                  className="rounded-xl"
+                >
+                  Annuler
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={loading || !name.trim() || !selectedTypeId}
+                  className="rounded-xl bg-[#06b6d4] hover:bg-[#06b6d4]/90 text-white"
+                >
+                  {loading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                  {editAgent ? 'Enregistrer' : "Créer l'agent"}
+                </Button>
+              </div>
             </div>
           </ScrollArea>
-
-          {/* ── Footer ────────────────────────────── */}
-          <div className="flex items-center justify-end gap-2 border-t px-6 py-3 mt-auto">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              className="rounded-xl"
-            >
-              Annuler
-            </Button>
-            <Button
-              type="submit"
-              disabled={loading || !name.trim() || !selectedTypeId}
-              className="rounded-xl bg-[#06b6d4] hover:bg-[#06b6d4]/90 text-white"
-            >
-              {loading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              {editAgent ? 'Enregistrer' : "Créer l'agent"}
-            </Button>
-          </div>
         </form>
       </DialogContent>
     </Dialog>
