@@ -13,20 +13,23 @@
  * - Aucune métrique n'est exposée sans l'un de ces trois pré-requis.
  *
  * Covers: agents, executions, credits, webhooks, errors, performance
+ *
+ * Note : projet migré de Prisma vers Cloud Firestore. Les requêtes
+ * reposent désormais sur la façade `db` (src/lib/firestore-extra.ts).
  */
 
 import { NextResponse, NextRequest } from "next/server";
-import prisma from "@/lib/prisma";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { applySecurity } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Verify access to metrics endpoint
+ * Vérifie l'accès au endpoint metrics.
  */
 async function verifyMetricsAccess(request: NextRequest): Promise<boolean> {
-  // 1. Check API key (server-to-server scraping)
+  // 1. Clé API (scraping serveur-à-serveur)
   const apiKey = request.headers.get("x-api-key");
   const expectedKey = process.env.METRICS_API_KEY;
 
@@ -34,7 +37,7 @@ async function verifyMetricsAccess(request: NextRequest): Promise<boolean> {
     return true;
   }
 
-  // 2. Check admin auth via Firebase session cookie (cryptographic verification)
+  // 2. Auth admin via cookie de session Firebase
   try {
     const { auth } = await applySecurity(request, {
       requireAuth: true,
@@ -44,10 +47,10 @@ async function verifyMetricsAccess(request: NextRequest): Promise<boolean> {
       return true;
     }
   } catch (_e) {
-    // Token verification failed
+    // Vérification de session échouée
   }
 
-  // 3. Allow localhost in development
+  // 3. Localhost en développement
   if (process.env.NODE_ENV === "development") {
     const host = request.headers.get("host") || "";
     if (host.startsWith("127.0.0.1") || host.startsWith("localhost")) {
@@ -99,30 +102,27 @@ async function collectMetrics(): Promise<MetricsData> {
     allUsers,
     recentLogs,
   ] = await Promise.all([
-    prisma.user.count({ where: [{ field: 'isActive', op: '==', value: true }] }),
-    prisma.agent.count({ where: [{ field: 'status', op: '!=', value: 'inactive' }] }),
-    prisma.agentExecution.count(),
-    prisma.creditTransaction.aggregate({
-      where: [{ field: 'type', op: '==', value: 'usage' }],
-      _sum: { amount: true },
-    }).catch(() => ({ _sum: { amount: 0 } })),
-    prisma.subscription.count({ where: [{ field: 'status', op: '==', value: 'active' }] }).catch(() => 0),
-    prisma.agentExecution.count({ where: [{ field: 'status', op: '==', value: 'failed' }] }).catch(() => 0),
-    prisma.apiKey.count({ where: [] }).catch(() => 0),
-    prisma.agentExecution.count({
-      where: [{ field: 'createdAt', op: '>=', value: last24h }],
-    }).catch(() => 0),
-    prisma.agentExecution.count({
-      where: [{ field: 'status', op: '==', value: 'running' }],
-    }).catch(() => 0),
-    prisma.conversation.count().catch(() => 0),
-    prisma.workflow.count({ where: [{ field: 'status', op: '==', value: 'active' }] }).catch(() => 0),
-    prisma.agentExecution.findMany().catch(() => []),
-    prisma.user.findMany({ select: ['plan', 'credits'] }).catch(() => []),
-    prisma.auditLog.findMany({
-      where: [{ field: 'createdAt', op: '>=', value: last1h }],
-      select: ['action', 'type'],
-    }).catch(() => []),
+    db.user.count({ where: { isActive: true } }),
+    db.agent.count({ where: { status: { ne: "inactive" } } }).catch(() => 0),
+    db.agentExecution.count().catch(() => 0),
+    db.creditTransaction
+      .aggregate({ where: { type: "usage" }, _sum: { amount: true } })
+      .catch(() => ({ _sum: { amount: 0 } })),
+    db.subscription.count({ where: { status: "active" } }).catch(() => 0),
+    db.agentExecution.count({ where: { status: "failed" } }).catch(() => 0),
+    db.apiKey.count().catch(() => 0),
+    db.webhook.count().catch(() => 0),
+    db.terminalSession.count().catch(() => 0),
+    db.conversation.count().catch(() => 0),
+    db.workflow.count({ where: { status: "active" } }).catch(() => 0),
+    db.agentExecution.findMany().catch(() => []),
+    db.user.findMany({ select: ["plan", "credits"] }).catch(() => []),
+    db.auditLog
+      .findMany({
+        where: { createdAt: { gte: last1h } },
+        select: ["action", "type"],
+      })
+      .catch(() => []),
   ]);
 
   // Erreurs récentes (1h) à partir des audit_logs
@@ -148,21 +148,23 @@ async function collectMetrics(): Promise<MetricsData> {
   const creditsByPlan = Object.entries(planCredits).map(([plan, total]) => ({ plan, total }));
 
   // Temps moyen d'exécution des 100 dernières terminées
-  const recentExecs = await prisma.agentExecution.findMany({
-    where: [
-      { field: 'status', op: '==', value: 'completed' },
-      { field: 'completedAt', op: '!=', value: null },
-    ],
-    orderBy: [{ field: 'createdAt', direction: 'desc' }],
-    limit: 100,
-    select: ['createdAt', 'completedAt'],
-  }).catch(() => []);
+  const recentExecs = await db.agentExecution
+    .findMany({
+      where: {
+        status: "completed",
+        completedAt: { ne: null },
+      },
+      orderBy: { field: "createdAt", direction: "desc" },
+      limit: 100,
+      select: ["createdAt", "completedAt"],
+    })
+    .catch(() => []);
 
   let avgExecutionTime = 0;
   if (recentExecs.length > 0) {
     const durations = (recentExecs as Array<Record<string, unknown>>)
-      .filter(e => e.completedAt)
-      .map(e => new Date(e.completedAt as string).getTime() - new Date(e.createdAt as string).getTime());
+      .filter((e) => e.completedAt)
+      .map((e) => new Date(e.completedAt as string).getTime() - new Date(e.createdAt as string).getTime());
     avgExecutionTime = durations.length > 0
       ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
       : 0;
@@ -191,7 +193,7 @@ async function collectMetrics(): Promise<MetricsData> {
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify access
+    // Vérification de l'accès
     const hasAccess = await verifyMetricsAccess(request);
     if (!hasAccess) {
       logger.warn("Unauthorized metrics access attempt", {
@@ -211,7 +213,7 @@ export async function GET(request: NextRequest) {
       lines.push('');
     };
 
-    // === Core metrics ===
+    // === Métriques de base ===
     add("Nombre total d'utilisateurs actifs", 'gauge', 'gen3ia_users_total', m.users);
     add("Nombre d'agents actifs", 'gauge', 'gen3ia_active_agents_total', m.activeAgents);
     add("Nombre total d'exécutions", 'counter', 'gen3ia_executions_total', m.totalExecutions);
@@ -260,7 +262,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
     logger.error("Metrics collection failed", { error, msg });
-    
+
     return new NextResponse(
       '# ERROR Failed to collect metrics\n' + `# ${msg}`,
       {
