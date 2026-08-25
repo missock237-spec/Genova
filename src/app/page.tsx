@@ -19,6 +19,7 @@ import { SchedulerView } from '@/components/scheduler/scheduler-view';
 import { VoiceView } from '@/components/voice/voice-view';
 import { MediaView } from '@/components/media/media-view';
 import { PromptsView } from '@/components/prompts/prompts-view';
+import { GenerationWorkbench } from '@/components/generation/generation-workbench';
 import { AdBar } from '@/components/advertising/ad-bar';
 import { ThemeProvider } from 'next-themes';
 import { Loader2, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
@@ -99,7 +100,7 @@ function AppContent() {
       settings: 'settings', approvals: 'approvals', analytics: 'analytics',
       billing: 'billing', developers: 'developers', voice: 'voice',
       images: 'images', integrations: 'integrations', notifications: 'notifications',
-      scheduler: 'scheduler', prompts: 'prompts',
+      scheduler: 'scheduler', prompts: 'prompts', generation: 'generation',
     };
     if (path && validViews[path]) {
       setCurrentView(validViews[path] as any);
@@ -125,7 +126,7 @@ function AppContent() {
       settings: 'settings', approvals: 'approvals', analytics: 'analytics',
       billing: 'billing', developers: 'developers', voice: 'voice',
       images: 'images', integrations: 'integrations', notifications: 'notifications',
-      scheduler: 'scheduler', prompts: 'prompts',
+      scheduler: 'scheduler', prompts: 'prompts', generation: 'generation',
     };
     const onPopState = () => {
       const path = window.location.pathname.replace(/^\//, '');
@@ -300,6 +301,7 @@ function AppContent() {
       case 'developers': return <DevelopersPage />;
       case 'voice': return <VoiceView />;
       case 'images': return <MediaView />;
+      case 'generation': return <GenerationWorkbench />;
       case 'integrations': return <IntegrationsView />;
       case 'notifications': return <DashboardView />; // TODO: NotificationsView
       case 'scheduler': return <SchedulerView />;
