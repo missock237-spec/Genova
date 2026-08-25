@@ -1,8 +1,14 @@
 /**
- * GENOVA AI OS — Mailer
- * Sends transactional emails via Nodemailer (SMTP).
- * Falls back to console logging if SMTP is not configured.
- * Configure via environment variables.
+ * Gen3ia — Mailer
+ * Envoie les emails transactionnels via l'API Resend (méthode privilégiée),
+ * avec repli sur SMTP (Nodemailer) puis sur la console en dernier recours.
+ * Configuration via les variables d'environnement documentées dans .env.example :
+ *   - RESEND_API_KEY  (API Resend, méthode privilégiée)
+ *   - EMAIL_FROM      (adresse d'expédition, ex. noreply@gen3ia.ai)
+ *   - EMAIL_FROM_NAME (nom d'expédition, ex. Genova AI)
+ *   - SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_SECURE
+ *     (repli SMTP)
+ *   - SMTP_FROM_EMAIL / SMTP_FROM_NAME (expéditeur SMTP, sinon EMAIL_*)
  */
 
 import nodemailer from 'nodemailer';
@@ -12,15 +18,22 @@ const log = createLogger('mailer');
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 
-const FROM_NAME = process.env.MAIL_FROM_NAME ?? 'Genova AI';
-const FROM_EMAIL = process.env.MAIL_FROM_EMAIL ?? 'noreply@genova.ai';
+const FROM_NAME = process.env.EMAIL_FROM_NAME ?? process.env.SMTP_FROM_NAME ?? 'Genova AI';
+const FROM_EMAIL = process.env.EMAIL_FROM ?? process.env.SMTP_FROM_EMAIL ?? 'noreply@genova.ai';
 const BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
 
+/** Resend est-il configuré (méthode privilégiée) ? */
+function isResendConfigured(): boolean {
+  return !!RESEND_API_KEY;
+}
+
+/** SMTP est-il configuré (méthode de repli) ? */
 function isSmtpConfigured(): boolean {
   return !!(process.env.SMTP_HOST && process.env.SMTP_PORT);
 }
 
-function createTransporter() {
+function createSmtpTransporter() {
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST!,
     port: parseInt(process.env.SMTP_PORT ?? '587'),
@@ -32,7 +45,106 @@ function createTransporter() {
   });
 }
 
-// ─── VERIFICATION EMAIL ───────────────────────────────────────────────────────
+/**
+ * Envoie un email via l'API Resend (https://resend.com).
+ * Retourne true si l'envoi a réussi, false sinon.
+ */
+async function sendViaResend(opts: {
+  to: string;
+  subject: string;
+  html: string;
+}): Promise<boolean> {
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: `${FROM_NAME} <${FROM_EMAIL}>`,
+        to: [opts.to],
+        subject: opts.subject,
+        html: opts.html,
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      log.error('Resend API error', {
+        status: response.status,
+        body,
+        to: opts.to,
+      });
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    log.error('Resend request failed', {
+      err: err instanceof Error ? err.message : 'Unknown',
+      to: opts.to,
+    });
+    return false;
+  }
+}
+
+/** Envoie via SMTP (repli). Retourne true si réussi, false sinon. */
+async function sendViaSmtp(opts: {
+  to: string;
+  subject: string;
+  html: string;
+}): Promise<boolean> {
+  try {
+    const transporter = createSmtpTransporter();
+    await transporter.sendMail({
+      from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+    });
+    return true;
+  } catch (err) {
+    log.error('SMTP send failed', {
+      err: err instanceof Error ? err.message : 'Unknown',
+      to: opts.to,
+    });
+    return false;
+  }
+}
+
+/**
+ * Envoie un email transactionnel en cascade :
+ * Resend → SMTP → console (fallback de développement).
+ */
+async function sendEmail(opts: {
+  to: string;
+  subject: string;
+  html: string;
+  logFallback: string;
+}): Promise<void> {
+  if (isResendConfigured()) {
+    const ok = await sendViaResend({ to: opts.to, subject: opts.subject, html: opts.html });
+    if (ok) {
+      log.info('Email sent via Resend', { to: opts.to });
+      return;
+    }
+    log.warn('Resend failed, falling back to SMTP', { to: opts.to });
+  }
+
+  if (isSmtpConfigured()) {
+    const ok = await sendViaSmtp({ to: opts.to, subject: opts.subject, html: opts.html });
+    if (ok) {
+      log.info('Email sent via SMTP', { to: opts.to });
+      return;
+    }
+    log.warn('SMTP failed, falling back to console', { to: opts.to });
+  }
+
+  log.info(opts.logFallback, { to: opts.to });
+}
+
+// ─── EMAIL DE VÉRIFICATION ────────────────────────────────────────────────────
 
 export async function sendVerificationEmail(opts: {
   to: string;
@@ -41,40 +153,26 @@ export async function sendVerificationEmail(opts: {
 }): Promise<void> {
   const link = `${BASE_URL}/verify-email?token=${opts.token}`;
 
-  if (!isSmtpConfigured()) {
-    log.info('Verification email (console fallback)', { to: opts.to, link });
-    return;
-  }
-
-  try {
-    const transporter = createTransporter();
-    await transporter.sendMail({
-      from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
-      to: opts.to,
-      subject: 'Activez votre compte Genova AI',
-      html: buildEmailTemplate({
-        title: 'Activez votre compte',
-        preheader: 'Bienvenue sur Genova AI — cliquez pour activer votre compte.',
-        body: `
-          <p>Bonjour <strong>${escapeHtml(opts.name)}</strong>,</p>
-          <p>Merci de vous être inscrit sur <strong>Genova AI OS</strong>. Cliquez sur le bouton ci-dessous pour activer votre compte.</p>
-          <p>Ce lien expire dans <strong>24 heures</strong>.</p>
-        `,
-        ctaText: 'Activer mon compte',
-        ctaLink: link,
-        footerNote: "Si vous n'avez pas créé de compte, ignorez cet email.",
-      }),
-    });
-    log.info('Verification email sent', { to: opts.to });
-  } catch (err) {
-    log.error('Failed to send verification email', {
-      err: err instanceof Error ? err.message : 'Unknown',
-      to: opts.to,
-    });
-  }
+  await sendEmail({
+    to: opts.to,
+    subject: 'Activez votre compte Genova AI',
+    html: buildEmailTemplate({
+      title: 'Activez votre compte',
+      preheader: 'Bienvenue sur Genova AI — cliquez pour activer votre compte.',
+      body: `
+        <p>Bonjour <strong>${escapeHtml(opts.name)}</strong>,</p>
+        <p>Merci de vous être inscrit sur <strong>Genova AI OS</strong>. Cliquez sur le bouton ci-dessous pour activer votre compte.</p>
+        <p>Ce lien expire dans <strong>24 heures</strong>.</p>
+      `,
+      ctaText: 'Activer mon compte',
+      ctaLink: link,
+      footerNote: "Si vous n'avez pas créé de compte, ignorez cet email.",
+    }),
+    logFallback: 'Verification email (console fallback)',
+  });
 }
 
-// ─── PASSWORD RESET EMAIL ─────────────────────────────────────────────────────
+// ─── EMAIL DE RÉINITIALISATION DE MOT DE PASSE ────────────────────────────────
 
 export async function sendPasswordResetEmail(opts: {
   to: string;
@@ -83,40 +181,26 @@ export async function sendPasswordResetEmail(opts: {
 }): Promise<void> {
   const link = `${BASE_URL}/reset-password?token=${opts.token}`;
 
-  if (!isSmtpConfigured()) {
-    log.info('Password reset email (console fallback)', { to: opts.to, link });
-    return;
-  }
-
-  try {
-    const transporter = createTransporter();
-    await transporter.sendMail({
-      from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
-      to: opts.to,
-      subject: 'Réinitialisation de votre mot de passe Genova AI',
-      html: buildEmailTemplate({
-        title: 'Réinitialiser votre mot de passe',
-        preheader: 'Vous avez demandé une réinitialisation de mot de passe.',
-        body: `
-          <p>Bonjour <strong>${escapeHtml(opts.name)}</strong>,</p>
-          <p>Vous avez demandé la réinitialisation de votre mot de passe <strong>Genova AI OS</strong>.</p>
-          <p>Cliquez sur le bouton ci-dessous. Ce lien expire dans <strong>1 heure</strong>.</p>
-        `,
-        ctaText: 'Réinitialiser mon mot de passe',
-        ctaLink: link,
-        footerNote: "Si vous n'êtes pas à l'origine de cette demande, ignorez cet email. Votre mot de passe restera inchangé.",
-      }),
-    });
-    log.info('Password reset email sent', { to: opts.to });
-  } catch (err) {
-    log.error('Failed to send password reset email', {
-      err: err instanceof Error ? err.message : 'Unknown',
-      to: opts.to,
-    });
-  }
+  await sendEmail({
+    to: opts.to,
+    subject: 'Réinitialisation de votre mot de passe Genova AI',
+    html: buildEmailTemplate({
+      title: 'Réinitialiser votre mot de passe',
+      preheader: 'Vous avez demandé une réinitialisation de mot de passe.',
+      body: `
+        <p>Bonjour <strong>${escapeHtml(opts.name)}</strong>,</p>
+        <p>Vous avez demandé la réinitialisation de votre mot de passe <strong>Genova AI OS</strong>.</p>
+        <p>Cliquez sur le bouton ci-dessous. Ce lien expire dans <strong>1 heure</strong>.</p>
+      `,
+      ctaText: 'Réinitialiser mon mot de passe',
+      ctaLink: link,
+      footerNote: "Si vous n'êtes pas à l'origine de cette demande, ignorez cet email. Votre mot de passe restera inchangé.",
+    }),
+    logFallback: 'Password reset email (console fallback)',
+  });
 }
 
-// ─── HTML TEMPLATE ────────────────────────────────────────────────────────────
+// ─── TEMPLATE HTML ────────────────────────────────────────────────────────────
 
 function buildEmailTemplate(opts: {
   title: string;
