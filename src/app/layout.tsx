@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { headers } from 'next/headers';
 import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
+import { Newsreader } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from 'next-themes';
 import { Toaster } from 'sonner';
@@ -13,6 +14,17 @@ import { UpdateBannerClient } from '@/components/update-banner-client';
 const geistSans = GeistSans;
 const geistMono = GeistMono;
 
+// Newsreader — serif éditorial (Production Type via Google Fonts)
+// Used for: headlines, drop caps, pull-quotes (see .editorial-headline)
+const newsreader = Newsreader({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  style: ['normal', 'italic'],
+  variable: '--font-newsreader',
+  display: 'swap',
+  preload: false,
+});
+
 const siteUrl = siteConfig.url;
 const siteName = siteConfig.name;
 const title = "gen3ia - Système d'exploitation pour agents IA";
@@ -20,8 +32,8 @@ const description = siteConfig.description;
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
-    { media: '(prefers-color-scheme: dark)', color: '#00F5FF' },
+    { media: '(prefers-color-scheme: light)', color: '#F4F1EA' },
+    { media: '(prefers-color-scheme: dark)', color: '#0F0E0C' },
   ],
   colorScheme: 'dark light',
   width: 'device-width',
@@ -51,7 +63,7 @@ export const metadata: Metadata = {
       { url: '/icon.svg', type: 'image/svg+xml' },
     ],
     apple: [{ url: '/favicon-gen3ia.png', sizes: '180x180', type: 'image/png' }],
-    other: [{ rel: 'mask-icon', url: '/icon.svg', color: '#00F5FF' }],
+    other: [{ rel: 'mask-icon', url: '/icon.svg', color: '#C8341F' }],
   },
   manifest: '/manifest.json',
   appleWebApp: {
@@ -126,7 +138,7 @@ export default async function RootLayout({
         <link rel="me" href={siteConfig.githubUrl} />
         <link rel="author" href={`${siteUrl}/about`} />
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#0A0A0B" />
+        <meta name="theme-color" content="#0F0E0C" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         {/* SW force-upgrade: unregister old SWs + reload on new SW, URL versionnée par buildId */}
@@ -155,7 +167,7 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${newsreader.variable} antialiased bg-background text-foreground`}>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           <ErrorProvider>
             <ErrorBoundary>
