@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from 'next';
 import { headers } from 'next/headers';
 import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
-import { Newsreader } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from 'next-themes';
 import { Toaster } from 'sonner';
@@ -14,16 +13,9 @@ import { UpdateBannerClient } from '@/components/update-banner-client';
 const geistSans = GeistSans;
 const geistMono = GeistMono;
 
-// Newsreader — serif éditorial (Production Type via Google Fonts)
-// Used for: headlines, drop caps, pull-quotes (see .editorial-headline)
-const newsreader = Newsreader({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  style: ['normal', 'italic'],
-  variable: '--font-newsreader',
-  display: 'swap',
-  preload: false,
-});
+// Newsreader — serif éditorial chargé via <link> (évite next/font/google
+// qui nécessite du réseau au build et peut planter le build Vercel).
+// Variable CSS --font-newsreader est définie dans globals.css.
 
 const siteUrl = siteConfig.url;
 const siteName = siteConfig.name;
@@ -141,6 +133,13 @@ export default async function RootLayout({
         <meta name="theme-color" content="#0F0E0C" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        {/* Newsreader — serif éditorial (chargé via Google Fonts CDN) */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap"
+        />
         {/* SW force-upgrade: unregister old SWs + reload on new SW, URL versionnée par buildId */}
         <script
           nonce={nonce}
@@ -167,7 +166,7 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} ${newsreader.variable} antialiased bg-background text-foreground`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           <ErrorProvider>
             <ErrorBoundary>

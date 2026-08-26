@@ -101,6 +101,9 @@
   --sidebar-border: rgba(26, 25, 22, 0.10);
   --sidebar-ring: #C8341F;
 
+  /* Newsreader — chargé via <link> Google Fonts dans layout.tsx */
+  --font-newsreader: 'Newsreader', 'Newsreader LF', Georgia, 'Times New Roman', serif;
+
   /* Editorial tokens */
   --color-vermillion: #C8341F;
   --color-ultramarine: #1B3A6B;
