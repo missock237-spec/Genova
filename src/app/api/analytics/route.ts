@@ -52,8 +52,10 @@ export async function GET(request: NextRequest) {
     // 1. Fetch credit transactions (for creditsUsed, totalCost)
     //    Filtre userId côté serveur — ne charge plus toute la collection.
     // ============================================================
+    // [server-03] Plafond de sécurité pour éviter les OOM
     const transactions = await db.creditTransaction.findMany({
       where: [{ field: 'userId', op: '==', value: userId }],
+      take: 50000,
     });
     const userTxns = (transactions as Record<string, unknown>[])
       .filter((t) => {
@@ -84,6 +86,7 @@ export async function GET(request: NextRequest) {
     try {
       const aiCosts = await db.aICost.findMany({
         where: [{ field: 'userId', op: '==', value: userId }],
+        take: 50000, // [server-03] Plafond de sécurité
       });
       for (const cost of aiCosts as Record<string, unknown>[]) {
         const d = new Date(cost.createdAt as string);
@@ -107,6 +110,7 @@ export async function GET(request: NextRequest) {
     try {
       const myExecs = await db.agentExecution.findMany({
         where: [{ field: 'userId', op: '==', value: userId }],
+        take: 50000, // [server-03] Plafond de sécurité
       });
       agentExecutions = (myExecs as Record<string, unknown>[]).filter((e) => {
         const d = new Date(e.createdAt as string);

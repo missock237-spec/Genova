@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { BarChart3, TrendingUp, Users, DollarSign, Loader2, Activity, Clock, MessageSquare, Phone, Zap } from 'lucide-react';
 
 interface AnalyticsData {
@@ -42,14 +42,15 @@ export function AnalyticsView() {
     );
   }
 
-  const metrics = [
+  // [js-02] Metrics tableau mémoïsé — recréé uniquement quand data change
+  const metrics = useMemo(() => [
     { label: 'Utilisateurs', value: data?.totalUsers ?? 0, icon: Users, color: 'text-blue-500' },
     { label: 'Agents', value: data?.totalAgents ?? 0, icon: Activity, color: 'text-green-500' },
     { label: 'Tâches', value: data?.totalTasks ?? 0, icon: BarChart3, color: 'text-purple-500' },
     { label: 'Messages', value: data?.totalMessages ?? 0, icon: MessageSquare, color: 'text-cyan-500' },
     { label: 'Appels vocaux', value: data?.totalVoiceCalls ?? 0, icon: Phone, color: 'text-orange-500' },
     { label: 'Coût total', value: `$${data?.totalCost?.toFixed(2) ?? '0.00'}`, icon: DollarSign, color: 'text-yellow-500' },
-  ];
+  ], [data]);
 
   return (
     <div className="space-y-6">

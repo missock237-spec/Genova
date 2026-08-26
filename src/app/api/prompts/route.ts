@@ -94,15 +94,18 @@ export async function GET(request: NextRequest) {
     // Tri avec fallback en mémoire : on tente d'abord un orderBy Firestore,
     // si l'index composite requis n'est pas déployé (erreur index manquant)
     // on re-lit sans orderBy et on trie côté serveur (volume raisonnable).
+    // [server-03] Plafond raisonnable pour la pagination mémoire
+    const MAX_PROMPTS_LOAD = 500;
     let rows: Record<string, unknown>[] = [];
     try {
       rows = (await db.prompt.findMany({
         where,
         orderBy: [{ field: sortField, direction: 'desc' }] as FirestoreOrderBy[],
+        take: MAX_PROMPTS_LOAD,
       })) as Record<string, unknown>[];
     } catch {
       log.warn('prompts_index_fallback', { sortField });
-      rows = (await db.prompt.findMany({ where })) as Record<string, unknown>[];
+      rows = (await db.prompt.findMany({ where, take: MAX_PROMPTS_LOAD })) as Record<string, unknown>[];
       const dir = (a: Record<string, unknown>, b: Record<string, unknown>) =>
         (Number(b[sortField]) || 0) - (Number(a[sortField]) || 0);
       rows.sort(dir);
@@ -168,17 +171,18 @@ export const POST = withAuth(async (
       const user = await db.user.findUnique({ where: { id: auth.userId }, select: ['plan', 'role'] });
       const plan = ((user as { plan?: string } | null)?.plan) || 'free';
       const limit = getPromptPublishLimit(plan);
-      const published = await db.prompt.findMany({
+      // [server-02] count() au lieu de findMany pour vérifier le quota
+      const publishedCount = await db.prompt.count({
         where: [
           { field: 'userId', op: '==', value: auth.userId },
           { field: 'status', op: '==', value: 'published' },
           { field: 'isActive', op: '==', value: true },
         ],
-      });
-      if (published.length >= limit) {
+      }).catch(() => 0);
+      if (publishedCount >= limit) {
         quotaOk = false;
         log.warn('prompts_publish_quota_exceeded', {
-          userId: auth.userId, plan, limit, count: published.length,
+          userId: auth.userId, plan, limit, count: publishedCount,
         });
         return NextResponse.json({
           error: `Limite de publication atteinte (${limit}) pour le plan ${plan}. Résiliez ou passez à un plan supérieur.`,

@@ -8,7 +8,8 @@
 
 import { NextResponse } from 'next/server';
 
-export const runtime = 'nodejs';
+// [server-04] Edge runtime — pas de DB, que des env vars + calculs simples
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 const startTime = Date.now();

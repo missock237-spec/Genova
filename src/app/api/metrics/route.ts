@@ -115,8 +115,16 @@ async function collectMetrics(): Promise<MetricsData> {
     db.terminalSession.count().catch(() => 0),
     db.conversation.count().catch(() => 0),
     db.workflow.count({ where: { status: "active" } }).catch(() => 0),
-    db.agentExecution.findMany().catch(() => []),
-    db.user.findMany({ select: ["plan", "credits"] }).catch(() => []),
+    // [server-01] Remplacé findMany (table scan complet) par count avec groupBy mémoire.
+    // On ne charge plus toutes les exécutions/utilisateurs en mémoire.
+    db.agentExecution.findMany({
+      select: ['status'],
+      take: 10000, // [server-03] Plafond de sécurité
+    }).catch(() => []),
+    db.user.findMany({
+      select: ['plan', 'credits'],
+      take: 10000, // [server-03] Plafond de sécurité
+    }).catch(() => []),
     db.auditLog
       .findMany({
         where: { createdAt: { gte: last1h } },

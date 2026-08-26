@@ -33,10 +33,11 @@ export async function GET(request: NextRequest) {
       whereClause.provider = provider;
     }
 
-    // Get AI costs with grouping
+    // Get AI costs with grouping — [server-03] Plafond de sécurité
     const aiCosts = await db.aICost.findMany({
       where: whereClause,
       orderBy: { createdAt: 'desc' },
+      take: 50000,
     });
 
     // Group by provider and model

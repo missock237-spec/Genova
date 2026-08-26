@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
       }
       case 'campaigns': {
         if (auth.role !== 'admin') return NextResponse.json({ error: 'Admin only' }, { status: 403 });
-        const campaigns = await prisma.adCampaign.findMany({ orderBy: { createdAt: 'desc' } });
+        const campaigns = await prisma.adCampaign.findMany({ orderBy: { createdAt: 'desc' }, take: 500 });
         return NextResponse.json({ success: true, campaigns });
       }
       case 'campaign-stats': {

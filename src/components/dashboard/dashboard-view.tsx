@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useAuthStore, useAppStore, useModernStore } from '@/lib/store';
 import { motion } from 'framer-motion';
 import {
@@ -132,17 +132,17 @@ export function DashboardView() {
     }));
   }, [stats?.recentActivity]);
 
-  // Cartes de stats — palette éditoriale (vermillon/ultramarine/ochre/moss)
-  const statCards = [
+  // [js-02] Cartes de stats — palette éditoriale, mémoïsées car dépendent de stats
+  const statCards = useMemo(() => [
     { label: 'Agents', value: stats?.agentCount ?? 0, icon: Bot, tone: 'vermillon' as const },
     { label: 'Sessions actives', value: stats?.activeSessions ?? 0, icon: Activity, tone: 'moss' as const },
     { label: 'Tâches totales', value: stats?.totalTasks ?? 0, icon: Zap, tone: 'ochre' as const },
     { label: 'Taux de succès', value: `${stats?.successRate ?? 0}%`, icon: TrendingUp, tone: 'ultramarine' as const },
     { label: 'Crédits utilisés', value: stats?.creditsUsed ?? 0, icon: Wallet, tone: 'vermillon' as const },
     { label: 'Crédits restants', value: stats?.creditsRemaining ?? 0, icon: CheckCircle, tone: 'moss' as const },
-  ];
+  ], [stats?.agentCount, stats?.activeSessions, stats?.totalTasks, stats?.successRate, stats?.creditsUsed, stats?.creditsRemaining]);
 
-  const toneColor = (tone: string) => {
+  const toneColor = useCallback((tone: string) => {
     switch (tone) {
       case 'vermillon': return 'var(--color-vermillion)';
       case 'ultramarine': return 'var(--color-ultramarine)';
@@ -150,14 +150,15 @@ export function DashboardView() {
       case 'moss': return 'var(--color-moss)';
       default: return 'var(--color-vermillion)';
     }
-  };
+  }, []);
 
-  const quickActions: { label: string; icon: React.ElementType; view: ModernViewType; tone: string }[] = [
+  // [js-02] Quick actions — tableau statique mémoïsé
+  const quickActions: { label: string; icon: React.ElementType; view: ModernViewType; tone: string }[] = useMemo(() => [
     { label: 'New Agent', icon: Bot, view: 'agents', tone: 'vermillon' },
     { label: 'New Workflow', icon: GitBranch, view: 'coordination', tone: 'ochre' },
     { label: 'Voice Studio', icon: Mic, view: 'voice', tone: 'ultramarine' },
     { label: 'Generate Image', icon: ImageIcon, view: 'images', tone: 'moss' },
-  ];
+  ], []);
 
   return (
     <div className="space-y-8">

@@ -4,6 +4,8 @@
 import { NextResponse } from "next/server";
 import { SUBSCRIPTION_PLANS } from "@/lib/sebpay";
 
+// [server-04] Edge runtime — mapping statique, pas de DB
+export const runtime = 'edge';
 export const dynamic = "force-dynamic";
 export async function GET() {
   return NextResponse.json({

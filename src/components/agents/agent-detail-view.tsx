@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -99,6 +99,13 @@ export function AgentDetailView({
   const [chatInput, setChatInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  // [rerender-7] Refs pour stabiliser handleSendMessage via useCallback
+  const chatInputRef = useRef(chatInput);
+  chatInputRef.current = chatInput;
+  const isStreamingRef = useRef(isStreaming);
+  isStreamingRef.current = isStreaming;
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
 
   // Fetch agent data
   useEffect(() => {
@@ -135,18 +142,19 @@ export function AgentDetailView({
   const temperature = typeof config.temperature === 'number' ? (config.temperature as number) : 0.7;
   const isActive = agent?.status === 'active';
 
-  const handleSendMessage = async (e: React.FormEvent) => {
+  // [rerender-7] Stabilisé avec useCallback + refs — même pattern que chat-panel/agents-view
+  const handleSendMessage = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || isStreaming || !agentId || !isActive) return;
+    if (!chatInputRef.current.trim() || isStreamingRef.current || !agentId || !isActiveRef.current) return;
 
     const userMsg: ChatMsg = {
       role: 'user',
-      content: chatInput.trim(),
+      content: chatInputRef.current.trim(),
       timestamp: new Date().toISOString(),
     };
 
     setMessages((prev) => [...prev, userMsg]);
-    const sentText = chatInput.trim();
+    const sentText = chatInputRef.current.trim();
     setChatInput('');
     setIsStreaming(true);
 
@@ -254,7 +262,7 @@ export function AgentDetailView({
     } finally {
       setIsStreaming(false);
     }
-  };
+  }, [agentId]);
 
   // Loading state
   if (loading) {

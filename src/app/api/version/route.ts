@@ -17,6 +17,8 @@ import {
   isVersionDeprecated,
 } from '@/lib/api-version';
 
+// [server-04] Edge runtime — pas de DB, pas de Node.js APIs, pur calcul statique
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {

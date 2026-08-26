@@ -399,6 +399,19 @@ function ChatTab({ agents, onOpenCreate }: { agents: Agent[]; onOpenCreate: () =
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const conversationIdRef = useRef<string | null>(null);
+  // [rerender-6] Refs pour les valeurs mutables utilisées dans handleSend
+  // afin de stabiliser la référence de handleSend via useCallback.
+  // Évite la recréation à chaque keystroke (input) ou streaming tick (messages).
+  const inputRef = useRef(input);
+  inputRef.current = input;
+  const isTypingRef = useRef(isTyping);
+  isTypingRef.current = isTyping;
+  const selectedAgentIdRef = useRef(selectedAgentId);
+  selectedAgentIdRef.current = selectedAgentId;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const isAgentActiveRef = useRef(isAgentActive);
+  isAgentActiveRef.current = isAgentActive;
 
   const userPlan = user?.plan || 'free';
   const isPaid = userPlan !== 'free';
@@ -443,9 +456,10 @@ function ChatTab({ agents, onOpenCreate }: { agents: Agent[]; onOpenCreate: () =
     setIsTyping(false);
   }, []);
 
-  const handleSend = async (overrideText?: string) => {
-    const text = overrideText || input;
-    if (!text.trim() || isTyping || !selectedAgentId || !isAgentActive) return;
+  // [rerender-6] handleSend stabilisé avec useCallback + refs — même pattern que chat-panel.tsx
+  const handleSend = useCallback(async (overrideText?: string) => {
+    const text = overrideText || inputRef.current;
+    if (!text.trim() || isTypingRef.current || !selectedAgentIdRef.current || !isAgentActiveRef.current) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -464,7 +478,7 @@ function ChatTab({ agents, onOpenCreate }: { agents: Agent[]; onOpenCreate: () =
     requestAnimationFrame(() => textareaRef.current?.focus());
 
     // Historique pour le backend (12 derniers messages)
-    const historyForBackend = [...messages, userMsg].slice(-12).map((m) => ({
+    const historyForBackend = [...messagesRef.current, userMsg].slice(-12).map((m) => ({
       role: m.role,
       content: m.content,
     }));
@@ -473,7 +487,7 @@ function ChatTab({ agents, onOpenCreate }: { agents: Agent[]; onOpenCreate: () =
     abortRef.current = controller;
 
     try {
-      const res = await fetch(`/api/agents/${selectedAgentId}/chat`, {
+      const res = await fetch(`/api/agents/${selectedAgentIdRef.current}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', credentials: 'include' },
         body: JSON.stringify({
@@ -603,14 +617,14 @@ function ChatTab({ agents, onOpenCreate }: { agents: Agent[]; onOpenCreate: () =
       setIsTyping(false);
       abortRef.current = null;
     }
-  };
+  }, [incMessageCount]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  };
+  }, [handleSend]);
 
   // [rerender-5] Memoïsé pour éviter de recréer 2 nouvelles références de tableau à chaque render
   const activeAgents = useMemo(() => agents.filter((a) => a.status === 'active'), [agents]);

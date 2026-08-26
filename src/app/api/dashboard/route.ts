@@ -40,19 +40,26 @@ export async function GET(request: NextRequest) {
   };
 
   try {
-    // [async-02] Toutes les requêtes DB sont indépendantes — Promise.allSettled
-    // pour graceful degradation individuelle (certaines collections peuvent échouer).
-    const [agentsResult, tasksResult, userResult, txnsResult, auditLogsResult] =
+    // [server-02] Remplacé findMany par count/aggregate + bounded queries.
+    // Avant : on chargeait TOUTES les tâches (findMany) juste pour les compter.
+    // Maintenant : count() pour les nombres, agrégation Firestore pour crédits,
+    // et seule l'activité récente reste en findMany (déjà plafonnée à 8).
+    const [agentCountResult, tasksResult, userResult, txnsCountResult, auditLogsResult] =
       await Promise.allSettled([
-        db.agent.findMany({
+        db.agent.count({
           where: [{ field: 'userId', op: '==', value: userId }],
         }),
+        // Pour le successRate on doit charger les statuts (pas de groupBy dans la facade)
         db.task.findMany({
           where: [{ field: 'userId', op: '==', value: userId }],
+          select: ['status'],
+          take: 50000, // [server-03] Plafond de sécurité
         }),
         db.user.findUnique({ where: { id: userId } }),
-        db.creditTransaction.findMany({
+        // [server-02] Aggregate sur les crédits au lieu de charger toutes les transactions
+        db.creditTransaction.aggregate({
           where: [{ field: 'userId', op: '==', value: userId }],
+          _sum: { amount: true },
         }),
         db.auditLog.findMany({
           where: [{ field: 'userId', op: '==', value: userId }],
@@ -62,19 +69,18 @@ export async function GET(request: NextRequest) {
       ]);
 
     // 1. Count user's agents
-    const agents = agentsResult.status === 'fulfilled' ? agentsResult.value : [];
-    const agentCount = (agents as unknown[]).length;
+    const agentCount = agentCountResult.status === 'fulfilled' ? (agentCountResult.value as number) : 0;
 
     // 2. Count user's tasks and calculate success rate
-    const tasks = tasksResult.status === 'fulfilled' ? tasksResult.value : [];
-    const totalTasks = (tasks as unknown[]).length;
-    const successfulTasks = (tasks as Record<string, unknown>[]).filter(
+    const tasks = tasksResult.status === 'fulfilled' ? (tasksResult.value as Record<string, unknown>[]) : [];
+    const totalTasks = tasks.length;
+    const successfulTasks = tasks.filter(
       (t) => t.status === 'completed' || t.status === 'success',
     ).length;
     const successRate = totalTasks > 0 ? Math.round((successfulTasks / totalTasks) * 100) : 0;
 
     // 3. Count active sessions (running tasks count as active sessions)
-    const activeSessions = (tasks as Record<string, unknown>[]).filter(
+    const activeSessions = tasks.filter(
       (t) => t.status === 'running' || t.status === 'in_progress',
     ).length;
 
@@ -85,13 +91,12 @@ export async function GET(request: NextRequest) {
       creditsRemaining = (u.credits as number) || 0;
     }
 
-    // Sum credits used from credit transactions
+    // Sum credits used from aggregate result
     let creditsUsed = 0;
-    if (txnsResult.status === 'fulfilled') {
-      creditsUsed = (txnsResult.value as Record<string, unknown>[]).reduce((sum, t) => {
-        const amount = t.amount as number;
-        return sum + (amount < 0 ? Math.abs(amount) : 0);
-      }, 0);
+    if (txnsCountResult.status === 'fulfilled' && txnsCountResult.value) {
+      const agg = txnsCountResult.value as { _sum?: { amount?: number } };
+      // amount est négatif pour les utilisations → on prend la valeur absolue
+      creditsUsed = Math.abs(agg._sum?.amount || 0);
     }
 
     // 5. Recent activity (last 8 actions from audit_logs)

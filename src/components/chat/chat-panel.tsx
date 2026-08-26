@@ -130,8 +130,9 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
   const isPaid = userPlan !== 'free';
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
   const isAgentActive = selectedAgent?.status === 'active';
-  const activeAgents = agents.filter((a) => a.status === 'active');
-  const inactiveAgents = agents.filter((a) => a.status !== 'active');
+  // [rerender-5] Memoïsé — évite de recréer 2 nouvelles références de tableau à chaque render
+  const activeAgents = useMemo(() => agents.filter((a) => a.status === 'active'), [agents]);
+  const inactiveAgents = useMemo(() => agents.filter((a) => a.status !== 'active'), [agents]);
   const remainingToday = rewardStats.maxPerDay - rewardStats.balance.today;
 
   // ============================================================

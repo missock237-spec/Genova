@@ -41,12 +41,15 @@ export async function GET(request: Request) {
       // NOTE : l'abstraction Firestore facade ne supporte pas les filtres de date
       // complexes (gte), donc on filtre par userId seulement au niveau DB et
       // on affine la plage de dates en JS. C'est déjà beaucoup mieux que where: {}.
+      // [server-03] Plafond de sécurité take: 50000 pour éviter les OOM.
       const [transactions, executions] = await Promise.all([
         db.creditTransaction.findMany({
           where: [{ field: 'userId', op: '==', value: auth.userId }],
+          take: 50000,
         }),
         db.agentExecution.findMany({
           where: [{ field: 'userId', op: '==', value: auth.userId }],
+          take: 50000,
         }),
       ]);
 
@@ -137,6 +140,7 @@ export async function GET(request: Request) {
         if (agentIds.length > 0) {
           const agents = await db.agent.findMany({
             where: { id: { in: agentIds } },
+            take: agentIds.length, // [server-03] Bounded by unique IDs
           });
           const agentNames: Record<string, string> = {};
           for (const a of agents as Record<string, unknown>[]) {

@@ -87,27 +87,26 @@ export function AgentCostDashboard({ userId }: AgentCostDashboardProps) {
 
       setData(json);
 
-      // Fetch budgets for all unique agent IDs
+      // [client-01] Batch budget fetch — un seul appel au lieu de N appels.
+      // On passe tous les agentIds en query param pour éviter le pattern N+1.
       const agentIds = Object.keys(json.byAgent || {});
-      const fetchedBudgets: Record<string, AgentBudget> = {};
-
-      await Promise.all(
-        agentIds.map(async (agentId) => {
-          try {
-            const bRes = await fetch(
-              `/api/agent-costs/budget?userId=${encodeURIComponent(userId)}&agentId=${encodeURIComponent(agentId)}`
-            );
-            const bJson = await bRes.json();
-            if (bRes.ok && bJson.success && bJson.budget) {
-              fetchedBudgets[agentId] = bJson.budget;
-            }
-          } catch {
-            // Ignore individual budget fetch failures
+      if (agentIds.length > 0) {
+        try {
+          const bRes = await fetch(
+            `/api/agent-costs/budgets?userId=${encodeURIComponent(userId)}&agentIds=${agentIds.map(encodeURIComponent).join(',')}`
+          );
+          const bJson = await bRes.json();
+          if (bRes.ok && bJson.success && bJson.budgets) {
+            setBudgets(bJson.budgets);
+          } else {
+            setBudgets({});
           }
-        })
-      );
-
-      setBudgets(fetchedBudgets);
+        } catch {
+          setBudgets({});
+        }
+      } else {
+        setBudgets({});
+      }
     } catch (err: any) {
       setError(err?.message || 'Error fetching cost data');
     } finally {

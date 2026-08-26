@@ -4,6 +4,8 @@
 import { NextResponse } from 'next/server';
 import { FEATURES, getOperationalFeatures } from '@/lib/features-registry';
 
+// [server-04] Edge runtime — registre statique en mémoire, pas de DB
+export const runtime = 'edge';
 export const dynamic = "force-dynamic";
 export async function GET() {
   const operational = getOperationalFeatures();
