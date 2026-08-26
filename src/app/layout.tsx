@@ -3,7 +3,6 @@ import { headers } from 'next/headers';
 import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
 import './globals.css';
-import './editorial.css';
 import { ThemeProvider } from 'next-themes';
 import { Toaster } from 'sonner';
 import { siteConfig } from '@/lib/seo/config';
