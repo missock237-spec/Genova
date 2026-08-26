@@ -78,16 +78,6 @@
   --sidebar-ring: #C8341F;
 
   --font-newsreader: 'Newsreader', 'Newsreader LF', Georgia, 'Times New Roman', serif;
-
-  --color-vermillion: #C8341F;
-  --color-ultramarine: #1B3A6B;
-  --color-ochre: #C8951E;
-  --color-moss: #5C7A4A;
-  --color-bone: #F4F1EA;
-  --color-carbon: #0F0E0C;
-  --color-ink: #1A1916;
-  --hairline: rgba(26, 25, 22, 0.14);
-  --hairline-strong: rgba(26, 25, 22, 0.28);
 }
 
 /* ----------  DARK : carbon chaud, cream, vermillon  ---------- */
@@ -123,16 +113,6 @@
   --sidebar-accent-foreground: #F4F1EA;
   --sidebar-border: rgba(244, 241, 234, 0.08);
   --sidebar-ring: #E5523F;
-
-  --color-vermillion: #E5523F;
-  --color-ultramarine: #4A6FA5;
-  --color-ochre: #D9A835;
-  --color-moss: #7A9B6A;
-  --color-bone: #F4F1EA;
-  --color-carbon: #0F0E0C;
-  --color-ink: #1A1916;
-  --hairline: rgba(244, 241, 234, 0.10);
-  --hairline-strong: rgba(244, 241, 234, 0.22);
 }
 
 @layer base {
