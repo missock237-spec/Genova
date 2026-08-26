@@ -1,4 +1,48 @@
-/* Editorial.css — minimal test: juste 1 override */
-:root {
-  --background: red;
+/* Editorial.css — utility classes only (pas de :root ni .dark) */
+
+.editorial-eyebrow {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #C8341F;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.dark .editorial-eyebrow { color: #E5523F; }
+
+.editorial-eyebrow::before {
+  content: "";
+  display: inline-block;
+  width: 24px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.editorial-section-num {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  color: #C8341F;
+  font-variant-numeric: tabular-nums;
+}
+.dark .editorial-section-num { color: #E5523F; }
+
+.editorial-headline {
+  font-family: 'Newsreader', 'Newsreader LF', Georgia, 'Times New Roman', serif;
+  font-weight: 500;
+  letter-spacing: -0.018em;
+  line-height: 1.04;
+  font-feature-settings: "ss01", "ss02";
+}
+
+.editorial-meta {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
 }
