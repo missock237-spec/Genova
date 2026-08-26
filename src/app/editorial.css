@@ -1,0 +1,278 @@
+/* =================================================================
+   GEN3IA — EDITORIAL INSTRUMENT TOKENS OVERRIDE
+   =================================================================
+   Direction artistique : "Editorial Instrument"
+   Ce fichier surcharge les tokens de globals.css (qui reste à la
+   version d'origine du projet pour la compat build). Les nouvelles
+   valeurs sont piochées ici en runtime via CSS cascade.
+   ================================================================= */
+
+:root {
+  --radius: 0.25rem;
+  --background: #F4F1EA;
+  --foreground: #1A1916;
+  --card: #FBF9F3;
+  --card-foreground: #1A1916;
+  --popover: #FBF9F3;
+  --popover-foreground: #1A1916;
+  --primary: #C8341F;
+  --primary-foreground: #FBF9F3;
+  --secondary: #EAE5D7;
+  --secondary-foreground: #1A1916;
+  --muted: #EAE5D7;
+  --muted-foreground: #6B6863;
+  --accent: #1B3A6B;
+  --accent-foreground: #FBF9F3;
+  --destructive: #B03017;
+  --border: #DDD8CA;
+  --input: #DDD8CA;
+  --ring: #C8341F;
+  --chart-1: #C8341F;
+  --chart-2: #1B3A6B;
+  --chart-3: #C8951E;
+  --chart-4: #5C7A4A;
+  --chart-5: #6B6863;
+  --sidebar: #EFE9DA;
+  --sidebar-foreground: #1A1916;
+  --sidebar-primary: #C8341F;
+  --sidebar-primary-foreground: #FBF9F3;
+  --sidebar-accent: #E5DECC;
+  --sidebar-accent-foreground: #1A1916;
+  --sidebar-border: #E0DACA;
+  --sidebar-ring: #C8341F;
+
+  /* Editorial tokens (variables CSS pures, pas de namespace Tailwind) */
+  --color-vermillion: #C8341F;
+  --color-ultramarine: #1B3A6B;
+  --color-ochre: #C8951E;
+  --color-moss: #5C7A4A;
+  --color-bone: #F4F1EA;
+  --color-carbon: #0F0E0C;
+  --color-ink: #1A1916;
+  --hairline: rgba(26, 25, 22, 0.14);
+  --hairline-strong: rgba(26, 25, 22, 0.28);
+  --font-newsreader: 'Newsreader', 'Newsreader LF', Georgia, 'Times New Roman', serif;
+}
+
+.dark {
+  --background: #0F0E0C;
+  --foreground: #F4F1EA;
+  --card: #16140F;
+  --card-foreground: #F4F1EA;
+  --popover: #131210;
+  --popover-foreground: #F4F1EA;
+  --primary: #E5523F;
+  --primary-foreground: #FBF9F3;
+  --secondary: #1C1A16;
+  --secondary-foreground: #F4F1EA;
+  --muted: #1C1A16;
+  --muted-foreground: #9A968E;
+  --accent: #4A6FA5;
+  --accent-foreground: #FBF9F3;
+  --destructive: #E5523F;
+  --border: #2A2826;
+  --input: #2A2826;
+  --ring: #E5523F;
+  --chart-1: #E5523F;
+  --chart-2: #4A6FA5;
+  --chart-3: #D9A835;
+  --chart-4: #7A9B6A;
+  --chart-5: #9A968E;
+  --sidebar: #131210;
+  --sidebar-foreground: #F4F1EA;
+  --sidebar-primary: #E5523F;
+  --sidebar-primary-foreground: #FBF9F3;
+  --sidebar-accent: #1C1A16;
+  --sidebar-accent-foreground: #F4F1EA;
+  --sidebar-border: #2A2826;
+  --sidebar-ring: #E5523F;
+
+  --color-vermillion: #E5523F;
+  --color-ultramarine: #4A6FA5;
+  --color-ochre: #D9A835;
+  --color-moss: #7A9B6A;
+  --color-bone: #F4F1EA;
+  --color-carbon: #0F0E0C;
+  --color-ink: #1A1916;
+  --hairline: rgba(244, 241, 234, 0.10);
+  --hairline-strong: rgba(244, 241, 234, 0.22);
+}
+
+::selection {
+  background: rgba(200, 52, 31, 0.22);
+  color: inherit;
+}
+
+/* =================================================================
+   EDITORIAL UTILITY CLASSES (custom CSS, pas de @theme inline)
+   ================================================================= */
+
+.editorial-eyebrow {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #C8341F;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.dark .editorial-eyebrow { color: #E5523F; }
+
+.editorial-eyebrow::before {
+  content: "";
+  display: inline-block;
+  width: 24px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.editorial-section-num {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  color: #C8341F;
+  font-variant-numeric: tabular-nums;
+}
+.dark .editorial-section-num { color: #E5523F; }
+
+.editorial-headline {
+  font-family: 'Newsreader', 'Newsreader LF', Georgia, 'Times New Roman', serif;
+  font-weight: 500;
+  letter-spacing: -0.018em;
+  line-height: 1.04;
+  font-feature-settings: "ss01", "ss02";
+}
+
+.editorial-meta {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.editorial-pullquote {
+  font-family: 'Newsreader', Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.25;
+  border-left: 2px solid #C8341F;
+  padding-left: 1.2rem;
+}
+.dark .editorial-pullquote { border-left-color: #E5523F; }
+
+.instrument-card {
+  border: 1px solid #DDD8CA;
+  background: var(--card);
+  transition: border-color 0.18s ease, transform 0.18s ease;
+  position: relative;
+}
+.instrument-card:hover { border-color: #C8341F; }
+.dark .instrument-card { border-color: #2A2826; }
+.dark .instrument-card:hover { border-color: #E5523F; }
+
+.instrument-card-flat {
+  border: 1px solid #DDD8CA;
+  background: var(--card);
+}
+.dark .instrument-card-flat { border-color: #2A2826; }
+
+.editorial-grid {
+  background-image:
+    linear-gradient(rgba(26, 25, 22, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(26, 25, 22, 0.08) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.dark .editorial-grid {
+  background-image:
+    linear-gradient(rgba(244, 241, 234, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(244, 241, 234, 0.06) 1px, transparent 1px);
+}
+
+.editorial-tag {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #C8341F;
+  border: 1px solid #DDD8CA;
+  padding: 2px 8px;
+  border-radius: 2px;
+  background: transparent;
+  display: inline-block;
+}
+.dark .editorial-tag { color: #E5523F; border-color: #2A2826; }
+.editorial-tag--ochre { color: #C8951E; }
+.editorial-tag--ultramarine { color: #1B3A6B; }
+.dark .editorial-tag--ochre { color: #D9A835; }
+.dark .editorial-tag--ultramarine { color: #4A6FA5; }
+
+.editorial-reveal {
+  animation: fade-up-editorial 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes fade-up-editorial {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.editorial-caret {
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  background: #C8341F;
+  vertical-align: text-bottom;
+  animation: caret-blink-editorial 1s steps(1) infinite;
+}
+.dark .editorial-caret { background: #E5523F; }
+@keyframes caret-blink-editorial {
+  50% { opacity: 0; }
+}
+
+.status-mark {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: #5C7A4A;
+}
+.dark .status-mark { background: #7A9B6A; }
+.status-mark--warn { background: #C8951E; }
+.dark .status-mark--warn { background: #D9A835; }
+.status-mark--danger { background: #C8341F; }
+.dark .status-mark--danger { background: #E5523F; }
+.status-mark--info { background: #1B3A6B; }
+.dark .status-mark--info { background: #4A6FA5; }
+
+.btn-signal {
+  background: #C8341F;
+  color: #F4F1EA;
+  border: 1px solid #C8341F;
+  font-weight: 500;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.dark .btn-signal { background: #E5523F; border-color: #E5523F; }
+.btn-signal:hover { background: #B03017; }
+.dark .btn-signal:hover { background: #C8341F; }
+.btn-signal:active { transform: translateY(1px); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--foreground);
+  border: 1px solid #DDD8CA;
+  font-weight: 500;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.dark .btn-ghost { border-color: #2A2826; }
+.btn-ghost:hover { border-color: #C8341F; color: #C8341F; }
+.dark .btn-ghost:hover { border-color: #E5523F; color: #E5523F; }
+
+/* Hairlines éditoriales (remplaçant les bordures #1C1E22) */
+.border-hairline {
+  border-color: #DDD8CA;
+}
+.dark .border-hairline {
+  border-color: #2A2826;
+}
