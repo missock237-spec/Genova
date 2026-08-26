@@ -36,26 +36,28 @@ export async function GET(request: Request) {
     prevEndDate.setDate(prevEndDate.getDate() - daysBack);
 
     try {
-      // ============================================================
-      // 1. Transactions de crédit (débits) — consommation réelle
-      // ============================================================
-      const transactions = await db.creditTransaction.findMany({
-        where: {},
-      });
+      // [server-01 + async-08] Filtrer au niveau DB au lieu de tout ramener en mémoire.
+      // Les deux requêtes sont indépendantes → Promise.all.
+      // NOTE : l'abstraction Firestore facade ne supporte pas les filtres de date
+      // complexes (gte), donc on filtre par userId seulement au niveau DB et
+      // on affine la plage de dates en JS. C'est déjà beaucoup mieux que where: {}.
+      const [transactions, executions] = await Promise.all([
+        db.creditTransaction.findMany({
+          where: [{ field: 'userId', op: '==', value: auth.userId }],
+        }),
+        db.agentExecution.findMany({
+          where: [{ field: 'userId', op: '==', value: auth.userId }],
+        }),
+      ]);
 
-      // Filtrer côté JS (l'abstraction Firestore ne supporte pas
-      // les filtres de date complexes)
+      // Filtrer par plage de dates côté JS
       const userTxns = (transactions as Record<string, unknown>[])
-        .filter((t) => {
-          const tDate = new Date(t.createdAt as string);
-          return t.userId === auth.userId && tDate >= startDate;
-        });
+        .filter((t) => new Date(t.createdAt as string) >= startDate);
 
-      // Transactions période précédente
       const prevTxns = (transactions as Record<string, unknown>[])
         .filter((t) => {
           const tDate = new Date(t.createdAt as string);
-          return t.userId === auth.userId && tDate >= prevStartDate && tDate < prevEndDate;
+          return tDate >= prevStartDate && tDate < prevEndDate;
         });
 
       // ============================================================
@@ -88,7 +90,6 @@ export async function GET(request: Request) {
       let grouped: Record<string, unknown> = {};
 
       if (groupBy === 'day') {
-        // Consommation par jour
         const byDay: Record<string, { credits: number; usd: number; count: number }> = {};
         for (const t of userTxns) {
           const date = new Date(t.createdAt as string).toISOString().split('T')[0];
@@ -108,7 +109,6 @@ export async function GET(request: Request) {
         }
         grouped = byDay;
       } else if (groupBy === 'agent') {
-        // Top agents par coût
         const byAgent: Record<string, { credits: number; usd: number; executions: number }> = {};
         for (const t of userTxns) {
           let agentId = 'unknown';
@@ -142,7 +142,6 @@ export async function GET(request: Request) {
           for (const a of agents as Record<string, unknown>[]) {
             agentNames[a.id as string] = a.name as string;
           }
-          // Remplacer les IDs par les noms
           const byAgentNamed: Record<string, typeof byAgent[string]> = {};
           for (const [id, data] of Object.entries(byAgent)) {
             const name = agentNames[id] || id;
@@ -153,7 +152,6 @@ export async function GET(request: Request) {
           grouped = byAgent;
         }
       } else if (groupBy === 'provider') {
-        // Répartition par provider IA
         const byProvider: Record<string, { credits: number; usd: number; count: number }> = {};
         for (const t of userTxns) {
           let provider = 'unknown';
@@ -174,7 +172,6 @@ export async function GET(request: Request) {
         }
         grouped = byProvider;
       } else if (groupBy === 'type') {
-        // Par type d'action
         const byType: Record<string, { credits: number; count: number }> = {};
         for (const t of userTxns) {
           const resourceType = (t.resourceType as string) || 'unknown';
@@ -191,12 +188,9 @@ export async function GET(request: Request) {
       // ============================================================
       // 4. Exécutions d'agents — statistiques de performance
       // ============================================================
-      const executions = await db.agentExecution.findMany({
-        where: {},
-      });
-
+      // [server-01] Déjà filtré par userId au niveau DB ci-dessus
       const userExecs = (executions as Record<string, unknown>[])
-        .filter((e) => e.userId === auth.userId && new Date(e.createdAt as string) >= startDate);
+        .filter((e) => new Date(e.createdAt as string) >= startDate);
 
       const totalExecutions = userExecs.length;
       const successfulExecs = userExecs.filter(e => e.status === 'completed').length;

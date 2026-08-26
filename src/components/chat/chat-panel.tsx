@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Bot,
   User,
@@ -110,6 +110,16 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const conversationIdRef = useRef<string | null>(null);
+  // [rerender-4] Refs pour les valeurs mutables utilisées dans handleSend
+  // afin de stabiliser la référence de handleSend via useCallback
+  const inputRef = useRef(input);
+  inputRef.current = input;
+  const isTypingRef = useRef(isTyping);
+  isTypingRef.current = isTyping;
+  const selectedAgentIdRef = useRef(selectedAgentId);
+  selectedAgentIdRef.current = selectedAgentId;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   // --- State: Sidebar ---
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -283,9 +293,11 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
   // Envoyer un message
   // ============================================================
 
-  const handleSend = async (overrideText?: string) => {
-    const text = overrideText || input;
-    if (!text.trim() || isTyping || !selectedAgentId) return;
+  // [rerender-4] handleSend stabilisé avec useCallback + refs pour les valeurs mutables.
+  // Évite de recréer la fonction à chaque keystroke (input) ou chaque streaming tick (messages).
+  const handleSend = useCallback(async (overrideText?: string) => {
+    const text = overrideText || inputRef.current;
+    if (!text.trim() || isTypingRef.current || !selectedAgentIdRef.current) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -305,7 +317,7 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
     requestAnimationFrame(() => textareaRef.current?.focus());
 
     // Historique pour le backend (12 derniers messages)
-    const historyForBackend = [...messages, userMsg].slice(-12).map((m) => ({
+    const historyForBackend = [...messagesRef.current, userMsg].slice(-12).map((m) => ({
       role: m.role,
       content: m.content,
     }));
@@ -314,7 +326,7 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
     abortRef.current = controller;
 
     try {
-      const res = await fetch(`/api/agents/${selectedAgentId}/chat`, {
+      const res = await fetch(`/api/agents/${selectedAgentIdRef.current}/chat`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -430,7 +442,7 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
       }
 
       // Rafraîchir la liste des conversations après l'envoi
-      fetchConversations(selectedAgentId || undefined);
+      fetchConversations(selectedAgentIdRef.current || undefined);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       const errMsg = err instanceof Error ? err.message : 'Erreur de communication';
@@ -446,7 +458,21 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
       setIsTyping(false);
       abortRef.current = null;
     }
-  };
+  }, []); // deps vides : toutes les valeurs mutables passent par refs
+
+  // [rerender-3] Callbacks de tracking pub stabilisés pour éviter re-rendus AdBanner pendant le streaming
+  const adHandlers = useMemo(() => {
+    const map = new Map<number, { onAdViewed: () => void; onAdClicked: () => void }>();
+    return (idx: number) => {
+      if (!map.has(idx)) {
+        map.set(idx, {
+          onAdViewed: () => trackAdEvent(`ad_response_${idx}`, 'view', userPlan),
+          onAdClicked: () => trackAdEvent(`ad_response_${idx}`, 'click', userPlan),
+        });
+      }
+      return map.get(idx)!;
+    };
+  }, [trackAdEvent, userPlan]);
 
   // ============================================================
   // Keyboard
@@ -819,8 +845,7 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
                     userPlan={userPlan}
                     placement="agent-response"
                     messageIndex={idx}
-                    onAdViewed={() => trackAdEvent(`ad_response_${idx}`, 'view', userPlan)}
-                    onAdClicked={() => trackAdEvent(`ad_response_${idx}`, 'click', userPlan)}
+                    {...adHandlers(idx)}
                   />
                 </div>
               )}

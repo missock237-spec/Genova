@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   DollarSign,
   Coins,
@@ -158,20 +158,25 @@ export function AgentCostDashboard({ userId }: AgentCostDashboardProps) {
     );
   }
 
-  const agentEntries = Object.entries(data?.byAgent || {}).sort(
-    ([, a], [, b]) => b.totalCost - a.totalCost
-  );
-
-  const dayEntries = Object.entries(data?.byDay || {}).sort(
-    ([a], [b]) => a.localeCompare(b)
-  );
-
-  const modelEntries = Object.entries(data?.byModel || {}).sort(
-    ([, a], [, b]) => b.totalCost - a.totalCost
-  );
-
-  const maxAgentCost = Math.max(...agentEntries.map(([, v]) => v.totalCost), 1);
-  const maxDayCost = Math.max(...dayEntries.map(([, v]) => v.totalCost), 1);
+  // [rendering-4] Tri + Math.max mémoïsés — évite de recalculer à chaque hover/click
+  const { agentEntries, dayEntries, modelEntries, maxAgentCost, maxDayCost } = useMemo(() => {
+    const aEntries = Object.entries(data?.byAgent || {}).sort(
+      ([, a], [, b]) => b.totalCost - a.totalCost
+    );
+    const dEntries = Object.entries(data?.byDay || {}).sort(
+      ([a], [b]) => a.localeCompare(b)
+    );
+    const mEntries = Object.entries(data?.byModel || {}).sort(
+      ([, a], [, b]) => b.totalCost - a.totalCost
+    );
+    return {
+      agentEntries: aEntries,
+      dayEntries: dEntries,
+      modelEntries: mEntries,
+      maxAgentCost: Math.max(...aEntries.map(([, v]) => v.totalCost), 1),
+      maxDayCost: Math.max(...dEntries.map(([, v]) => v.totalCost), 1),
+    };
+  }, [data]);
 
   return (
     <div className="space-y-6">

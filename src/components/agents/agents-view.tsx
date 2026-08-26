@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Bot,
   User,
@@ -612,8 +612,31 @@ function ChatTab({ agents, onOpenCreate }: { agents: Agent[]; onOpenCreate: () =
     }
   };
 
-  const activeAgents = agents.filter((a) => a.status === 'active');
-  const inactiveAgents = agents.filter((a) => a.status !== 'active');
+  // [rerender-5] Memoïsé pour éviter de recréer 2 nouvelles références de tableau à chaque render
+  const activeAgents = useMemo(() => agents.filter((a) => a.status === 'active'), [agents]);
+  const inactiveAgents = useMemo(() => agents.filter((a) => a.status !== 'active'), [agents]);
+
+  // [rerender-2] Callbacks de tracking pub stabilisés — une seule référence pour tous les AdBanner
+  const handleAdViewed = useCallback((idx: number) => {
+    trackAdEvent(`ad_response_${idx}`, 'view', userPlan);
+  }, [trackAdEvent, userPlan]);
+  const handleAdClicked = useCallback((idx: number) => {
+    trackAdEvent(`ad_response_${idx}`, 'click', userPlan);
+  }, [trackAdEvent, userPlan]);
+
+  // Wrapper qui curry l'index pour compatibilité avec la prop onAdViewed/onAdClicked
+  const adViewHandlers = useMemo(() => {
+    const map = new Map<number, { onAdViewed: () => void; onAdClicked: () => void }>();
+    return (idx: number) => {
+      if (!map.has(idx)) {
+        map.set(idx, {
+          onAdViewed: () => handleAdViewed(idx),
+          onAdClicked: () => handleAdClicked(idx),
+        });
+      }
+      return map.get(idx)!;
+    };
+  }, [handleAdViewed, handleAdClicked]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-16rem)] rounded-3xl border border-border/60 bg-card/40 backdrop-blur-xl overflow-hidden shadow-2xl shadow-black/20">
@@ -815,8 +838,7 @@ function ChatTab({ agents, onOpenCreate }: { agents: Agent[]; onOpenCreate: () =
                   userPlan={userPlan}
                   placement="agent-response"
                   messageIndex={idx}
-                  onAdViewed={() => trackAdEvent(`ad_response_${idx}`, 'view', userPlan)}
-                  onAdClicked={() => trackAdEvent(`ad_response_${idx}`, 'click', userPlan)}
+                  {...adViewHandlers(idx)}
                 />
               </div>
             )}
