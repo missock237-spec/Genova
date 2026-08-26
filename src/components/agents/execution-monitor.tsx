@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -303,13 +303,15 @@ export function ExecutionMonitor({
     return `${(ms / 1000).toFixed(1)}s`;
   };
 
-  const totalDuration = steps.reduce((sum, s) => sum + (s.duration || 0), 0);
-  const thoughtCount = steps.filter(s => s.type === 'thought').length;
-  const actionCount = steps.filter(s => s.type === 'action').length;
-  const reflectionCount = steps.filter(s => s.type === 'reflection').length;
-  const correctionCount = steps.filter(s => s.type === 'correction').length;
-  const retryCount = steps.filter(s => s.type === 'retry').length;
-  const errorCount = steps.filter(s => s.type === 'error').length;
+  // [rendering-2] Un seul parcours au lieu de 6 filter().length
+  const { totalDuration, thoughtCount, actionCount, reflectionCount, correctionCount, retryCount, errorCount } = useMemo(() => {
+    const counts = { thought: 0, action: 0, reflection: 0, correction: 0, retry: 0, error: 0, totalDuration: 0 };
+    for (const s of steps) {
+      counts[s.type as keyof typeof counts] = (counts[s.type as keyof typeof counts] || 0) + 1;
+      counts.totalDuration += s.duration || 0;
+    }
+    return counts;
+  }, [steps]);
 
   return (
     <div className="flex flex-col h-full">
@@ -371,7 +373,7 @@ export function ExecutionMonitor({
           </div>
         )}
 
-        <AnimatePresence mode="popLayout">
+        <AnimatePresence mode="sync">
           {steps.map((step, index) => {
             const config = stepConfig[step.type] || stepConfig.thought;
             const Icon = config.icon;

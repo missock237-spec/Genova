@@ -89,11 +89,16 @@ export async function POST(
       });
     }
 
-    // Check daily token limit before processing chat
-    const user = await db.user.findUnique({
-      where: { id: auth.userId },
-      select: ['plan'],
-    });
+    // [async-06] user+checkTokenLimit est une chaîne de dépendance réelle,
+    // mais agentPermissions et memoryContext sont indépendantes de user.
+    // On les lance en parallèle avec user, puis on fait checkTokenLimit.
+    const [user, agentPermissions, memoryContext] = await Promise.all([
+      db.user.findUnique({ where: { id: auth.userId }, select: ['plan'] }),
+      db.agentPermission.findMany({
+        where: [{ field: 'agentId', op: '==', value: id }],
+      }).catch(() => []),
+      getMemoryContext(id, auth.userId, message),
+    ]);
     const plan = (user?.plan as string) || 'free';
     const tokenCheck = await checkTokenLimit(auth.userId, plan);
 
@@ -112,11 +117,6 @@ export async function POST(
         headers: { 'Content-Type': 'application/json' },
       });
     }
-
-    // Récupérer les permissions séparément (Firestore ne supporte pas include)
-    const agentPermissions = await db.agentPermission.findMany({
-      where: [{ field: 'agentId', op: '==', value: id }],
-    }).catch(() => []);
 
     // Parse agent config — use ALL config fields (systemPrompt, skills, knowledge, model, temperature)
     const agentConfigStr = (agent as Record<string, unknown>).config as string || '{}';
@@ -152,8 +152,7 @@ export async function POST(
       .filter((p) => p.granted)
       .map((p) => p.permission as string);
 
-    // Retrieve relevant memories for context injection
-    const memoryContext = await getMemoryContext(id, auth.userId, message);
+    // memoryContext déjà récupéré dans le Promise.all plus haut
 
     const agentName = (agent as Record<string, unknown>).name as string || 'Assistant';
     const agentType = (agent as Record<string, unknown>).type as string || 'custom';

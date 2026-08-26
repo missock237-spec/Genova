@@ -1,25 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useAuthStore, useAppStore, useModernStore } from '@/lib/store';
 import { hardReload, diagnoseServiceWorker } from '@/lib/client-cache-reset';
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { AppHeader } from '@/components/layout/app-header';
-import { DashboardView } from '@/components/dashboard/dashboard-view';
-import { AgentsView } from '@/components/agents/agents-view';
-import { AutomationView } from '@/components/automation/automation-view';
-import { GuardrailsView } from '@/components/guardrails/guardrails-view';
-import { CoordinationView } from '@/components/coordination/coordination-view';
-import { SettingsView } from '@/components/settings/settings-view';
-import { AnalyticsView } from '@/components/analytics/analytics-view';
-import BillingPage from '@/components/billing/billing-page';
-import DevelopersPage from '@/components/developers/developers-page';
-import { IntegrationsView } from '@/components/integrations/integrations-view';
-import { SchedulerView } from '@/components/scheduler/scheduler-view';
-import { VoiceView } from '@/components/voice/voice-view';
-import { MediaView } from '@/components/media/media-view';
-import { PromptsView } from '@/components/prompts/prompts-view';
-import { GenerationWorkbench } from '@/components/generation/generation-workbench';
 import { AdBar } from '@/components/advertising/ad-bar';
 import { ThemeProvider } from 'next-themes';
 import { Loader2, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
@@ -27,9 +13,82 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
-import HardTechLanding from '@/components/landing/hardtech-landing';
 import { SystemCommandCenter } from '@/components/system/system-command-center';
 import { CommandPalette } from '@/components/system/command-palette';
+
+// [bundle-01] Tous les composants de vue sont chargés dynamiquement.
+// Seule la vue active est téléchargée — réduction ~200-400KB du JS initial.
+const ViewSkeleton = () => (
+  <div className="flex items-center justify-center h-64">
+    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+  </div>
+);
+
+const DashboardView = dynamic(
+  () => import('@/components/dashboard/dashboard-view').then(m => ({ default: m.DashboardView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const AgentsView = dynamic(
+  () => import('@/components/agents/agents-view').then(m => ({ default: m.AgentsView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const AutomationView = dynamic(
+  () => import('@/components/automation/automation-view').then(m => ({ default: m.AutomationView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const GuardrailsView = dynamic(
+  () => import('@/components/guardrails/guardrails-view').then(m => ({ default: m.GuardrailsView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const CoordinationView = dynamic(
+  () => import('@/components/coordination/coordination-view').then(m => ({ default: m.CoordinationView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const SettingsView = dynamic(
+  () => import('@/components/settings/settings-view').then(m => ({ default: m.SettingsView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const AnalyticsView = dynamic(
+  () => import('@/components/analytics/analytics-view').then(m => ({ default: m.AnalyticsView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const BillingPage = dynamic(
+  () => import('@/components/billing/billing-page'),
+  { loading: ViewSkeleton, ssr: false },
+);
+const DevelopersPage = dynamic(
+  () => import('@/components/developers/developers-page'),
+  { loading: ViewSkeleton, ssr: false },
+);
+const IntegrationsView = dynamic(
+  () => import('@/components/integrations/integrations-view').then(m => ({ default: m.IntegrationsView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const SchedulerView = dynamic(
+  () => import('@/components/scheduler/scheduler-view').then(m => ({ default: m.SchedulerView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const VoiceView = dynamic(
+  () => import('@/components/voice/voice-view').then(m => ({ default: m.VoiceView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const MediaView = dynamic(
+  () => import('@/components/media/media-view').then(m => ({ default: m.MediaView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const PromptsView = dynamic(
+  () => import('@/components/prompts/prompts-view').then(m => ({ default: m.PromptsView })),
+  { loading: ViewSkeleton, ssr: false },
+);
+const GenerationWorkbench = dynamic(
+  () => import('@/components/generation/generation-workbench').then(m => ({ default: m.GenerationWorkbench })),
+  { loading: ViewSkeleton, ssr: false },
+);
+// [bundle-02] Landing page uniquement pour les non-authentifiés — ne pas charger pour les users connectés
+const HardTechLanding = dynamic(
+  () => import('@/components/landing/hardtech-landing'),
+  { ssr: false },
+);
 
 // T23 : délai avant d'afficher l'UI "chargement bloqué" (12s).
 const STUCK_LOADING_TIMEOUT_MS = 12_000;
@@ -88,8 +147,6 @@ function AppContent() {
   }, [isAuthenticated, loadError, fetchApprovalCount]);
 
   // --- SPA deep-linking : lire le pathname pour restaurer la vue ---
-  // IMPORTANT : ce useEffect s'exécute UNE FOIS après auth (authDoneRef)
-  // pour éviter de réinitialiser la vue à chaque re-render.
   const authDoneRef = useRef(false);
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -112,7 +169,6 @@ function AppContent() {
   // --- SPA navigation : mettre à jour l'URL quand currentView change ---
   useEffect(() => {
     if (!isAuthenticated) return;
-    // Ne pas pousser si on est déjà sur le bon pathname (évite doubles entrées)
     const expected = currentView === 'dashboard' ? '/' : `/${currentView}`;
     if (window.location.pathname !== expected) {
       window.history.replaceState(null, '', expected);
@@ -310,7 +366,7 @@ function AppContent() {
       case 'images': return <MediaView />;
       case 'generation': return <GenerationWorkbench />;
       case 'integrations': return <IntegrationsView />;
-      case 'notifications': return <DashboardView />; // TODO: NotificationsView
+      case 'notifications': return <DashboardView />;
       case 'scheduler': return <SchedulerView />;
       case 'prompts': return <PromptsView />;
       case 'agent-chat': return <AgentsView />;
@@ -320,7 +376,6 @@ function AppContent() {
 
   return (
     <div className="min-h-screen flex bg-background">
-      {/* Mobile sidebar Sheet */}
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
         <SheetContent side="left" className="w-64 p-0 bg-[#0B0C0D] border-[#1C1E22]">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
@@ -328,7 +383,6 @@ function AppContent() {
         </SheetContent>
       </Sheet>
 
-      {/* Desktop sidebar (mobile hidden - Sheet handles mobile) */}
       <div className="hidden lg:block">
         <AppSidebar />
       </div>
@@ -352,7 +406,6 @@ function AppContent() {
         </div>
       </main>
 
-      {/* Barre publicitaire — visible sur toutes les vues sauf le chat */}
       <AdBar sessionId="main-session" hidden={hideAdBar} />
     </div>
   );

@@ -19,11 +19,12 @@ export async function POST() {
     let refreshed = 0;
     let failed = 0;
 
-    for (const auth of authorizations) {
-      const success = await refreshSingleToken(auth.id);
-      if (success) refreshed++;
-      else failed++;
-    }
+    // [async-10] Tous les refreshs sont indépendants — exécution parallèle
+    const results = await Promise.allSettled(
+      authorizations.map((auth) => refreshSingleToken(auth.id)),
+    );
+    const refreshed = results.filter((r) => r.status === 'fulfilled' && r.value).length;
+    const failed = results.length - refreshed;
 
     return NextResponse.json({
       message: `Rafraichissement termine: ${refreshed} reussis, ${failed} echoues`,

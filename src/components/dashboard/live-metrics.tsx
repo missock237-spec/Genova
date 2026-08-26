@@ -100,7 +100,7 @@ export function LiveMetrics({ userId, refreshInterval = 5000 }: LiveMetricsProps
     };
 
     return eventSource;
-  }, [userId, eventCount]);
+  }, [userId]); // [rendering-1] Retiré eventCount des deps — évite reconnexion SSE à chaque événement
 
   // Keep ref in sync for recursive setTimeout calls (must be in effect, not during render).
   useEffect(() => {

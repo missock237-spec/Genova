@@ -231,11 +231,16 @@ export async function executeAgentLoop(context: ExecutionContext, toolRegistry: 
     if (agent) { context.agentName = agent.name; context.agentType = agent.type; try { context.agentConfig = JSON.parse(agent.config); } catch { context.agentConfig = {}; } }
   }
   const longTermMemory = new LongTermMemory();
-  context.memory.longTermContext = await longTermMemory.getContextForQuery(context.task, context.userId);
-  if (context.conversationId) {
-    const shortTermMemory = new ShortTermMemory();
-    context.memory.shortTerm = await shortTermMemory.getContext(context.conversationId, 10);
-  }
+  // [async-12] Mémoire longue et courte sont indépendantes — parallélisées
+  const shortTermMemory = context.conversationId ? new ShortTermMemory() : null;
+  const [longTermCtx, shortTermCtx] = await Promise.all([
+    longTermMemory.getContextForQuery(context.task, context.userId),
+    shortTermMemory
+      ? shortTermMemory.getContext(context.conversationId!, 10)
+      : Promise.resolve([] as string[]),
+  ]);
+  context.memory.longTermContext = longTermCtx;
+  if (shortTermMemory) context.memory.shortTerm = shortTermCtx;
   if (!context.plan) context.plan = await createExecutionPlan(context);
   let currentStep = 0;
   context.status = 'running';

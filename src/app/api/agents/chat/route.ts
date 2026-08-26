@@ -120,19 +120,19 @@ export async function POST(request: NextRequest) {
     const personality = (agentConfig as { personality?: string }).personality || 'helpful and professional';
     const instructions = (agentConfig as { instructions?: string }).instructions || '';
 
-    // Get granted permissions
-    const permissions = await db.agentPermission.findMany({
-      where: [
-        { field: 'agentId', op: '==', value: agentId },
-        { field: 'userId', op: '==', value: auth.userId },
-      ],
-    });
+    // [async-05] Permissions et mémoire sont indépendantes — exécution parallèle
+    const [permissions, memoryContext] = await Promise.all([
+      db.agentPermission.findMany({
+        where: [
+          { field: 'agentId', op: '==', value: agentId },
+          { field: 'userId', op: '==', value: auth.userId },
+        ],
+      }).catch(() => []),
+      getMemoryContext(agentId, auth.userId, message),
+    ]);
     const grantedPermissions = (permissions as Record<string, unknown>[])
       .filter((p) => p.granted)
       .map((p) => p.permission as string);
-
-    // Retrieve relevant memories
-    const memoryContext = await getMemoryContext(agentId, auth.userId, message);
 
     const systemPrompt = `You are ${agentRecord.name as string}, an AI agent with the following characteristics:
 - Type: ${agentRecord.type}

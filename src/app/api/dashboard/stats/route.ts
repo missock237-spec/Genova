@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
   try {
     const userId = auth.userId;
 
+    // [async-01] Toutes les 17 requêtes sont indépendantes — un seul Promise.all
     const [
       activeAgents,
       runningTasks,
@@ -31,7 +32,13 @@ export async function GET(request: NextRequest) {
       pendingApprovals,
       browserSessions,
       totalResources,
+      recentActivities,
+      tasksByStatus,
+      socialAccountsByPlatform,
+      resourcesByType,
+      recentApprovals,
     ] = await Promise.all([
+      // --- counts (original 12) ---
       db.agent.count({ where: { userId, status: 'active' } }),
       db.task.count({ where: { userId, status: 'running' } }),
       db.validation.count({
@@ -49,40 +56,33 @@ export async function GET(request: NextRequest) {
       db.approvalRequest.count({ where: { userId, status: 'pending' } }),
       db.browserSession.count({ where: { userId } }),
       db.userResource.count({ where: { userId, isActive: true } }),
+      // --- anciennement séquentiel (5 requêtes) ---
+      db.activityLog.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+      db.task.groupBy({
+        by: ['status'],
+        where: { userId },
+        _count: { status: true },
+      }),
+      db.socialAccount.groupBy({
+        by: ['platform'],
+        where: { userId, isActive: true },
+        _count: { platform: true },
+      }),
+      db.userResource.groupBy({
+        by: ['type'],
+        where: { userId, isActive: true },
+        _count: { type: true },
+      }),
+      db.approvalRequest.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      }),
     ]);
-
-    const recentActivities = await db.activityLog.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-    });
-
-    const tasksByStatus = await db.task.groupBy({
-      by: ['status'],
-      where: { userId },
-      _count: { status: true },
-    });
-
-    // Social accounts by platform
-    const socialAccountsByPlatform = await db.socialAccount.groupBy({
-      by: ['platform'],
-      where: { userId, isActive: true },
-      _count: { platform: true },
-    });
-
-    // Resources by type
-    const resourcesByType = await db.userResource.groupBy({
-      by: ['type'],
-      where: { userId, isActive: true },
-      _count: { type: true },
-    });
-
-    // Recent approval requests
-    const recentApprovals = await db.approvalRequest.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    });
 
     const res = NextResponse.json({
       activeAgents,

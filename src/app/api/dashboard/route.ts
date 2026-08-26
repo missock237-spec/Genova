@@ -40,16 +40,33 @@ export async function GET(request: NextRequest) {
   };
 
   try {
+    // [async-02] Toutes les requêtes DB sont indépendantes — Promise.allSettled
+    // pour graceful degradation individuelle (certaines collections peuvent échouer).
+    const [agentsResult, tasksResult, userResult, txnsResult, auditLogsResult] =
+      await Promise.allSettled([
+        db.agent.findMany({
+          where: [{ field: 'userId', op: '==', value: userId }],
+        }),
+        db.task.findMany({
+          where: [{ field: 'userId', op: '==', value: userId }],
+        }),
+        db.user.findUnique({ where: { id: userId } }),
+        db.creditTransaction.findMany({
+          where: [{ field: 'userId', op: '==', value: userId }],
+        }),
+        db.auditLog.findMany({
+          where: [{ field: 'userId', op: '==', value: userId }],
+          orderBy: [{ field: 'createdAt', direction: 'desc' }],
+          take: 8,
+        }),
+      ]);
+
     // 1. Count user's agents
-    const agents = await db.agent.findMany({
-      where: [{ field: 'userId', op: '==', value: userId }],
-    });
+    const agents = agentsResult.status === 'fulfilled' ? agentsResult.value : [];
     const agentCount = (agents as unknown[]).length;
 
     // 2. Count user's tasks and calculate success rate
-    const tasks = await db.task.findMany({
-      where: [{ field: 'userId', op: '==', value: userId }],
-    });
+    const tasks = tasksResult.status === 'fulfilled' ? tasksResult.value : [];
     const totalTasks = (tasks as unknown[]).length;
     const successfulTasks = (tasks as Record<string, unknown>[]).filter(
       (t) => t.status === 'completed' || t.status === 'success',
@@ -62,50 +79,31 @@ export async function GET(request: NextRequest) {
     ).length;
 
     // 4. Credits info from user profile
-    let creditsUsed = 0;
     let creditsRemaining = 0;
-    try {
-      const user = await db.user.findUnique({
-        where: { id: userId },
-      });
-      if (user) {
-        const u = user as Record<string, unknown>;
-        creditsRemaining = (u.credits as number) || 0;
-      }
-    } catch {
-      // Graceful: leave credits at 0
+    if (userResult.status === 'fulfilled' && userResult.value) {
+      const u = userResult.value as Record<string, unknown>;
+      creditsRemaining = (u.credits as number) || 0;
     }
 
     // Sum credits used from credit transactions
-    try {
-      const txns = await db.creditTransaction.findMany({
-        where: [{ field: 'userId', op: '==', value: userId }],
-      });
-      creditsUsed = (txns as Record<string, unknown>[]).reduce((sum, t) => {
+    let creditsUsed = 0;
+    if (txnsResult.status === 'fulfilled') {
+      creditsUsed = (txnsResult.value as Record<string, unknown>[]).reduce((sum, t) => {
         const amount = t.amount as number;
         return sum + (amount < 0 ? Math.abs(amount) : 0);
       }, 0);
-    } catch {
-      // Graceful: leave at 0
     }
 
     // 5. Recent activity (last 8 actions from audit_logs)
-    let recentActivity: { action: string; createdAt: string }[] = [];
-    try {
-      const auditLogs = await db.auditLog.findMany({
-        where: [{ field: 'userId', op: '==', value: userId }],
-        orderBy: [{ field: 'createdAt', direction: 'desc' }],
-        take: 8,
-      });
-      recentActivity = (auditLogs as Record<string, unknown>[]).map((log) => ({
-        action: (log.action as string) || 'Unknown action',
-        createdAt: log.createdAt
-          ? new Date(log.createdAt as string).toISOString()
-          : new Date().toISOString(),
-      }));
-    } catch {
-      // Graceful: empty array
-    }
+    const recentActivity =
+      auditLogsResult.status === 'fulfilled'
+        ? (auditLogsResult.value as Record<string, unknown>[]).map((log) => ({
+            action: (log.action as string) || 'Unknown action',
+            createdAt: log.createdAt
+              ? new Date(log.createdAt as string).toISOString()
+              : new Date().toISOString(),
+          }))
+        : [];
 
     const res = NextResponse.json({
       agentCount,

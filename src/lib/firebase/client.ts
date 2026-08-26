@@ -4,13 +4,10 @@
 //  Singleton initialisé côté client.
 //  À importer dans les composants React / hooks / client-side.
 //
-//  Ordre d'initialisation (Fix 3) :
-//    1. getFirebaseApp() — getApps().length === 0 ? initializeApp : getApp
-//    2. getFirebaseAuth() — getAuth/initializeAuth AVANT Firestore/Storage/...
-//    3. les autres services (db, storage, messaging, analytics) sont lazy
-//
-//  L'app + auth sont initialisées EAGER au chargement du module pour garantir
-//  qu'aucun autre SDK Firebase ne soit utilisé avant l'auth.
+//  [bundle-05] Firestore, Storage, Messaging, Analytics sont importés
+//  dynamiquement dans leurs getters pour réduire le JS initial (~60-100KB).
+//  Seuls firebase/app et firebase/auth sont importés statiquement
+//  (nécessaires pour l'initialisation eager de l'auth).
 // ============================================================
 
 'use client';
@@ -22,23 +19,17 @@ import {
   initializeAuth,
   type Auth,
 } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
-import { getStorage, type FirebaseStorage } from 'firebase/storage';
-import { getMessaging, type Messaging } from 'firebase/messaging';
-import { getAnalytics, type Analytics, isSupported } from 'firebase/analytics';
 
 import { firebaseConfig } from './config';
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
-let db: Firestore | null = null;
-let storage: FirebaseStorage | null = null;
-let messaging: Messaging | null = null;
-let analytics: Analytics | null = null;
+let db: ReturnType<typeof import('firebase/firestore').getFirestore> | null = null;
+let storage: ReturnType<typeof import('firebase/storage').getStorage> | null = null;
+let messaging: ReturnType<typeof import('firebase/messaging').getMessaging> | null = null;
+let analytics: ReturnType<typeof import('firebase/analytics').getAnalytics> | null = null;
 
 function initApp(): FirebaseApp {
-  // Fix 3 : getApps().length === 0 évite les réinitialisations multiples
-  // en développement (HMR) et en production (multiple dynamic imports).
   if (getApps().length === 0) {
     app = initializeApp(firebaseConfig);
   } else {
@@ -49,10 +40,8 @@ function initApp(): FirebaseApp {
 
 function initAuth(a: FirebaseApp): Auth {
   try {
-    // getAuth retourne le singleton Auth déjà initialisé s'il existe.
     return getAuth(a);
   } catch {
-    // SSR-safe : initializeAuth accepte une configuration de persistence.
     return initializeAuth(a, { persistence: indexedDBLocalPersistence });
   }
 }
@@ -67,20 +56,30 @@ export function getFirebaseAuth(): Auth {
   return auth;
 }
 
-export function getFirebaseDb(): Firestore {
-  if (!db) db = getFirestore(getFirebaseApp(), 'gen3ia');
+// [bundle-05] Import dynamique — firestore n'est chargé que si getFirebaseDb() est appelé
+export async function getFirebaseDb() {
+  if (!db) {
+    const { getFirestore } = await import('firebase/firestore');
+    db = getFirestore(getFirebaseApp(), 'gen3ia');
+  }
   return db;
 }
 
-export function getFirebaseStorage(): FirebaseStorage {
-  if (!storage) storage = getStorage(getFirebaseApp());
+// [bundle-05] Import dynamique — storage
+export async function getFirebaseStorage() {
+  if (!storage) {
+    const { getStorage } = await import('firebase/storage');
+    storage = getStorage(getFirebaseApp());
+  }
   return storage;
 }
 
-export async function getFirebaseMessaging(): Promise<Messaging | null> {
+// [bundle-05] Import dynamique — messaging
+export async function getFirebaseMessaging() {
   if (typeof window === 'undefined') return null;
   if (!messaging) {
     try {
+      const { getMessaging, isSupported } = await import('firebase/messaging');
       const supported = await isSupported();
       if (!supported) return null;
       messaging = getMessaging(getFirebaseApp());
@@ -91,10 +90,12 @@ export async function getFirebaseMessaging(): Promise<Messaging | null> {
   return messaging;
 }
 
-export async function getFirebaseAnalytics(): Promise<Analytics | null> {
+// [bundle-05] Import dynamique — analytics
+export async function getFirebaseAnalytics() {
   if (typeof window === 'undefined') return null;
   if (!analytics) {
     try {
+      const { getAnalytics, isSupported } = await import('firebase/analytics');
       const supported = await isSupported();
       if (!supported) return null;
       analytics = getAnalytics(getFirebaseApp());
@@ -107,9 +108,6 @@ export async function getFirebaseAnalytics(): Promise<Analytics | null> {
 
 // ---------------------------------------------------------------
 // Validation de la configuration Firebase côté client.
-// Détecte les variables NEXT_PUBLIC_* manquantes AVANT toute tentative
-// d'authentification, pour fournir un message d'erreur clair au lieu
-// d'une erreur cryptique Firebase.
 // ---------------------------------------------------------------
 export function isFirebaseClientConfigured(): { ok: boolean; missing: string[] } {
   const required: Array<{ key: string; value: string | undefined }> = [
@@ -130,15 +128,11 @@ export function getFirebaseInitError(): string | null {
 }
 
 // ---------------------------------------------------------------
-// Initialisation EAGER (Fix 3) :
-// On force l'app + l'auth à s'initialiser dès le chargement du module
-// pour qu'aucun autre service Firebase (Firestore, Storage, Messaging,
-// Analytics) ne puisse être appelé avant que l'Auth ne soit prête.
-// Côté serveur (typeof window === 'undefined'), on reste lazy.
+// Initialisation EAGER de app + auth uniquement.
+// Les autres services sont lazy (import dynamique).
 // ---------------------------------------------------------------
 if (typeof window !== 'undefined') {
   try {
-    // Vérifier la config avant d'initialiser
     const configCheck = isFirebaseClientConfigured();
     if (!configCheck.ok) {
       _initError = `Configuration Firebase manquante: ${configCheck.missing.join(', ')}`;
