@@ -1,1 +1,4 @@
-/* Editorial.css — empty test */
+/* Editorial.css — minimal test: juste 1 override */
+:root {
+  --background: red;
+}
