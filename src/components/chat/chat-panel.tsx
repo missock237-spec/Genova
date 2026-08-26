@@ -16,6 +16,13 @@ import {
   Sparkles,
   CheckCircle2,
   XCircle,
+  Paperclip,
+  Brain,
+  Grid3X3,
+  Image as ImageIcon,
+  FileText,
+  Video,
+  Upload,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -50,11 +57,21 @@ export interface Agent {
   permissions?: Record<string, unknown>[];
 }
 
+export interface ChatAttachment {
+  id: string;
+  file: File;
+  url: string | null;
+  preview: string | null;
+  status: 'uploading' | 'ready' | 'error';
+  category: 'image' | 'video' | 'document' | 'other';
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'agent';
   content: string;
   timestamp: Date;
+  attachments?: { url: string; filename: string; mimeType: string; category: string }[];
 }
 
 export interface ConversationSummary {
@@ -106,6 +123,18 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // --- State: Attachments ---
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- State: Reflection Mode ---
+  const [reflectionMode, setReflectionMode] = useState(false);
+
+  // --- State: Features Panel ---
+  const [featuresOpen, setFeaturesOpen] = useState(false);
+  const [features, setFeatures] = useState<Array<{ id: string; name: string; description: string; status: string }>>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -120,6 +149,10 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
   selectedAgentIdRef.current = selectedAgentId;
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  const reflectionModeRef = useRef(reflectionMode);
+  reflectionModeRef.current = reflectionMode;
 
   // --- State: Sidebar ---
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -134,6 +167,105 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
   const activeAgents = useMemo(() => agents.filter((a) => a.status === 'active'), [agents]);
   const inactiveAgents = useMemo(() => agents.filter((a) => a.status !== 'active'), [agents]);
   const remainingToday = rewardStats.maxPerDay - rewardStats.balance.today;
+
+  // ============================================================
+  // Fetch features (for functions panel)
+  // ============================================================
+  useEffect(() => {
+    fetch('/api/health/features')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.operational) setFeatures(data.operational);
+      })
+      .catch(() => {});
+  }, []);
+
+  // ============================================================
+  // File upload handler
+  // ============================================================
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const newAttachments: ChatAttachment[] = files.map((file) => {
+      const cat = file.type.startsWith('image/') ? 'image' as const
+        : file.type.startsWith('video/') ? 'video' as const
+        : file.type.includes('pdf') || file.type.includes('document') || file.type.includes('text') ? 'document' as const
+        : 'other' as const;
+
+      let preview: string | null = null;
+      if (cat === 'image') {
+        preview = URL.createObjectURL(file);
+      }
+
+      return {
+        id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        file,
+        url: null,
+        preview,
+        status: 'uploading' as const,
+        category: cat,
+      };
+    });
+
+    setAttachments((prev) => [...prev, ...newAttachments]);
+    setIsUploading(true);
+
+    // Upload all files
+    const formData = new FormData();
+    files.forEach((f) => formData.append('files', f));
+
+    try {
+      const res = await fetch('/api/chat/upload', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (data.files && Array.isArray(data.files)) {
+        type UploadedFile = { filename: string; url: string; mimeType: string; category: string };
+        const urlMap = new Map<string, UploadedFile>(data.files.map((f: UploadedFile) => [f.filename, f]));
+        setAttachments((prev) =>
+          prev.map((att) => {
+            const uploaded = urlMap.get(att.file.name);
+            if (uploaded) {
+              return { ...att, url: uploaded.url, status: 'ready' as const, category: (uploaded.category || att.category) as ChatAttachment['category'] };
+            }
+            return att;
+          })
+        );
+      } else {
+        throw new Error(data.error || 'Upload failed');
+      }
+    } catch {
+      setAttachments((prev) =>
+        prev.map((att) =>
+          att.status === 'uploading' ? { ...att, status: 'error' as const } : att
+        )
+      );
+      toast({ title: 'Erreur upload', description: 'Impossible de téléverser le(s) fichier(s)', variant: 'destructive' });
+    } finally {
+      setIsUploading(false);
+      // Reset input so same file can be selected again
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, [toast]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const att = prev.find((a) => a.id === id);
+      if (att?.preview) URL.revokeObjectURL(att.preview);
+      return prev.filter((a) => a.id !== id);
+    });
+  }, []);
+
+  // Format file size
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes}o`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}Ko`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)}Mo`;
+  };
 
   // ============================================================
   // Auto-select first active agent
@@ -298,18 +430,45 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
   // Évite de recréer la fonction à chaque keystroke (input) ou chaque streaming tick (messages).
   const handleSend = useCallback(async (overrideText?: string) => {
     const text = overrideText || inputRef.current;
-    if (!text.trim() || isTypingRef.current || !selectedAgentIdRef.current) return;
+    if ((!text.trim() && attachmentsRef.current.length === 0) || isTypingRef.current || !selectedAgentIdRef.current) return;
+
+    // Build message with attachment references
+    let content = text.trim();
+    const currentAttachments = attachmentsRef.current.filter((a) => a.status === 'ready');
+    if (currentAttachments.length > 0) {
+      const fileRefs = currentAttachments
+        .map((a) => {
+          const catLabel = a.category === 'image' ? 'Image' : a.category === 'video' ? 'Vidéo' : 'Document';
+          return `[${catLabel}: ${a.file.name}]`;
+        })
+        .join('\n');
+      content = content ? `${content}\n\n${fileRefs}` : fileRefs;
+    }
+
+    // Reflection mode: prepend thinking instruction
+    if (reflectionModeRef.current && content) {
+      content = `[Mode Réflexion activé] Réfléchis étape par étape avant de répondre. Montre ton raisonnement.\n\n${content}`;
+    }
+
+    if (!content) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: text.trim(),
+      content,
       timestamp: new Date(),
+      attachments: currentAttachments.map((a) => ({
+        url: a.url || '',
+        filename: a.file.name,
+        mimeType: a.file.type,
+        category: a.category,
+      })),
     };
 
     setMessages((prev) => [...prev, userMsg]);
-    const sentText = text.trim();
+    const sentText = content;
     setInput('');
+    setAttachments([]);
     setIsTyping(true);
     setError(null);
     incMessageCount();
@@ -335,6 +494,7 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
           message: sentText,
           history: historyForBackend,
           conversationId: conversationIdRef.current || undefined,
+          attachments: userMsg.attachments,
         }),
         signal: controller.signal,
       });
@@ -816,6 +976,18 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
               {msg.role === 'user' ? (
                 <div className="flex gap-3 justify-end chat-msg-user-enter">
                   <div className="max-w-[80%] rounded-2xl px-4 py-2.5 bg-gradient-to-br from-[#06b6d4] to-[#0891b2] text-white rounded-tr-sm shadow-lg shadow-[#06b6d4]/15 ring-1 ring-white/10">
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className="flex gap-1.5 mb-2 flex-wrap">
+                        {msg.attachments.map((att, i) => (
+                          <div key={i} className="rounded-lg bg-white/10 px-2 py-1 flex items-center gap-1 text-[10px]">
+                            {att.category === 'image' ? <ImageIcon className="h-3 w-3" /> :
+                             att.category === 'video' ? <Video className="h-3 w-3" /> :
+                             <FileText className="h-3 w-3" />}
+                            <span className="truncate max-w-[120px]">{att.filename}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
                     <p className="text-[10px] mt-1.5 text-white/50 flex items-center justify-end gap-1">
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -878,11 +1050,125 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
           <div ref={messagesEndRef} />
         </div>
 
+        {/* Features panel (rectangle zone — above input) */}
+        {featuresOpen && (
+          <div className="mx-3 sm:mx-4 mb-2 rounded-2xl border border-border/60 bg-card/80 backdrop-blur-xl p-3 animate-in slide-in-from-bottom-2 duration-200">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-bold text-foreground/90 flex items-center gap-1.5">
+                <Grid3X3 className="h-3.5 w-3.5 text-[#06b6d4]" />
+                Fonctions du projet
+              </h3>
+              <button
+                onClick={() => setFeaturesOpen(false)}
+                className="h-6 w-6 rounded-lg flex items-center justify-center hover:bg-muted transition-colors"
+              >
+                <X className="h-3 w-3 text-muted-foreground" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto custom-scrollbar">
+              {features.filter((f) => f.status === 'prod' || f.status === 'beta' || f.status === 'active').map((feature) => (
+                <button
+                  key={feature.id}
+                  onClick={() => {
+                    setInput((prev) => prev ? `${prev} [${feature.name}]` : `[${feature.name}] `);
+                    setFeaturesOpen(false);
+                    requestAnimationFrame(() => textareaRef.current?.focus());
+                  }}
+                  className="group flex flex-col items-start gap-0.5 px-2.5 py-2 rounded-xl border border-border/50 bg-white/[0.02] hover:bg-[#06b6d4]/5 hover:border-[#06b6d4]/30 transition-all duration-200 text-left"
+                >
+                  <span className="text-[11px] font-semibold text-foreground/90 group-hover:text-[#06b6d4] transition-colors">
+                    {feature.name}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground/70 line-clamp-2 leading-tight">
+                    {feature.description}
+                  </span>
+                  <span className={cn(
+                    'text-[8px] mt-0.5 font-medium px-1.5 py-0 rounded-full w-fit',
+                    feature.status === 'prod' ? 'bg-emerald-500/10 text-emerald-500' :
+                    feature.status === 'active' ? 'bg-blue-500/10 text-blue-400' :
+                    'bg-amber-500/10 text-amber-500'
+                  )}>
+                    {feature.status === 'prod' ? 'Actif' : feature.status === 'active' ? 'Disponible' : 'Bêta'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Input area — frosted glass composer */}
         <div className="sticky bottom-0 bg-gradient-to-t from-background via-background/90 to-background/0 backdrop-blur border-t border-border/40 p-3 sm:p-4 pt-4">
+          {/* Attachments preview */}
+          {attachments.length > 0 && (
+            <div className="flex gap-2 mb-2 px-1 overflow-x-auto custom-scrollbar pb-1">
+              {attachments.map((att) => (
+                <div
+                  key={att.id}
+                  className={cn(
+                    'relative flex-shrink-0 group rounded-xl border border-border/60 bg-white/[0.03] overflow-hidden transition-all',
+                    att.status === 'error' && 'border-red-500/40',
+                  )}
+                >
+                  {att.category === 'image' && att.preview ? (
+                    <div className="relative w-16 h-16">
+                      <img src={att.preview} alt={att.file.name} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                    </div>
+                  ) : (
+                    <div className="w-16 h-16 flex flex-col items-center justify-center gap-1 p-1.5">
+                      {att.category === 'video' ? (
+                        <Video className="h-5 w-5 text-violet-400" />
+                      ) : (
+                        <FileText className="h-5 w-5 text-[#06b6d4]" />
+                      )}
+                      <span className="text-[8px] text-muted-foreground truncate max-w-[52px]">{att.file.name}</span>
+                      <span className="text-[7px] text-muted-foreground/60">{formatFileSize(att.file.size)}</span>
+                    </div>
+                  )}
+                  {att.status === 'uploading' && (
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                      <Loader2 className="h-4 w-4 animate-spin text-white" />
+                    </div>
+                  )}
+                  {att.status === 'error' && (
+                    <div className="absolute inset-0 bg-red-500/10 flex items-center justify-center">
+                      <AlertCircle className="h-4 w-4 text-red-400" />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => removeAttachment(att.id)}
+                    className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="relative">
             <div className="pointer-events-none absolute -inset-x-1 -top-1 bottom-0 rounded-full bg-gradient-to-r from-[#06b6d4]/10 via-violet-500/10 to-[#06b6d4]/10 blur-2xl opacity-70" />
             <div className="relative flex items-end gap-2 rounded-2xl border border-border/70 bg-white/[0.03] backdrop-blur-2xl p-2 shadow-xl shadow-black/10 focus-within:border-[#06b6d4]/40 focus-within:shadow-[0_0_24px_rgba(6,182,212,0.12)] transition-all duration-300">
+              {/* Upload button (Plus / Paperclip) */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading || isTyping}
+                className="h-[44px] w-[44px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-[#06b6d4] hover:bg-[#06b6d4]/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shrink-0"
+                title="Téléverser images, vidéos, fichiers"
+              >
+                {isUploading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Paperclip className="h-4 w-4" />
+                )}
+              </button>
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -899,6 +1185,21 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
                 rows={1}
                 disabled={!selectedAgentId || !isAgentActive || isTyping}
               />
+              {/* Reflection mode toggle (circle button) */}
+              <button
+                onClick={() => setReflectionMode((prev) => !prev)}
+                disabled={!selectedAgentId || !isAgentActive}
+                className={cn(
+                  'h-[44px] w-[44px] rounded-full flex items-center justify-center transition-all duration-300 shrink-0 border-2',
+                  reflectionMode
+                    ? 'border-[#06b6d4] bg-[#06b6d4]/15 text-[#06b6d4] shadow-[0_0_16px_rgba(6,182,212,0.3)]'
+                    : 'border-transparent text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 hover:border-violet-500/30',
+                  'disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-muted-foreground'
+                )}
+                title={reflectionMode ? 'Désactiver le mode réflexion' : 'Activer le mode réflexion'}
+              >
+                <Brain className={cn('h-4 w-4', reflectionMode && 'animate-pulse')} />
+              </button>
               {isTyping ? (
                 <button
                   onClick={handleStop}
@@ -919,20 +1220,42 @@ export function ChatPanel({ agents, onOpenCreate, onBack }: ChatPanelProps) {
             </div>
           </div>
           <div className="flex items-center justify-between mt-2 px-1">
-            {selectedAgent && !isAgentActive ? (
-              <p className="text-[10px] text-amber-500 flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" /> Cet agent est inactif. Activez-le pour discuter.
-              </p>
-            ) : (
-              <p className="text-[10px] text-muted-foreground/50">
-                Entrée pour envoyer · Maj+Entrée pour nouvelle ligne
-              </p>
-            )}
-            {isTyping && (
-              <p className="text-[10px] text-[#06b6d4] font-medium flex items-center gap-1">
-                <Sparkles className="h-3 w-3 animate-pulse" /> Génération en cours...
-              </p>
-            )}
+            <div className="flex items-center gap-2">
+              {/* Features button (rectangle — show other project functions) */}
+              <button
+                onClick={() => setFeaturesOpen((prev) => !prev)}
+                className={cn(
+                  'flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border transition-all duration-200',
+                  featuresOpen
+                    ? 'border-[#06b6d4]/40 bg-[#06b6d4]/10 text-[#06b6d4]'
+                    : 'border-border/50 text-muted-foreground/60 hover:text-foreground/80 hover:border-border'
+                )}
+              >
+                <Grid3X3 className="h-3 w-3" />
+                Fonctions
+              </button>
+              {selectedAgent && !isAgentActive ? (
+                <p className="text-[10px] text-amber-500 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" /> Inactif
+                </p>
+              ) : (
+                <p className="text-[10px] text-muted-foreground/40">
+                  Entrée pour envoyer
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {reflectionMode && (
+                <span className="text-[10px] text-[#06b6d4] font-medium flex items-center gap-1">
+                  <Brain className="h-3 w-3" /> Réflexion
+                </span>
+              )}
+              {isTyping && (
+                <p className="text-[10px] text-[#06b6d4] font-medium flex items-center gap-1">
+                  <Sparkles className="h-3 w-3 animate-pulse" /> Génération en cours...
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </div>
