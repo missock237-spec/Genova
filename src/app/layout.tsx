@@ -13,10 +13,6 @@ import { UpdateBannerClient } from '@/components/update-banner-client';
 const geistSans = GeistSans;
 const geistMono = GeistMono;
 
-// Newsreader — serif éditorial chargé via <link> (évite next/font/google
-// qui nécessite du réseau au build et peut planter le build Vercel).
-// Variable CSS --font-newsreader est définie dans globals.css.
-
 const siteUrl = siteConfig.url;
 const siteName = siteConfig.name;
 const title = "gen3ia - Système d'exploitation pour agents IA";
@@ -24,8 +20,8 @@ const description = siteConfig.description;
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#F4F1EA' },
-    { media: '(prefers-color-scheme: dark)', color: '#0F0E0C' },
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#00F5FF' },
   ],
   colorScheme: 'dark light',
   width: 'device-width',
@@ -55,7 +51,7 @@ export const metadata: Metadata = {
       { url: '/icon.svg', type: 'image/svg+xml' },
     ],
     apple: [{ url: '/favicon-gen3ia.png', sizes: '180x180', type: 'image/png' }],
-    other: [{ rel: 'mask-icon', url: '/icon.svg', color: '#C8341F' }],
+    other: [{ rel: 'mask-icon', url: '/icon.svg', color: '#00F5FF' }],
   },
   manifest: '/manifest.json',
   appleWebApp: {
@@ -130,16 +126,9 @@ export default async function RootLayout({
         <link rel="me" href={siteConfig.githubUrl} />
         <link rel="author" href={`${siteUrl}/about`} />
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#0F0E0C" />
+        <meta name="theme-color" content="#0A0A0B" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        {/* Newsreader — serif éditorial (chargé via Google Fonts CDN) */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap"
-        />
         {/* SW force-upgrade: unregister old SWs + reload on new SW, URL versionnée par buildId */}
         <script
           nonce={nonce}
