@@ -6,7 +6,7 @@
 # ============================================================
 
 # ===== STAGE 0 : Rust builder =====
-FROM rust:1.85-slim AS rust-builder
+FROM rust:1.97-slim AS rust-builder
 WORKDIR /build
 
 # Installer les dépendances système pour napi-rs
